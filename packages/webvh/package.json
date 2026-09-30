@@ -1,0 +1,7 @@
+{
+  "name": "@did-md/webvh",
+  "private": true,
+  "type": "module",
+  "description": "Generic did:webvh toolkit: a thin, typed layer over didwebvh-ts (signer, log helpers).",
+  "main": "src/index.ts"
+}

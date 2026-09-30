@@ -1,0 +1,465 @@
+<section class="panel" data-route-page="/dashboard">
+  <section id="overview-loaded" class="hidden">
+    <h1 id="overview-loaded-title">Identity loaded</h1>
+    <p id="overview-loaded-did" class="panel-intro did-value"></p>
+  </section>
+  <section id="loaded-identity" class="user-info hidden" aria-live="polite">
+    <div class="user-info-copy">
+      <h2>
+        <!-- Each affordance is its own clickable element, sized to its own
+             content -- not the whole row -- so a click lands only on the
+             control it looks like. The identity name is data, not a
+             command, hence role="button" on a <span>, not <button>. Same
+             reasoning as the per-file spans in renderIdentityFiles. -->
+        <!-- Doubles as the remove/republish control (used to be its own
+             separate cloud icon next to Edit alias -- merged in here since
+             both were about the same hosted-connection state). Rests on
+             the plain green dot while connected; disconnected rests on the
+             crossed-out cloud outline instead. Hovering previews the other
+             action's icon (crossed-out while connected, plain while
+             disconnected) -- see the [data-state]/:hover rules in
+             styles.css. Clicking removes from the server while connected,
+             republishes to it while disconnected (app.ts). -->
+        <!-- The identity name now lives in THIS clickable area (publish/
+             remove), not Edit alias's -- clicking the name toggles the
+             hosted connection, same as clicking the cloud icon beside it.
+             Edit alias (below) is icon-only now. data-toast: hovering/
+             focusing this shows its message in the header's center-column
+             toast overlay (see #context-toast in dashboard-header.html and
+             the [data-toast] wiring in app.ts) -- not a local tooltip,
+             since this row has no room for one. -->
+        <!-- Identity name is data (left). status-dot is the separate
+             publish/remove control to its right -- not wrapped around the
+             name. Then Edit alias, then GitHub host. Order asked for
+             2026-09-29: [alias] [status-dot] [edit] [github]. -->
+        <!-- Wrapper carries role/hover bubble: the name span itself clips
+             overflow (ellipsis), which would clip the bubble too. -->
+        <span
+          id="identity-alias-link"
+          class="identity-alias-link"
+          role="button"
+          tabindex="0"
+          aria-label="View hosted doc"
+          data-toast="View hosted doc"
+        ><span id="loaded-identity-name" class="identity-alias-name"></span></span>
+        <span
+          id="connection-dot"
+          class="loaded-identity-status-dot"
+          role="button"
+          tabindex="0"
+          aria-label="Publish to server"
+          data-toast="publish to server"
+          data-state="disconnected"
+        >
+          <span class="status-dot-circle" aria-hidden="true"></span>
+          <svg
+            class="cloud-off-icon"
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"></path>
+            <line x1="1" y1="1" x2="23" y2="23"></line>
+          </svg>
+          <svg
+            class="cloud-icon"
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"></path>
+          </svg>
+        </span>
+        <span
+          id="identity-alias-edit"
+          class="identity-name-copy"
+          role="button"
+          tabindex="0"
+          aria-label="Edit alias"
+          data-toast="edit alias"
+        >
+          <svg
+            class="edit-icon"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+          </svg>
+        </span>
+        <!-- GitHub Pages host control -- icon only. Color stays muted;
+             liveness is the status-dot's job (asked 2026-09-29). -->
+        <button
+          id="identity-host-github"
+          class="identity-name-copy identity-host-icon"
+          type="button"
+          data-state="unhosted"
+          data-toast="host on your github"
+          aria-label="Host on your github"
+        >
+          <svg
+            class="host-icon"
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+          </svg>
+        </button>
+      </h2>
+      <div class="identity-did-row">
+        <!-- The DID itself is data, not a command -- see the note above. -->
+        <span
+          id="identity-did-copy"
+          class="identity-name-copy"
+          role="button"
+          tabindex="0"
+          aria-label="Copy DID"
+        >
+          <svg
+            class="copy-icon"
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+            <path
+              d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+            ></path>
+          </svg>
+          <span class="identity-did-text"><span id="identity-did" class="identity-did"></span><span class="identity-did" aria-hidden="true">:</span><span
+          id="identity-did-alias"
+          class="identity-did identity-did-alias"
+          data-state="disconnected"
+        ></span></span>
+        </span>
+      </div>
+      <dl id="loaded-identity-summary"></dl>
+      <!-- GitHub host view: opened by #identity-host-github (openModalCard).
+           Replaces the identity card's default contents in place (see
+           .github-host-open in styles.css); the back arrow returns to them.
+           The PAT is kept in a JS variable while publishing. Opt-in
+           "Remember this token" stores it in localStorage so republish/remove
+           skip the prompt (asked 2026-09-29) -- never sent to did.md. The
+           create-token link pre-fills the classic `repo` scope. -->
+      <div id="github-host-card" class="github-host-card hidden">
+      <div class="github-host-head">
+        <h3 id="github-host-title">Host on your GitHub</h3>
+        <button class="modal-card-close" type="button" aria-label="Back">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+        </button>
+      </div>
+      <p class="hint">
+        To publish did:web to
+        <code>&lt;your_github_account&gt;.github.io</code>:
+      </p>
+      <p class="hint">
+        1.
+        <a
+          id="github-pat-link"
+          href="https://github.com/settings/tokens/new?scopes=repo&amp;description=did.md%20host"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Generate a new personal access token</a
+        >
+        (PAT, classic) with the <code>repo</code> scope.
+      </p>
+      <p class="hint">2. Paste it below:</p>
+      <div class="github-host-pill">
+        <input
+          id="github-pat-input"
+          type="password"
+          aria-label="Personal access token"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="ghp_…"
+        />
+        <button id="github-host-publish" class="primary" type="button">
+          Publish
+        </button>
+      </div>
+      <label id="github-pat-remember-row" class="check github-host-remember">
+        <input id="github-pat-remember" type="checkbox" />
+        Save in this browser
+      </label>
+      <!-- Remove intent only: replaces the save option above. Unchecked
+           keeps whatever token is already saved. -->
+      <label id="github-pat-remove-row" class="check github-host-remember hidden">
+        <input id="github-pat-remove-token" type="checkbox" />
+        Remove token from browser
+      </label>
+      <div class="actions">
+        <button id="github-host-recheck" class="hidden" type="button">
+          Recheck
+        </button>
+      </div>
+      <ol id="github-host-progress" class="github-host-progress" aria-live="polite"></ol>
+      <p id="github-host-result" class="hint"></p>
+      </div>
+    </div>
+  </section>
+  <p id="connection-empty" class="hidden"></p>
+  <!-- Tabs, not commands -- plain text with an underline for the active
+       one, not <button>. See .application-tabs [role="tab"] for the same
+       reasoning. -->
+  <div class="application-tabs" role="tablist" aria-label="Application">
+    <span
+      role="tab"
+      tabindex="0"
+      class="active"
+      aria-selected="true"
+      data-application-tab="apps"
+    >
+      Apps
+    </span>
+    <span
+      role="tab"
+      tabindex="0"
+      aria-selected="false"
+      data-application-tab="docs"
+    >
+      Docs
+    </span>
+    <span
+      role="tab"
+      tabindex="0"
+      aria-selected="false"
+      data-application-tab="credentials"
+    >
+      Keys
+    </span>
+    <span
+      role="tab"
+      tabindex="0"
+      aria-selected="false"
+      data-application-tab="files"
+    >
+      Files
+    </span>
+  </div>
+  <section
+    id="application-devices-manager"
+    class="wallet-identities application-pane"
+    role="tabpanel"
+  >
+    <div id="wallet-grant-list"></div>
+  </section>
+  <!-- Docs tab: Services + Application keys are shown together (see the
+       "docs" entry in selectApplicationTab's panes map, app.ts), side by
+       side in two columns at a wide enough viewport -- .docs-columns is the
+       shared grid for that, same pattern as Keys' own .key-material-grid.
+       Each section keeps its own "hidden" toggle regardless of this
+       wrapper, so selectApplicationTab's id-based show/hide is unaffected. -->
+  <div class="docs-columns">
+    <section
+      id="services-manager"
+      class="application-pane hidden"
+      role="tabpanel"
+    >
+      <div id="services-list"></div>
+      <output id="services-result"></output>
+    </section>
+    <section
+      id="application-keys-manager"
+      class="application-pane hidden"
+      role="tabpanel"
+    >
+      <div id="application-keys-list"></div>
+    </section>
+  </div>
+  <section
+    id="credentials-manager"
+    class="application-pane hidden"
+    role="tabpanel"
+  >
+    <p id="keys-empty" class="panel-intro hidden">
+      Create or load an identity first.
+    </p>
+    <div id="key-editor" class="hidden">
+      <section class="local-key-material">
+        <div class="key-material-grid">
+          <div id="local-key-material-list" class="key-material-key-list"></div>
+          <section class="key-rotation key-rotation-card record-card">
+            <!-- No heading -- Rotate key IS the card's heading now that it's
+                 atomic (prepare+publish in one click, see app.ts): its own
+                 label ("Rotate key" / "Rotated") already says what this
+                 card is for and what just happened, a separate "Key
+                 rotation" title above it was redundant. -->
+            <div class="actions">
+              <button id="rotate-key" class="primary" type="button">
+                Rotate key
+              </button>
+            </div>
+            <!-- Rotate key's own success/failure both replace this message
+                 (justRotated/rotateKeyFailed in app.ts) rather than using
+                 #keys-result -- there's no separate retry step anymore, so
+                 nothing needs a one-off panel of its own. -->
+            <p id="key-status" class="hint"></p>
+            <button id="enable-passkey" class="hidden" type="button">
+              Store Passphrase with a passkey
+            </button>
+            <output id="keys-result"></output>
+          </section>
+        </div>
+      </section>
+    </div>
+  </section>
+  <section
+    id="files-manager"
+    class="application-pane hidden"
+    role="tabpanel"
+  >
+    <!-- .record-card is the same outer card every other tab uses (Root key,
+         Application keys, Services, wallet grants); .files-tree-* (styles.css)
+         is Files' own dedicated look inside it -- a directory listing, not
+         a fact card, since that's a closer match for what this actually is:
+         one manifest's named logical parts (container.manifest.contents /
+         container.files in renderIdentityFiles), not unrelated facts about
+         one thing. Not a real filesystem underneath (see that function's own
+         comment -- the encrypted outer JWE is one blob, this is its
+         decrypted manifest's flat contents list), but every entry here does
+         correspond 1:1 to one independently-meaningful named part of it, the
+         same relationship a real directory's entries have to their files. -->
+    <div class="record-card files-tree">
+      <div class="files-tree-header">
+        <!-- "loaded/" by default; renderIdentityFiles' show() in app.ts
+             rewrites this to "loaded/{basename}" for an open file, or
+             setUnloadView() to "Unload this identity?" (swapping
+             #files-actions for #files-back either way) -- a path/status, not
+             independent pieces of text, hence one span rather than markup
+             that could be reflowed apart. -->
+        <span id="files-tree-path" class="files-tree-root">loaded/</span>
+        <div id="files-actions" class="actions">
+          <button id="wallet-backup-export" type="button">Export</button>
+          <!-- Also still in the header's hamburger menu (#context-unload-menu)
+               -- both trigger the same #files-unload-body view below, this
+               is just a second, more discoverable entry point. -->
+          <button id="files-unload" type="button">Unload</button>
+        </div>
+        <div id="files-back-actions" class="actions hidden">
+          <button id="files-back" type="button" aria-label="Back">←</button>
+        </div>
+      </div>
+      <div id="identity-file-list" class="files-tree-list" aria-label="Identity files"></div>
+      <!-- Below, not a sibling block under the card (see show() in app.ts) --
+           a clicked file's content is this same card's own detail view, not a
+           separate area, the same way #files-tree-path above becomes this
+           file's path instead of a second heading next to "loaded/". -->
+      <div id="identity-file-display" class="identity-file-display hidden">
+        <pre id="identity-file-content"></pre>
+      </div>
+      <form
+        id="identity-keyring-password"
+        class="container-password-prompt hidden"
+      >
+        <h4>Show keyring.json</h4>
+        <p>
+          Enter this identity's password. Secret contents are shown
+          temporarily and the password is not stored.
+        </p>
+        <label>
+          Password
+          <input
+            id="identity-keyring-password-input"
+            type="password"
+            minlength="8"
+            autocomplete="current-password"
+            required
+          />
+        </label>
+        <div class="actions">
+          <button class="primary" type="submit">Show temporarily</button>
+          <button id="identity-keyring-password-cancel" type="button">
+            Cancel
+          </button>
+        </div>
+      </form>
+      <div id="identity-keyring-passkey" class="container-password-prompt hidden">
+        <h4>Show keyring.json</h4>
+        <p>
+          This identity is protected by a passkey. Secret contents are shown
+          temporarily and are not stored.
+        </p>
+        <div class="actions">
+          <button
+            id="identity-keyring-passkey-unlock"
+            class="primary"
+            type="button"
+          >
+            Show temporarily
+          </button>
+          <button id="identity-keyring-passkey-cancel" type="button">
+            Cancel
+          </button>
+        </div>
+      </div>
+      <!-- Unload confirmation: this card's own third detail view, same as an
+           open file (#identity-file-display above) -- see setUnloadView() in
+           app.ts, which drives "Unload this identity?" + <- into the header
+           the same way show() does for "loaded/{basename}". No Cancel button
+           here; <- in the header is the one way back, for every detail view
+           alike. -->
+      <div id="files-unload-body" class="hidden">
+        <p class="hint">
+          This permanently erases the local copy in this browser: the
+          encrypted Master seed, cached DID log, device labels, and grant
+          records. Only the 24-word Passphrase (or a separately
+          exported EIC) can restore it afterward.
+        </p>
+        <div class="actions">
+          <button id="context-unload-confirm" class="danger" type="button">Unload</button>
+          <label class="check">
+            <input id="unload-disconnect-host" type="checkbox" checked />
+            remove from server
+          </label>
+        </div>
+      </div>
+      <!-- Export's own detail view, same pattern as Unload above --
+           setExportView() in app.ts opens this once the download itself has
+           already fired (#wallet-backup-export's click handler), not before,
+           so this text is always describing something that already
+           happened, never a pending step. -->
+      <div id="files-export-body" class="hidden">
+        <p class="hint">
+          Encrypted identity container downloaded. It opens with this
+          identity's 24-word Passphrase and includes complete DID histories
+          and portable keyring records.
+        </p>
+      </div>
+    </div>
+  </section>
+</section>

@@ -1,0 +1,3147 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Silkscreen:wght@400;700&display=swap');
+
+@import url("https://fonts.googleapis.com/css2?family=Geologica:slnt,wght,CRSV@-12..0,100..900,0..1&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=MuseoModerno:wght@100..900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap");
+/* Fira Sans and Roboto Flex are used (#eyecatch/.site-header-subtitle,
+ * .field-heading) but were never imported -- Chrome apparently has one or
+ * both preinstalled and silently fell back to the real thing, Safari
+ * doesn't and fell back to a serif instead. Fira Sans is a static (not
+ * variable) family on Google Fonts, so it needs explicit weights: the
+ * wght@100..900 range form answers HTTP 400 and loads nothing. */
+@import url("https://fonts.googleapis.com/css2?family=Fira+Sans:wght@100;200;300;400;500;600;700;800;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Roboto+Flex:wght@100..1000&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Ubuntu+Sans:wght@100..800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap");
+
+/* ==========================================================================
+   did.md styles.css
+   1) COMMON
+   2) HOME
+   3) DASHBOARD
+   Layout: CCD (var(--cc-w) horizontal, 1rem vertical)
+   ========================================================================== */
+
+/* ==========================================================================
+   1) COMMON
+   ========================================================================== */
+
+:root {
+  font-size: 20px;
+  font-family: ui-monospace, monospace;
+
+  /* CCD grid */
+  --cc-w: 1ch;
+  --cc-side: 0;
+  --cc-content-max: 80;
+  --cc-icon: 0.8rem;
+
+  /* colors */
+  --paper: white;
+  --ink: #000000;
+  --border: #e7e7e7;
+  --muted: #666666;
+  --theme: #f1f8fd;
+  --field-text: #111111;
+  --hint: #ff000094;
+  --ok: #51730e;
+
+  --canvas: #ffffff;
+  --surface: #fafafa;
+  --surface-hover: #f3f3f1;
+  --ui-border: #e7e7e3;
+  --border-strong: #bdbdb7;
+  --heading: #111110;
+  --section-rule: #deded9;
+  --accent: #0083ff;
+  --accent2:  #0096b6;
+  --accent-hover: #7cbd3f;
+  --accent-text: #162000;
+  --danger: #d06868;
+
+  --panel-section-gap: 1rem;
+
+  /* aliases (were referenced by dashboard rules but never defined) */
+  --text: var(--ink);
+  --text-muted: var(--muted);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  /* Kills the rubber-band/bounce overscroll (trackpad on macOS Chrome/
+     Safari, touch elsewhere) -- with --header-progress driven straight off
+     window.scrollY, that bounce fed the header/logo/subtitle a scrollY
+     that overshot past the real content range and sprang back, reading as
+     elasticity in the whole scroll-linked animation, not just the page. */
+  overscroll-behavior-y: none;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+  font: 1rem/1.5rem ui-monospace, monospace;
+}
+
+body.show-grid {
+  background-image:
+    linear-gradient(to right, rgb(23 23 22 / 10%) 0.05rem, transparent 0.05rem),
+    linear-gradient(to bottom, rgb(23 23 22 / 10%) 0.05rem, transparent 0.05rem);
+  background-size: var(--cc-w) 1rem;
+  background-position: var(--cc-side) 0;
+  background-attachment: fixed;
+}
+
+body.load-card-open {
+  overflow: hidden;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---- page layout: header / main / footer ---- */
+
+header.site-header,
+main#app,
+footer#site-footer {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+/* Dashboard used to have its own static header (fixed 4rem, plain flex row,
+ * a permanent context window) entirely separate from home's welcome/normal
+ * scroll-shrink treatment. Both routes now share that same look and
+ * behavior (home-header-root is applied unconditionally in app.ts's
+ * renderRoute) -- .site-header remains only as dashboard's OWN additive
+ * marker: it fades #context-window in as the header settles into its
+ * "normal" state, and hides the brand while a context view is open. See
+ * header.home-header-root below for the shared chrome itself. */
+
+/* Decorative on dashboard (a <span>, not home's <button> -- no click
+ * behavior makes sense here: clicking it would just navigate to a route
+ * that immediately redirects back to /dashboard). Never intercepts clicks
+ * meant for whatever of #context-window it happens to sit over. */
+header.site-header .site-header-brand {
+  pointer-events: none;
+}
+
+/* Hidden whenever #context-window is showing anything other than its
+ * default (idle) view -- command line, Connect form, menu, Unload
+ * confirmation all have their own content that would otherwise sit right
+ * on top of a dead-center wordmark. ".contextual" (toggled in app.ts's
+ * applyContextViewVisibility) covers exactly those four views as one flat
+ * class rather than four separate :has(#view:not(.hidden)) checks here --
+ * this rule needs to be reachable from body too (see .panel below), and
+ * this engine doesn't support nesting :has() inside another :has(). */
+header.site-header.contextual .site-header-brand {
+  opacity: 0;
+}
+
+/* Home header: original logo + lock icon, no context window, no chrome.
+ * Sticky + shrinks 5rem -> 4rem once scrolled (see .scrolled below) --
+ * .scrolled itself is already toggled by updateSiteHeaderScrolled() in
+ * app.ts on #site-header for both home and dashboard headers, this just
+ * adds the rule that responds to it here. The logo block right below is
+ * positioned off this header's own height (top:100%), so it tracks the
+ * shrink automatically without its own scroll listener. */
+header.home-header-root {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+  --header-progress: 0;
+  height: calc(5rem - 1rem * var(--header-progress));
+  overflow: visible;
+  /* Frosted glass instead of an opaque fill -- content scrolling underneath
+   * this sticky bar stays faintly visible through it. */
+  background: color-mix(in srgb, var(--paper) 72%, transparent);
+  backdrop-filter: blur(0.6rem);
+  -webkit-backdrop-filter: blur(0.6rem);
+  /* A soft drop shadow instead of a hard border-bottom seam -- inset with a
+   * negative offset-y so it hugs the bottom inner edge instead of a plain
+   * (non-inset) shadow, which wraps around the header's left/right edges
+   * too (visible as vertical shadow slivers down the sides of the
+   * viewport). blur (3px) and spread (-3px) cancel out, which is what
+   * keeps it from bleeding sideways into the corners -- shrink the shadow
+   * rectangle inward by the same amount the blur would otherwise expand
+   * it. Fades out over the first half of --header-progress (fully gone
+   * well before the header finishes shrinking) rather than tracking it
+   * 1:1 -- once the bar has shrunk and the glass effect is doing the
+   * separating-from-content work, a static shadow under it looked
+   * redundant, so it shouldn't still be visible that late into the
+   * scroll. */
+  box-shadow: inset 0 -3px 3px -3px rgba(0, 0, 0, calc(0.3 * (1 - min(1, var(--header-progress) / 0.5))));
+}
+
+.home-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  visibility:hidden;
+}
+
+.home-header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 0 0 auto;
+}
+
+/* Whether there's a stored identity (and so whether this page will end up
+ * showing the home header or the dashboard one) isn't known until an async
+ * IndexedDB read resolves (restoreStoredIdentityRecord() in app.ts) --
+ * renderRoute() always renders "home" first, synchronously, regardless of
+ * what's actually stored. html.identity-pending (set in index.html,
+ * removed once that read resolves) hides these two buttons for that one
+ * frame instead of letting them flash before a same-tick redirect to
+ * dashboard swaps the header out from under them. visibility, not
+ * display:none, so nothing shifts once they reappear. */
+html.identity-pending .home-header-left,
+html.identity-pending .home-header-right {
+  visibility: hidden;
+}
+
+.home-header-btn {
+  display: inline-block;
+  border: 0.5px solid gray;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+}
+
+.home-header-btn:hover,
+.home-header-btn[aria-pressed="true"] {
+  opacity: 0.7;
+}
+
+/* The logo block sits outside the header's own centered row -- its
+ * background box starts with its vertical center on the header's
+ * border-bottom, then rides up to the header's own vertical center and
+ * shrinks to fit alongside the ?/load buttons. Driven continuously off
+ * --header-progress (0..1, set every scroll frame by
+ * updateSiteHeaderScrolled() in app.ts) rather than a single .scrolled
+ * toggle -- a boolean class + CSS transition snapped in one visible jump
+ * at scrollY>0 and never tracked the scroll position itself, which read
+ * as janky instead of following the finger/wheel 1:1. */
+header.home-header-root .site-header-brand {
+  position: absolute;
+  left: 50%;
+  top: calc(100% - 45% * var(--header-progress));
+  transform: translate(-50%, calc(-1.5rem + 1.5rem * var(--header-progress) - 50% * var(--header-progress)));
+  /* .site-header-brand's own opaque --canvas box (needed while it straddles
+     the border-bottom, half over page content) turns into a visible white
+     tile once the header itself is frosted glass -- fade it out with the
+     same progress instead. The top 25% stays transparent regardless of
+     progress -- that sliver sits above the header's own border-bottom, over
+     whatever page content is there, and an opaque fill there very slightly
+     overlaid it. */
+  background: linear-gradient(
+    to bottom,
+    transparent 0 25%,
+    color-mix(in srgb, var(--canvas) calc((1 - var(--header-progress)) * 100%), transparent) 25% 100%
+  );
+}
+
+header.home-header-root .site-header-logo {
+  --logo-base-size: clamp(2rem, 9vw, 3rem);
+  margin-inline: auto;
+  line-height: 1;
+  font-size: calc(var(--logo-base-size) - (var(--logo-base-size) - 1.4rem) * var(--header-progress));
+}
+
+/* Two sequential phases, not one shared progress: opacity fades out fully
+ * over the first 15% of the header's scroll range, THEN (only once fully
+ * transparent) max-height collapses it over the next 15%. Doing both off
+ * the same progress clipped the still-partially-opaque text mid-line as
+ * its box shrank, which read as the subtitle being cut off rather than
+ * fading away. The height still has to collapse eventually (not just
+ * opacity) -- .site-header-brand is a column flexbox, and a reserved-but-
+ * invisible subtitle row leaves the brand box taller than the logo alone,
+ * so translate(-50%, -50%) centers that taller box instead of the logo,
+ * settling it above the header's true vertical center once scrolled. */
+header.home-header-root .site-header-subtitle {
+  --subtitle-fade: min(1, var(--header-progress) / 0.15);
+  --subtitle-collapse: clamp(0, calc((var(--header-progress) - 0.15) / 0.15), 1);
+  opacity: calc(1 - var(--subtitle-fade));
+  max-height: calc((1 - var(--subtitle-collapse)) * 1.3rem);
+  overflow: hidden;
+}
+
+header.home-header-root.scrolled .site-header-subtitle {
+  pointer-events: none;
+}
+
+header.home-header-root .floating-lock-wrap {
+  position: absolute;
+  right: 3%;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+#context-window {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1rem;
+}
+
+.context-window-column {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Left column: logo or context icon */
+.context-window-column.left {
+  flex: 0 0 auto;
+  min-width: 1.55rem;
+}
+
+/* Middle column: omnibox (field + buttons) */
+.context-window-column.middle {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Right column: hamburger menu */
+.context-window-column.right {
+  flex: 0 0 auto;
+  min-width: 1.8rem;
+  position: relative;
+}
+
+/* Omnibox: inline-flex, gap */
+.context-omnibox {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Action-result toast (showActionToast / showContextToast in app.ts): a
+ * glass bottom sheet that slides up over the page, same look and easing as
+ * .load-glass-card. Toggled with .is-open; text stays put while it slides
+ * back out. */
+.context-toast {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  padding: 1.5rem calc(2 * var(--cc-w));
+  background: rgb(255 255 255 / 75%);
+  backdrop-filter: blur(1rem);
+  -webkit-backdrop-filter: blur(1rem);
+  box-shadow: 0 -0.05rem 0.25rem rgb(0 0 0 / 7%);
+  font-size: 0.9rem;
+  color: var(--ink);
+  pointer-events: none;
+  visibility: hidden;
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0.35s;
+  will-change: transform;
+}
+
+/* Leading bell icon (a close button, X on hover), tinted with the text color. */
+.context-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  line-height: 1.5;
+}
+
+/* Long unbroken strings (DIDs, URLs) wrap anywhere instead of overflowing. */
+.context-toast-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.context-toast-close {
+  position: relative;
+  flex: 0 0 auto;
+  margin-top: 0.14rem; /* centers the icon on the first text line */
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  margin-right: 0.5rem;
+}
+
+.context-toast-close svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.context-toast-close .bell {
+  opacity: 0.55;
+}
+
+.context-toast-close .x {
+  opacity: 0;
+}
+
+.context-toast-close:hover .bell,
+.context-toast-close:focus-visible .bell {
+  opacity: 0;
+}
+
+.context-toast-close:hover .x,
+.context-toast-close:focus-visible .x {
+  opacity: 1;
+}
+
+.context-toast.is-open {
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s;
+}
+
+.context-toast.error {
+  color: var(--danger);
+}
+
+/* Reset for header-context card styling -- override data-card defaults */
+#context-window .data-card-row {
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#context-window .context-icon-column {
+  margin: 0;
+  gap: 0;
+  flex: 0 0 auto;
+  width: auto;
+  align-self: center;
+}
+
+main#app {
+  flex: 1 1 auto;
+}
+
+footer#site-footer {
+  flex: 0 0 auto;
+  padding: 2rem calc(2 * var(--cc-w));
+  background: var(--theme);
+  color: var(--ink);
+}
+
+footer#site-footer:has(.wallet-authorize-card:not(.hidden)) {
+  padding: 0;
+  background: transparent;
+}
+
+.footer-placeholder {
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* One row; each item is a single click target (logo+version, github+license,
+ * tor+label). */
+.footer-placeholder-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: calc(2 * var(--cc-w));
+  font: 400 0.75rem/1.5 ui-monospace, monospace;
+  color: #999999;
+}
+
+.footer-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5ch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #999999;
+  font: inherit;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.footer-item:hover {
+  color: var(--ink);
+}
+
+.footer-placeholder-brand {
+  font-family: "MuseoModerno", ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.footer-github-icon,
+.footer-onion-icon {
+  display: block;
+  flex: 0 0 auto;
+}
+
+/* "Copied" speech bubble above the onion item (white, drop shadow, 1rem
+ * radius -- same as the identity row's hover bubbles). */
+.footer-onion-link::after {
+  content: "Copied";
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 50%;
+  z-index: 20;
+  padding: 0.4rem 0.9rem;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 0.15rem 0.8rem rgb(0 0 0 / 18%);
+  color: var(--ink);
+  font-size: 0.8rem;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 0.2rem);
+  transition: opacity 0.12s, transform 0.12s;
+}
+
+.footer-onion-link.copied::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* Header download icon: saves the single-file app for local (file://) use. */
+.header-download {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0.5rem;
+  border-radius: 0.2rem;
+  color: var(--muted);
+  cursor: pointer;
+  width: 2rem;
+  height: 2rem;
+}
+
+.header-download:hover,
+.header-download:focus-visible {
+  color: var(--ink);
+  background: rgb(0 0 0 / 6%);
+}
+
+/* "?" (About) shares the download icon's look: same 1.5rem square. */
+.header-about {
+  width: 2rem;
+  height: 2rem;
+  padding: 0.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  font-family: ui-monospace;
+}
+
+/* Phones can't run a downloaded .html, so no download icon on mobile. */
+@media (max-width: 576px) {
+  .header-download:not(.header-about) {
+    display: none;
+  }
+}
+
+html.local-file .header-download:not(.header-about) {
+  display: none;
+}
+
+/* Toast notification */
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(100%);
+  background: rgba(0, 0, 0, 0.85);
+  color: #ffffff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.toast.visible {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+.panel {
+  padding: 5rem calc(3 * var(--cc-w)) 2rem;
+  transition: margin-top 0.15s ease;
+}
+
+/* ---- logo / network activity ---- */
+
+.site-header-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: calc(100vw - 2rem);
+  background: var(--canvas);
+  padding-inline: 1rem;
+}
+
+.site-header-logo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: "MuseoModerno";
+  font-size: clamp(1.75rem, 9vw, 3rem);
+  white-space: nowrap;
+  padding-right: 0.5rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.site-header-logo:hover,
+.site-header-logo:focus {
+  outline: none;
+}
+
+/* The "//" mark ahead of the wordmark -- see home-header.html. Sized off
+ * the logo's own font-size so it scales with the wordmark. */
+.site-header-logo-mark {
+  width: 0.5em;
+  height: 1em;
+}
+
+.site-header-subtitle {
+  margin: 0;
+  font-family: "Fira Sans";
+  font-size: clamp(0.7rem, 3.2vw, 0.9rem);
+  white-space: nowrap;
+  line-height: 1.6;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.network-activity-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 41;
+  height: 0.15rem;
+  background: transparent;
+  pointer-events: none;
+}
+
+.network-activity-bar.active {
+  background: green;
+}
+
+.network-activity-domain {
+  position: fixed;
+  top: 0.3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 41;
+  color: green;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.network-activity-domain.active {
+  opacity: 1;
+}
+
+/* ---- text helpers ---- */
+
+.hint,
+output,
+.panel-intro {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5rem;
+}
+
+/* ---- buttons ---- */
+
+button {
+  appearance: none;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Plain-text clickable elements (role="button"/"tab" on a <span>, not a
+ * <button> -- see #context-files, .application-tabs [role="tab"]): onClick()
+ * falls back to this class where there's no native .disabled to set. */
+.is-busy {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+button.primary:not(#publish-create) {
+  background: var(--ink);
+  color: #fff;
+  box-shadow: none;
+}
+
+/* Create — full-width ink pill */
+#creation-create-actions {
+  display: flex;
+  width: 100%;
+  margin-top: 2rem;
+}
+
+/* Import: hyperlink look, centered under the Create pill. */
+.creation-import-link {
+  display: block;
+  margin: 1rem 0rem -1rem 0rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+  cursor: pointer;
+}
+
+.creation-import-link:hover,
+.creation-import-link[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+#publish-create {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0.5rem calc(1.5 * var(--cc-w));
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: var(--canvas);
+  text-align: center;
+  cursor: pointer;
+}
+
+#publish-create:hover {
+  opacity: 0.9;
+}
+
+#publish-create:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Saved-the-passphrase confirm pill -- same full-width outline pill as
+ * #creation-create-actions/#publish-create above (same size, same slot: the
+ * two swap hidden/visible in place). The outer div is just the frame
+ * (border/radius/clip); #creation-confirm-saved itself is a real <button>
+ * stretched to fill it, so the ENTIRE pill is one trusted click target, not
+ * only the "Yes" chip -- the prompt text and the chip are both its own
+ * children, laid out with space-between. */
+#creation-confirm-actions.confirm-pill {
+  display: flex;
+  width: 100%;
+  margin-top: 2rem;
+  border: 0.5px solid var(--accent);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: transparent;
+}
+
+/* button#... (not just #...) to match button.primary:not(#publish-create)'s
+ * own specificity (element+class+id vs id+class) -- otherwise that rule's
+ * background:var(--ink) wins and paints the whole pill solid ink instead of
+ * just the "Yes" label chip below. */
+button#creation-confirm-saved.primary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  padding-left: calc(1.5 * var(--cc-w));
+  border: 0;
+  border-radius: 4.95rem;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.creation-confirm-prompt {
+  overflow: hidden;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.creation-confirm-saved-label {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0.5rem 2rem;
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---- overlays: authorize card, nav menu, scrims ---- */
+
+.wallet-session {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 0.05rem var(--border);
+}
+
+.menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 36;
+  background: rgb(23 23 22 / 25%);
+}
+
+.modal-card {
+  z-index: 36;
+}
+
+#nav-menu {
+  position: fixed;
+  top: 3.8rem;
+  right: max(1rem, calc((100% - 43rem) / 2));
+  z-index: 37;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 12rem;
+  padding: 0.4rem;
+  background: var(--canvas);
+  border: 0.05rem solid var(--border);
+  border-radius: 0.4rem;
+  box-shadow: 0 0.6rem 1.6rem rgb(23 23 22 / 12%);
+}
+
+#nav-menu button {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  color: var(--text-muted);
+  text-align: left;
+  background: none;
+  border-radius: 0.2rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+#nav-menu button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+
+#nav-menu .active {
+  color: var(--text);
+  background: var(--surface);
+}
+
+/* ==========================================================================
+   2) HOME — creation form / load glass card
+   ========================================================================== */
+
+/* ---- field blocks ---- */
+
+.field-block {
+  display: grid;
+  gap: 0;
+  width: 100%;
+  margin: 0 0 1.5rem;
+}
+
+/* Duplicates the DID already shown in #create-identity-did above -- kept
+ * small/muted rather than offscreen, since an offscreen input[type=password]
+ * alone was enough to stop password managers from recognizing the pair (see
+ * creation.html's own comment on this field). */
+.identity-username-block {
+  margin-bottom: 0.5rem;
+}
+
+.identity-username-heading {
+  display: block;
+  font-family: "Roboto Flex";
+  font-weight: 500;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+#create-username {
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-height: 1.5rem;
+}
+
+/* Reverted to the 2026-09-13 (d9ec4cd) shape: the eye-toggle and copy
+ * button sit as siblings of the input inside its own wrap, not off in the
+ * heading row -- see creation.html's comment on this same field. */
+.recovery-field-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.recovery-field-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.recovery-field-wrap #master-mnemonic,
+.recovery-field-wrap .passphrase-display-overlay {
+  margin-top: 0;
+}
+
+#create-load-form:not(.creation-load-mode) .recovery-field-wrap,
+#create-load-form:not(.creation-load-mode) .recovery-field-wrap .recovery-field {
+  cursor: pointer;
+}
+
+.recovery-field-wrap .recovery-field {
+  width: 100%;
+  min-height: 2rem;
+  padding: 0 1rem 0 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--field-text);
+  caret-color: var(--field-text);
+  font: 200 1rem/1.5rem "Geologica";
+}
+
+.recovery-eye-toggle {
+  position: absolute;
+  /* Inside the field, left of the copy button -- not the heading row.
+   * DOM position is unchanged (still a sibling of #master-mnemonic inside
+   * .recovery-field-wrap) since that's the structure password managers
+   * actually recognize; this is CSS-only. Pinned to the field's first-line
+   * center (not 50% of the wrap) so it stays top-right once the unmasked
+   * textarea grows to multiple lines, instead of drifting to the card's
+   * vertical center -- see the same choice on the copy button below. */
+  top: 1.75rem;
+  right: 2.3rem;
+  transform: translateY(-50%);
+  display: flex;
+  padding: 0.375rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* Cosmetic-only wrapped view of #master-mnemonic, shown in its place once
+ * revealed -- see the comment on it in creation.html for why #master-mnemonic
+ * itself never gets hidden/covered at the moment it's first detected (only
+ * afterward, on explicit user action, via .passphrase-field-covered below).
+ * Swaps roles with the input: while shown, THIS is what's in normal flow
+ * (so the wrap's height follows its wrapped content), and the input
+ * becomes the absolutely-positioned one instead. */
+.passphrase-display-overlay {
+  outline: none;
+  resize: none;
+  field-sizing: content;
+  cursor: pointer;
+}
+
+.passphrase-display-overlay.hidden {
+  display: none;
+}
+
+.passphrase-field-covered {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.recovery-eye-toggle:hover {
+  color: var(--ink);
+}
+
+.recovery-field-wrap .recovery-copy[data-for="master-mnemonic"] {
+  position: absolute;
+  top: 1.75rem;
+  right: 1rem;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+
+.recovery-field-wrap:has(.recovery-copy) #master-mnemonic,
+.recovery-field-wrap:has(.recovery-copy) .passphrase-display-overlay {
+  padding-right: 4.5rem;
+}
+
+/* Just the heading's label+icon are clickable now -- #create-identity-did
+ * (the field value below) sits outside the button, in its own div. */
+#create-regenerate {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: auto;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cc-w);
+  height: 2rem;
+  min-height: 2rem;
+  font-family: "Roboto Flex";
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 2rem;
+  color: var(--ink);
+}
+
+.field-heading-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(0.5 * var(--cc-w));
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* Action sits at the far right of the heading row */
+.field-heading > #creation-alias-toggle,
+.field-heading > .reload-icon,
+.field-heading > svg,
+.field-heading > .passphrase-copy-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: center;
+}
+
+/* Sits immediately right of the "did:webvh" label instead -- #create-regenerate
+ * is now sized to its own content (label+icon), not the full heading row. */
+#create-regenerate > .reload-icon {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.alias-hint {
+  font-weight: 500;
+  opacity: 0.55;
+}
+
+#creation-alias-row.alias-disabled .field-heading-label {
+  opacity: 0.4;
+}
+
+#creation-alias-create-row:has(#creation-alias-row.alias-disabled) .field-value-row,
+#creation-alias-create-row:has(#creation-alias-row.alias-disabled) #creation-alias {
+  display: none;
+}
+
+#creation-alias-create-row:has(.creation-alias-toggle[aria-checked="true"]) .field-value-row {
+  display: flex;
+}
+
+#creation-alias-create-row:has(.creation-alias-toggle[aria-checked="true"]) #creation-alias {
+  display: block;
+}
+
+#creation-alias-create-row:has(.creation-alias-toggle[aria-checked="true"]) .field-heading-label {
+  opacity: 1;
+}
+
+/* ---- field values ---- */
+
+.field-value,
+#master-mnemonic,
+.passphrase-display-overlay,
+#creation-alias,
+#creation-load-source,
+#create-identity-did {
+  display: block;
+  width: 100%;
+  min-height: 2rem;
+  border: 0px;
+  background: #f6f6f6;
+  color: var(--field-text);
+  font: 200 1rem / 1.5rem monospace;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 1rem 1rem;
+  margin-top: 0.5rem;
+  border-radius: 0.5rem;
+}
+.eyecatch-header{
+  /* Scales with viewport width (capped at the original 2rem) instead of a
+   * fixed size, and each <br>-separated line stays nowrap, so the two
+   * lines shrink together to fit any screen instead of wrapping a third
+   * time. line-height tracks font-size in the same clamp() so the two
+   * lines stay proportionally spaced as they scale. */
+  font-size: clamp(1.25rem, 8vw, 2.5rem);
+  line-height: clamp(1.5rem, 8vw, 2.5rem);
+  margin-bottom: 1rem;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: center;
+  font-family: 'Silkscreen';
+  letter-spacing: -10%;
+  white-space: nowrap;
+}
+
+#eyecatch {
+  text-align: justify;
+  font-family: "Ubuntu Sans", sans-serif;
+  color: #002031;
+  padding: 1rem;
+  border-radius: 0.3rem;
+}
+
+#create-form-area {
+  padding: 2rem 2rem 1rem 2rem;
+  box-shadow: 0 0px 3px rgba(0, 0, 0, 0);
+  border-radius: 1rem;
+}
+
+#create-form-area .field-value,
+#create-form-area #master-mnemonic,
+#create-form-area .passphrase-display-overlay {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+  line-height: 1.5rem;
+}
+
+#master-mnemonic {
+  resize: none;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Hover tint on the passphrase value (no copy-flash) -- #master-mnemonic-display
+ * is the unmasked, wrapped view shown in its place once revealed (see its
+ * comment in creation.html), so it gets the same treatment. */
+.passphrase-block:hover #master-mnemonic,
+#creation-passphrase-row:hover #master-mnemonic,
+#master-mnemonic:hover,
+.passphrase-block:hover #master-mnemonic-display,
+#creation-passphrase-row:hover #master-mnemonic-display,
+#master-mnemonic-display:hover {
+  color: var(--muted);
+}
+
+/* One rule for both the masked input and the unmasked overlay -- keyed off
+ * the shared wrap instead of listing each field twice. outline (not
+ * border) so it draws over the existing box instead of adding to it --
+ * border shifted the surrounding layout by its own width on hover even
+ * with box-sizing: border-box, since the field's padding/content area
+ * shrinks to make room for it; outline-offset pulls the outline back in
+ * to trace the same edge without any of that. */
+.recovery-field-wrap:hover #master-mnemonic,
+.recovery-field-wrap:hover .passphrase-display-overlay {
+  outline: 0.0625rem solid var(--hint);
+  outline-offset: -0.0625rem;
+}
+
+.field-value-row {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
+  position: relative;
+}
+
+.field-value-row .field-value {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.field-value-row:has(.alias-status-icon:not(.hidden):not([data-state="idle"])) .field-value {
+  padding-right: 2.5rem;
+}
+
+/* Alias availability indicator (setAliasStatusIcon) -- shared with the
+ * header's #context-connect-status (Edit alias/Connect form), which is
+ * NOT inside a .field-value-row and must stay in normal flow there
+ * (margin-left, not absolute) or it overlaps #context-connect-toggle's
+ * own esc/enter button next to it. */
+.alias-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 0.75ch;
+  width: 1.25rem;
+  height: 1.25rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Only creation.html's own Alias field wants it pinned inside the input
+ * instead (see .field-value-row:has(...) padding-right above). Centered via
+ * top/bottom + auto margin, not transform: translateY(-50%) -- the
+ * "checking" state's spin keyframes (below) animate `transform` too, and an
+ * animation's transform replaces the element's own static transform outright
+ * rather than combining with it, so translateY(-50%) was getting dropped
+ * for the animation's duration and the icon jumped out of vertical center
+ * while spinning. */
+.creation-alias-status {
+  position: absolute;
+  top: 0.5rem;
+  bottom: 0;
+  right: 1rem;
+  margin: auto 0;
+}
+
+.alias-status-icon.hidden,
+.alias-status-icon[data-state="idle"] {
+  display: none;
+}
+
+.alias-status-icon[data-state="available"] {
+  color: var(--ok);
+}
+
+.alias-status-icon[data-state="available"]::before {
+  content: "✓";
+}
+
+.alias-status-icon[data-state="unavailable"] {
+  color: var(--muted);
+}
+
+.alias-status-icon[data-state="unavailable"]::before {
+  content: "×";
+}
+
+.alias-status-icon[data-state="checking"] {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 0.1rem solid var(--border);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: alias-status-spin 0.7s linear infinite;
+}
+
+@keyframes alias-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#master-mnemonic-copy-hint,
+.copy-feedback {
+  color: var(--hint);
+  font: 500 0.85rem/1 Helvetica, Arial, sans-serif;
+}
+
+.copy-feedback {
+  white-space: nowrap;
+}
+
+.offscreen-field {
+  position: absolute;
+  width: 0.05rem;
+  height: 0.05rem;
+  padding: 0;
+  margin: -0.05rem;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- heading icons + alias toggle ---- */
+
+#create-regenerate .reload-icon,
+.passphrase-copy-btn,
+.recovery-copy[data-for="master-mnemonic"] {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--cc-icon);
+  height: var(--cc-icon);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+#create-regenerate .reload-icon,
+.passphrase-copy-btn svg,
+.recovery-copy svg {
+  display: block;
+  width: var(--cc-icon);
+  height: var(--cc-icon);
+  stroke: currentColor;
+}
+
+#creation-alias-toggle {
+  position: relative;
+  appearance: none;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 1.75rem;
+  min-width: 1.75rem;
+  height: 1rem;
+  min-height: 1rem;
+  max-height: 1rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: #e3e3e0;
+  box-shadow: none;
+  opacity: 1;
+  line-height: 0;
+  cursor: pointer;
+}
+
+#creation-alias-toggle::before {
+  content: "";
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 0.025rem rgb(23 23 22 / 12%);
+  transform: translateX(0);
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+
+#creation-alias-toggle[aria-checked="true"] {
+  background: green;
+}
+
+#creation-alias-toggle[aria-checked="true"]::before {
+  transform: translateX(0.75rem);
+}
+
+/* ---- load identity / passphrase fields ---- */
+
+.load-identity-field,
+.passphrase-field {
+  display: block;
+  width: 100%;
+  min-height: 2rem;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--field-text);
+  caret-color: var(--field-text);
+  font: 200 1rem/2rem "Geologica", ui-monospace, monospace;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.passphrase-field {
+  resize: none;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.passphrase-block:hover .passphrase-field,
+.passphrase-field:hover {
+  color: var(--muted);
+}
+
+/* File picker: not shown — input stays in DOM for app.ts */
+.file-input-hidden,
+.creation-file-select {
+  position: absolute;
+  width: 0.05rem;
+  height: 0.05rem;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  pointer-events: none;
+}
+
+/* ---- secondary links (Load / What's this?) ---- */
+
+.page-secondary-link-row {
+  margin: 2rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(1.5 * var(--cc-w));
+  text-align: center;
+}
+
+.page-secondary-link {
+  color: var(--ink);
+  font: 500 0.9rem/1rem Helvetica, Arial, sans-serif;
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+.page-secondary-sep {
+  color: var(--muted);
+  font: 400 0.9rem/1 Helvetica, Arial, sans-serif;
+}
+
+/* Load beside "What's this?" — same text-link treatment */
+.page-secondary-load {
+  appearance: none;
+  display: inline;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font: 500 0.9rem/1 Helvetica, Arial, sans-serif;
+  cursor: pointer;
+}
+
+.page-secondary-load:hover {
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.7;
+}
+
+/* ---- Load glass card (bottom sheet, slides up) ---- */
+
+/* .wallet-authorize-card (the SIOPv2 Authorize card) shares every visual
+ * property here on purpose -- same bottom sheet look. It's kept out of the
+ * transform/transition/will-change trio below: #wallet-authorize-panel is
+ * shown/hidden with a plain .hidden toggle (no .is-open slide-up), so those
+ * three would just leave it permanently translated off-screen. If you're
+ * tempted to tweak one card's look, check whether the other should change
+ * too. Declared after .wallet-session (both cards also carry that class) so
+ * these properties win over its background/padding/box-shadow. */
+.wallet-authorize-card,
+.load-glass-card {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: grid;
+  gap: 0.5rem;
+  max-height: 90vh;
+  overflow: auto;
+  padding: 1.5rem calc(2 * var(--cc-w)) 1.5rem;
+  background: rgb(255 255 255 / 50%);
+  backdrop-filter: blur(3rem);
+  -webkit-backdrop-filter: blur(3rem);
+  box-shadow: 0 -0.05rem 0.25rem rgb(0 0 0 / 7%);
+}
+
+.load-glass-card {
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.load-glass-card.is-open {
+  transform: translateY(0);
+}
+
+.load-glass-card.hidden {
+  display: none !important;
+}
+
+.load-glass-sheet {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem calc(2 * var(--cc-w)) 2rem;
+}
+
+/* Dim everything behind the load card */
+.load-glass-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgb(23 23 23 / 15%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+}
+
+.load-glass-scrim.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.load-glass-scrim.hidden {
+  display: none !important;
+}
+
+.load-glass-title {
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  font-size: 1.15rem;
+  line-height: 1.25rem;
+  color: var(--ink);
+}
+
+/* Shared with .wallet-authorize-heading (the Authorize card's own <h3>
+ * already carries this class, no load-glass-* needed there). */
+.wallet-authorize-heading,
+.load-glass-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+  width: 100%;
+  /* min-width: 0 so this can actually shrink below the DID title's natural
+   * width -- both this <h3> and .wallet-authorize-card/.load-glass-card
+   * above it are flex/grid items in their own right, which default to
+   * min-width: auto (refuse to shrink below content); without this, a long
+   * DID pushes the whole card wider instead of the title ellipsizing. */
+  min-width: 0;
+  min-height: 2rem;
+  font: 700 1rem/2rem Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  display:none;
+}
+
+/* On the Load card, the prefix ("Load your identity") is the only text
+ * before the close button, so it's the one that should grow. On the
+ * Authorize card, "Authorize" is a fixed label -- the DID title after it
+ * (.wallet-authorize-heading-title) is the part that should grow instead,
+ * or the prefix's own flex-grow leaves a large gap between the two. */
+.load-glass-heading .wallet-authorize-heading-prefix {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wallet-authorize-heading-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#wallet-authorize-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wallet-authorize-close,
+#load-glass-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.load-glass-block {
+  margin: 0;
+}
+
+.passphrase-slot-load {
+  min-height: 0;
+}
+
+.passphrase-slot-load .passphrase-block,
+.passphrase-slot-load #creation-passphrase-row {
+  margin: 0;
+}
+
+#load-glass-card .load-card-input,
+#load-glass-card #creation-load-source,
+#load-glass-card #master-mnemonic,
+#passphrase-slot-load #master-mnemonic {
+  display: block;
+  width: 100%;
+  height: 2rem;
+  min-height: 2rem;
+  max-height: 2rem;
+  margin: 0;
+  padding: 0 var(--cc-w);
+  border: 0;
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: none;
+  outline: none;
+  color: var(--field-text);
+  font: 200 0.8rem/2rem "Geologica", ui-monospace, monospace;
+  cursor: text;
+}
+
+.load-glass-field-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.load-glass-field-wrap .load-card-input,
+.load-glass-field-wrap #creation-load-source {
+  width: 100%;
+  padding-right: calc(3 * var(--cc-w));
+}
+
+/* Folder icon inside the source field, right edge */
+.load-file-select {
+  position: absolute;
+  right: 0.4rem;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+#creation-load-actions {
+  width: 100%;
+}
+
+/* Shared with .wallet-authorize-approve (the Authorize card's "Approve"
+ * button already carries this class alongside .primary) -- same full-width
+ * ink pill, not just .primary's background/color. */
+.wallet-authorize-approve {
+  display: block;
+  width: 100%;
+  height: 2rem;
+  min-height: 2rem;
+  margin: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--ink);
+  color: #fff;
+  box-shadow: none;
+}
+
+.load-glass-close {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 2rem;
+  margin: 0;
+  padding: 0 var(--cc-w);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 0.05rem var(--border);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.load-glass-close:hover {
+  box-shadow: inset 0 0 0 0.1rem var(--ink);
+}
+
+/* ==========================================================================
+   3) DASHBOARD
+   Cards, tabs, identity row, context window (old app.did.md look)
+   ========================================================================== */
+
+.panel[data-route-page="/dashboard"] {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+/* No border/shadow from generic rules on dashboard buttons. */
+.panel[data-route-page="/dashboard"] button {
+  border: 0;
+  box-shadow: none;
+}
+
+/* Destructive action, colored from the start like the header's own
+ * .context-connect-button.danger -- e.g. #files-unload. */
+.panel[data-route-page="/dashboard"] button.danger {
+  color: #fff;
+  background: var(--danger);
+}
+
+.panel[data-route-page="/dashboard"] button.danger:hover {
+  background: #a34646;
+}
+
+.panel[data-route-page="/dashboard"] #connection-content {
+  margin: 0;
+  width: 100%;
+}
+
+/* ---- identity row ---- */
+
+/* ---- identity card ----
+ * Everything for the dashboard's identity card lives here: the card, the
+ * name row  [alias] [connection] [edit] [github]  and its hover behavior,
+ * the did-line, and the shared .identity-name-copy icon button. */
+
+.user-info {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  max-width: none;
+}
+
+.user-info-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #f6f6f6;
+  border-radius: 0.5rem;
+  padding: 1rem 1rem;
+}
+
+/* -- name row --
+ * line-height caps the row height; every icon in it is exactly that tall
+ * (--identity-icon), i.e. as big as the alias's line box allows. */
+.user-info h2 {
+  --identity-icon: 1.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: var(--identity-icon);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height:2rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Alias link: opens the hosted did.jsonl (wrapper carries the hover bubble). */
+.identity-alias-link {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  border-radius: 0.2rem;
+  cursor: pointer;
+}
+
+/* Alias: text inside the link. Online = --ink; offline = --muted. */
+.identity-alias-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  font-size:1.25rem;
+  padding: 0rem 0.25rem;
+}
+
+.user-info h2:has(#connection-dot[data-state="disconnected"]) .identity-alias-name {
+  color: var(--muted);
+}
+
+/* connection icon hover: offline -> alias --ink, online -> alias --muted */
+.user-info h2:has(#connection-dot[data-state="disconnected"]:hover) .identity-alias-name {
+  color: var(--ink);
+}
+
+.user-info h2:has(#connection-dot[data-state="connected"]:hover) .identity-alias-name {
+  color: var(--muted);
+}
+
+/* edit icon hover (online or offline): underline the alias */
+.user-info h2:has(#identity-alias-edit:hover) .identity-alias-name {
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
+/* -- icon slots: all the same square, sized by the row's line-height -- */
+.loaded-identity-status-dot,
+.user-info h2 .identity-name-copy {
+  flex: 0 0 auto;
+  width: var(--identity-icon);
+  height: var(--identity-icon);
+  box-sizing: border-box;
+  padding: 0.25rem;
+  justify-content: center;
+}
+
+.user-info h2 svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* -- connection icon (publish/remove) --
+ * Connected rests on the green dot; disconnected on the crossed-out cloud.
+ * Hover previews the opposite state's icon. The dot's circle stays 0.5rem
+ * inside the full-size slot, so swapping icons never shifts the row. */
+.loaded-identity-status-dot {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.2rem;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.status-dot-circle {
+  display: none;
+  flex: 0 0 auto;
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.status-dot-circle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #3ba55c;
+  transform: translate(-50%, -50%);
+}
+
+#connection-dot[data-state="connected"] .status-dot-circle {
+  display: inline-block;
+}
+
+#connection-dot .cloud-off-icon,
+#connection-dot .cloud-icon {
+  display: none;
+  flex-shrink: 0;
+}
+
+#connection-dot[data-state="connected"]:hover .status-dot-circle {
+  display: none;
+}
+
+#connection-dot[data-state="connected"]:hover .cloud-off-icon {
+  display: block;
+}
+
+#connection-dot[data-state="disconnected"] .cloud-off-icon {
+  display: block;
+}
+
+#connection-dot[data-state="disconnected"]:hover .cloud-off-icon {
+  display: none;
+}
+
+#connection-dot[data-state="disconnected"]:hover .cloud-icon {
+  display: block;
+}
+
+/* Hover: slightly darker background on each icon / did-line target. */
+.loaded-identity-status-dot:hover,
+.user-info h2 .identity-name-copy:hover,
+.user-info h2 .identity-name-copy:focus-visible,
+.identity-did-row .identity-name-copy:hover,
+.identity-did-row .identity-name-copy:focus-visible,
+.identity-alias-link:hover,
+.identity-alias-link:focus-visible {
+  background: rgb(0 0 0 / 5%);
+}
+
+/* -- hover help bubble: any [data-toast] element in the name row shows its
+ * text in a white speech bubble above it (drop shadow, 1rem radius). -- */
+.loaded-identity-status-dot {
+  position: relative;
+}
+
+/* Bubble look, shared: identity-row items (above) and the home header's
+ * download icon (to its left). */
+.user-info h2 [data-toast]::after,
+.header-download[data-toast]::after {
+  content: attr(data-toast);
+  position: absolute;
+  z-index: 20;
+  padding: 0.4rem 1rem;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 0.1rem 0.2rem rgb(0 0 0 / 15%);
+  color: var(--ink);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s, transform 0.12s;
+}
+
+.user-info h2 [data-toast]::after {
+  bottom: calc(100% + 0.75rem);
+  left: 50%;
+  transform: translate(-50%, 0.2rem);
+}
+
+.user-info h2 [data-toast]:hover::after,
+.user-info h2 [data-toast]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* Below the icon, right edges aligned (the icons sit at the viewport's right
+ * edge, so a centered bubble would be clipped). Same rules for download and
+ * docs. */
+.header-download[data-toast]::after {
+  top: calc(100% + 0.5rem);
+  right: 0;
+  transform: translateY(-0.2rem);
+}
+
+.header-download[data-toast]:hover::after,
+.header-download[data-toast]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* -- shared icon button (edit pencil, copy, trash, github) -- */
+.identity-name-copy {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  padding: 0rem 0.25rem !important;
+  border: 0;
+  border-radius: 0.2rem;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  vertical-align: bottom;
+  cursor: pointer;
+}
+
+.identity-name-copy .copy-icon,
+.identity-name-copy .edit-icon,
+.identity-name-copy .trash-icon {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.identity-name-copy.copied .copy-icon {
+  color: var(--ok);
+}
+
+.record-card-heading .identity-name-copy:hover .trash-icon {
+  color: var(--danger);
+}
+
+/* -- github host icon: muted regardless of liveness (the connection icon
+ * reports that) -- */
+.identity-host-icon {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.identity-host-icon:hover,
+.identity-host-icon:focus-visible {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.identity-host-icon .host-icon {
+  display: block;
+  color: var(--text-muted);
+}
+
+/* -- did-line --
+ * No flexbox: scid/colon/alias spans sit in normal inline flow;
+ * nowrap keeps them on one line. Only #identity-did (the scid span)
+ * ever shrinks (see app.ts's fitDidHead). */
+.identity-did-row {
+  position: relative;
+  white-space: nowrap;
+}
+
+.identity-did-row .identity-name-copy {
+  padding: 0;
+}
+
+/* Shared look for the scid span, the ":" and the alias span. */
+.identity-did {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  color: var(--text-muted);
+  font: 0.9rem/1.5 "Fira Code";
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* scid, ":" and alias are one click target (the copy button); online adds
+ * accent + underline to the alias. */
+.identity-did-text {
+  white-space: nowrap;
+}
+
+
+/* Pulls the whole page body up into the gap the header's centered brand
+ * normally occupies -- while a context-window view is open (see the same
+ * .contextual class hiding .site-header-brand itself, in the header rules
+ * above) that space would otherwise just sit empty. .panel is
+ * header.site-header's sibling, not a descendant, hence :has() scoped from
+ * body rather than from the header itself -- a single level of :has(),
+ * since this engine can't nest one :has() inside another (which four
+ * separate body:has(header:has(#view:not(.hidden))) checks would each
+ * need). Only ever matches on dashboard (header.site-header is
+ * dashboard-only), even though .panel itself is shared across every route. */
+body:has(header.site-header.contextual) .panel {
+  margin-top: -2.5rem;
+}
+
+/* ---- GitHub host dialog (openModalCard) ---- */
+
+/* Inline view inside the identity card (.user-info-copy): while open, the
+ * card's default contents (name row, did-line, summary) give way to it. */
+.user-info-copy.github-host-open > h2,
+.user-info-copy.github-host-open > .identity-did-row,
+.user-info-copy.github-host-open > #loaded-identity-summary {
+  display: none;
+}
+
+.github-host-card {
+  display: grid;
+  padding: 0.5rem;
+}
+
+.github-host-card p {
+  margin:0;
+}
+
+.github-host-card.hidden {
+  display: none;
+}
+
+.github-host-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.github-host-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.github-host-card .modal-card-close {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.4rem;
+  border: 0;
+  border-radius: 0.2rem;
+  background: none;
+  color: var(--text-muted);
+  line-height: 0;
+  cursor: pointer;
+}
+
+.github-host-card .modal-card-close:hover {
+  background: rgb(0 0 0 / 6%);
+}
+
+/* PAT input + Publish as one pill -- same frame/chip look as
+ * #creation-confirm-actions (see "Saved-the-passphrase confirm pill"). */
+.github-host-pill {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: transparent;
+  margin-top:1rem;
+}
+
+.github-host-pill #github-pat-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem calc(1.5 * var(--cc-w));
+  border: 0;
+  outline: none;
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.github-host-pill #github-pat-input::placeholder {
+  color: var(--muted);
+}
+
+button#github-host-publish.primary {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-radius: 0;
+  background: var(--accent);
+  color: #fff;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.github-host-remember {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding:0.5rem;
+}
+
+.github-host-card .link-like {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+  cursor: pointer;
+}
+
+.github-host-card .link-like:hover {
+  color: var(--text);
+}
+
+.github-host-progress {
+  margin: 0;
+  padding-left: 1.5rem;
+  font-size: 0.75rem;
+  line-height: 1.5rem;
+  color: var(--text-muted);
+}
+
+.github-host-progress li[data-state="active"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.github-host-progress li[data-state="done"] {
+  color: #3ba55c;
+}
+
+.github-host-progress li[data-state="error"] {
+  color: var(--danger);
+}
+
+.github-host-card #github-host-result {
+  margin: 0;
+}
+
+.loaded-identity-menu {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0.2rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+#user-info-list {
+  display: grid;
+  gap: 0.5rem;
+  padding-top: 0.6rem;
+}
+
+#loaded-identity-summary,
+.fields {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.2rem 0.7rem;
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+#loaded-identity-summary dt,
+.fields dt {
+  color: var(--text-muted);
+}
+
+#loaded-identity-summary dd,
+.fields dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.user-info #loaded-identity-summary {
+  display: block;
+  color: var(--text-muted);
+  font: 0.82rem/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.user-info #loaded-identity-summary dt {
+  display: none;
+}
+
+.user-info #loaded-identity-summary dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- field groups / record cards ---- */
+
+.field-group {
+  margin-top: 1.2rem;
+}
+
+.field-group:first-child {
+  margin-top: 0;
+}
+
+.field-group h4 {
+  margin: 0 0 0.4rem;
+  color: var(--heading);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.field-group .fields {
+  padding-left: 0.8rem;
+}
+
+/* Services, application keys, and authorized devices are peers. A shared
+ * quiet card keeps that relationship legible without making the page heavy. */
+.record-card {
+  display: grid;
+  gap: 1rem;
+
+  padding: 1.5rem;
+  background: var(--canvas);
+  /*border: 0.1px solid gray;*/
+  border-radius: 1rem;
+  box-shadow: 0 0px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Same card as every other .record-card (Root key, Application keys,
+ * Services, wallet grants, Files) except for the shadow -- asked for
+ * explicitly, kept off here alone. .record-card.key-rotation-card (two
+ * classes) beats .record-card's own single-class shadow rule on
+ * specificity, regardless of which one comes first in the stylesheet. */
+.record-card.key-rotation-card {
+  box-shadow: none;
+}
+
+/* Two columns at a wide enough viewport, one below the other otherwise --
+ * .key-material-grid (Root/Sign/Spare key + Key rotation, Keys tab) and
+ * .docs-columns (Services + Application keys, Docs tab) are both meant to
+ * reflow their INDIVIDUAL cards row-major (one column: A/B/C/D top to
+ * bottom; two columns: A B / C D), not keep two fixed group-columns (which
+ * is all grid-template-columns alone gives you here, since each grid child
+ * -- #local-key-material-list, #services-manager, #application-keys-manager
+ * -- is itself a multi-card group, not one card). auto-fit collapses to a
+ * single column on its own once there isn't room for two, no separate
+ * mobile breakpoint needed; display:contents on every intermediate wrapper
+ * below is what makes the actual cards -- not their grouping divs -- the
+ * grid's direct children, which is what auto-flow needs to fill row-major
+ * across all of them together instead of per group. Each wrapper's own
+ * .hidden toggle (display:none !important) still wins over this when a tab
+ * isn't current, since !important outranks a plain display:contents. */
+.key-material-grid,
+.docs-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  align-items: start;
+  gap: 1rem;
+}
+
+#local-key-material-list,
+#services-manager,
+#application-keys-manager,
+#services-list,
+#application-keys-list {
+  display: contents;
+}
+
+/* Only ever a stray empty grid cell before renderServicesList has anything
+ * to report -- output()'s own hidden toggle only ever runs once there's a
+ * message to show or clear, so this is the one case it doesn't cover. */
+#services-result:empty {
+  display: none;
+}
+
+/* ---- Files tab: a directory listing, not a fact card (see the comment on
+ * .files-tree in dashboard.html for why that's the closer match here) --
+ * "loaded/" as the root, its manifest's named parts (renderIdentityFiles in
+ * app.ts) as a flat, single-level tree under it. Monospace already applies
+ * to the whole app (body's own font), which is what keeps the ├/└ connector
+ * glyphs aligned -- no font-family override needed here. */
+.files-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.files-tree-root {
+  color: var(--heading);
+  font-weight: 700;
+}
+
+.files-tree-list {
+  display: flex;
+  flex-direction: column
+}
+
+.files-tree-entry {
+  display: block;
+  padding: 0.15rem 0;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.files-tree-entry:hover,
+.files-tree-entry:focus-visible {
+  color: var(--heading);
+}
+
+.files-tree-entry.active {
+  color: var(--heading);
+  font-weight: 700;
+}
+
+.files-tree-connector {
+  color: var(--text-muted);
+  user-select: none;
+}
+
+/* Export/Unload (and the Unload confirmation's own Unload/Cancel below it)
+ * were bare, unstyled buttons -- the base button reset (see "---- buttons
+ * ----" above) strips all chrome by default, so they read as plain text
+ * with a pointer cursor, not controls. .danger (#files-unload,
+ * #context-unload-confirm) already tints the background red via the
+ * broader dashboard rule (.panel[data-route-page="/dashboard"] button.danger);
+ * :not(.danger) below leaves that rule in sole control of danger's own
+ * background/color -- this id selector would otherwise outrank that rule's
+ * lower-specificity class+attribute selector and paint every button
+ * (danger included) with the same plain var(--canvas) fill, white text
+ * sitting on a white background. */
+#files-manager .actions button {
+  padding: 0.35rem 0.9rem;
+  border: 0.06rem solid var(--ui-border);
+  border-radius: 0.4rem;
+}
+
+#files-manager .actions button:not(.danger) {
+  background: var(--canvas);
+}
+
+#files-manager .actions button:not(.danger):hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+#files-manager .actions button.danger {
+  border-color: transparent;
+}
+
+/* A plain "<-" glyph, not a labeled pill like Export/Unload -- no border, no
+ * fill, just the arrow. #files-manager .actions #files-back (matching the
+ * generic rule's own #id+.class+element specificity plus this id) is needed
+ * to actually win: a bare "#files-back" selector ties that rule's id count
+ * (1 each) and loses on its extra class+element. */
+#files-manager .actions #files-back {
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  background: transparent;
+}
+
+/* Same padding/radius as Files' own Unload, not the raw button.primary
+ * reset (border: 0, padding: 0). min-width because "Rotate key" vs.
+ * "Rotated" (see justRotated/updateRotateKeyButton in app.ts) would
+ * otherwise resize the button when the label changes. */
+#rotate-key {
+  padding: 0.35rem 0.9rem;
+  border-radius: 0.4rem;
+  min-width: 8rem;
+}
+
+#rotate-key:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The decrypted content behind a clicked filename (renderIdentityFiles'
+ * `show()` in app.ts) -- a light, padded panel instead of a bare <pre> that
+ * broke out of the tab horizontally on anything long (a DID log line, a
+ * multikey) instead of wrapping. */
+#identity-file-display {
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+}
+
+#identity-file-content {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* A field-group that is also a record-card keeps the card top spacing even as
+ * the section's first child. */
+.field-group.record-card:first-child {
+  margin-top: 0.8rem;
+}
+
+.record-card > button {
+  justify-self: start;
+}
+
+.record-card .fields {
+  grid-template-columns: 6.3rem minmax(0, 1fr);
+}
+
+.record-card h4,
+.connection-card h3 {
+  color: var(--heading);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.record-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.record-card-heading h4 {
+  margin: 0;
+}
+
+.record-card-heading .identity-name-copy:hover .trash-icon {
+  color: var(--danger);
+}
+
+/* Service fields: rounded label + value on one row; long DID URLs wrap. */
+.service-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 0.4rem 0.5rem;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.service-facts dt {
+  padding: 0.15rem 0.4rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-radius: 49.95rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.service-facts dd {
+  min-width: 0;
+  margin: 0.1rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* Keys tab: the public multikey value only. */
+.multikey-value {
+  font-family: "Fira Code", ui-monospace, monospace;
+}
+
+.service-key-directory {
+  margin: 0.9rem 0;
+  padding: 0.7rem 0.8rem;
+  border-left: 0.1rem solid var(--border);
+  background: var(--surface);
+}
+
+.service-key-directory h5 {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+}
+
+.service-key-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.service-key-entry code {
+  overflow-wrap: anywhere;
+}
+
+.encrypted-metadata {
+  margin: 0.9rem 0;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.2rem;
+  background: #f7faef;
+}
+
+.encrypted-metadata h5 {
+  margin: 0 0 0.5rem;
+  color: var(--ok);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.encrypted-metadata .fields {
+  margin: 0;
+  padding: 0;
+}
+
+.encrypted-metadata dd {
+  white-space: pre-wrap;
+}
+
+.storage-state {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.3rem;
+  color: var(--ok);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.storage-state::before {
+  width: 0.35rem;
+  height: 0.35rem;
+  background: currentColor;
+  border-radius: 50%;
+  content: "";
+}
+
+.storage-state.offline {
+  color: var(--text-muted);
+}
+
+.storage-state.warning {
+  color: var(--danger);
+}
+
+.wallet-unlock {
+  margin-top: 0.8rem;
+}
+
+/* ---- data card / Context Window ---- */
+
+/* Shared Home data-card component. Local data and Hosted data have the exact
+ * same HTML skeleton and use only these visual primitives. */
+.data-card {
+  position: relative;
+  padding: 1rem;
+  background: var(--canvas);
+  border: 0;
+  border-radius: 0.2rem;
+  box-shadow: none;
+}
+
+/* One font-size and one min-height for the whole row, so switching between
+ * the Context Window's views (actions, command line, Alias/Connect form)
+ * never changes the card's height for anything shorter than a single line.
+ * Everything is flush against the row's top padding at the same fixed
+ * 1.55rem content-box height (0.3rem vertical padding on buttons/inputs). */
+.data-card-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.4rem;
+  min-height: 3.2rem;
+  padding: 0.7rem 0.8rem 0.7rem 0.5rem;
+  border: 0;
+  font-size: 1rem;
+}
+
+.data-card-copy {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+/* One-row action bars — beat .data-card-copy { display: grid }. */
+.data-card-copy.context-actions-row,
+.data-card-copy.context-command-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+#context-actions-view.data-card-copy,
+#context-command-view.data-card-copy {
+  display: flex;
+  flex-direction: row;
+}
+
+/* Default (idle) view and the hamburger's menu view -- both empty or
+ * text-only, so without an explicit height they'd collapse to 0 and
+ * become unclickable. 1.55rem matches the shared content-box height every
+ * other row in this card uses (see the note on .context-icon-column). */
+.context-actions-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+  min-height: 1.55rem;
+  border: 0;
+  cursor: text;
+}
+
+.context-command-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+/* Quiet, non-interactive marker for the command bar's current context
+ * ("file": Files/Export/Unload). Clicks fall through to the row handler. */
+.context-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  opacity: 0.9;
+  padding: 0 0.5rem;
+}
+
+#context-icon-logo {
+  font-family: "MuseoModerno";
+  font-weight: 700;
+  /* 1.55rem column, 0.8rem svg equivalent in visual weight */
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+/* Redundant now that the header has a real, always-visible centered
+ * wordmark (.site-header-brand) -- this text-only "dito" was standing in
+ * for a logo before that existed. .context-icon-column stays a fixed
+ * 1.55rem regardless (see its own comment), so hiding this doesn't shift
+ * the row. */
+header.site-header #context-icon-logo {
+  display: none;
+}
+
+/* The context icon sits in its own column left of whichever view is
+ * showing. Fixed at 1.55rem so the row's content never shifts sideways
+ * between views. The 0.375rem top margin centers a 0.8rem icon against the
+ * 1.55rem content height shared by every view. */
+.context-icon-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.4rem;
+  flex: 0 0 1.55rem;
+  width: 1.55rem;
+  margin-top: 0.375rem;
+  margin-right: 0.35rem;
+}
+
+/* #files-unload-body's own checkbox (dashboard.html) -- sits directly in
+ * .actions next to the Unload button, no wrapper row needed. */
+#files-unload-body label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 0.5rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Plain, always-visible input fields (no idle-vs-focused swap, no label). */
+#context-connect-url,
+#context-command-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: none;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+/* While unlocking (see app.ts's setCommandMode swapping this to
+ * type="password"), password managers (ProtonPass, 1Password, ...) anchor
+ * their own autofill icon near the field's right edge. This field sits
+ * flush against #context-actions (the submit/cancel buttons) with only the
+ * grid's normal 0.7rem gap between them, which isn't enough room for that
+ * icon -- it was spilling onto the buttons. Reserve space inside the field
+ * itself, and widen the gap to its neighbor, only in this state. */
+#context-command-input[type="password"] {
+  padding-right: 2.2rem;
+}
+
+#context-window:has(#context-command-input[type="password"]) {
+  gap: 1rem;
+}
+
+/* KEEP-PX: 16px minimum, not rem -- under it, iOS Safari zooms the
+ * viewport on focus regardless of the root font-size a rem would scale
+ * with, so this needs to stay an absolute 16px. */
+#context-connect-url {
+  font-size: 16px; /* KEEP-PX: see comment above */
+}
+
+/* Edit-alias field: [slot][input + trailing suffix drawn over it]. Mirror =
+ * invisible copy of the typed text, ghost = the suffix right after it. */
+.connect-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.connect-input {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Input and suffix overlay share one font so typed text, placeholder and
+ * suffix read as a single continuous string. */
+.connect-field #context-connect-url,
+.connect-suffix {
+  font-family: system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+.connect-field #context-connect-url {
+  line-height: 1.2;
+}
+
+.connect-field #context-connect-url::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+/* Slot before the field: "hosts" while the server-mode field is empty, the
+ * availability icon (flush right, next to the text) otherwise. The text
+ * always keeps its width (visibility, not display), so swapping never
+ * shifts the field. */
+.connect-prefix {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+  margin-right: 0.5rem;
+  font: 16px/1.2 system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif; /* KEEP-PX: mirrors the input */
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* Custom-host mode: the slot exists only while the availability icon does. */
+.connect-prefix.collapsed:not(:has(.alias-status-icon[data-state])) {
+  display: none;
+}
+
+.connect-prefix #connect-prefix-text {
+  display: block;
+}
+
+.connect-prefix #connect-prefix-text.invisible {
+  visibility: hidden;
+}
+
+.connect-prefix .alias-status-icon {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0.5rem;
+  margin: auto 0;
+}
+
+.connect-suffix {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0;
+  overflow: hidden;
+  font-size: 16px; /* KEEP-PX: mirrors #context-connect-url */
+  line-height: 1.2;
+  white-space: pre;
+  pointer-events: none;
+}
+
+.connect-suffix #connect-suffix-mirror {
+  visibility: hidden;
+}
+
+.connect-suffix #connect-suffix-ghost {
+  color: var(--text);
+}
+
+.connect-suffix #connect-suffix-ghost.faint {
+  color: var(--muted);
+}
+
+/* Edit-alias mode's left-side toggle (replaces the profile icon). */
+.context-server-toggle {
+  padding: 0.2rem 0.5rem;
+  border: 0.5px solid transparent;
+  border-radius: 0.2rem;
+  background: var(--accent);
+  color: white;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.context-server-toggle[aria-pressed="false"] {
+  background: var(--canvas);
+  color: #aaaaaa;
+  border: 0.5px solid gray;
+}
+
+.data-card-dot {
+  color: #00a92a;
+  line-height: 1;
+  margin: 0 0.2rem 0 0.15rem;
+}
+
+.data-card-menu-button {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  /* pushes the button to the far right (the row itself is flex-start) */
+  margin-left: auto;
+  width: 1.8rem;
+  height: 1.55rem;
+  padding: 0.2rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.data-card-menu-button:hover {
+  color: var(--text);
+}
+
+.context-connect-trailing {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.context-connect-button {
+  flex-shrink: 0;
+  /* 0.3rem vertical padding matches the row's other fields so every view has
+   * the same content height and the row never grows past min-height. */
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-radius: 0.2rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.context-connect-button:hover,
+.context-connect-button.active {
+  background: #f3f3f1;
+  color: var(--text);
+}
+
+/* Unload is destructive: colored from the start, not only on hover. */
+.context-connect-button.danger {
+  color: #fff;
+  background: var(--danger);
+}
+
+.context-connect-button.danger:hover {
+  background: #a34646;
+  color: #fff;
+}
+
+/* Icon-only confirm: 0.375rem padding + 0.8rem icon = 1.55rem, same as every text
+ * button/input in the row. */
+.context-connect-confirm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.375rem;
+  border: 0;
+}
+
+/* Buttons inside the one-row bars.
+ * NOTE: declared after the rules above with equal specificity, so it also
+ * overrides their hover/active/danger colors. */
+.context-actions-row .context-connect-button,
+.context-command-row .context-connect-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-radius: 0.2rem;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-family: system-ui;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+/* Input-mode fields (command line, header unlock field, ...): a quiet esc icon
+ * while empty, swapped for the return/confirm icon once something is typed.
+ * See syncInputModeIcons() in app.ts. */
+.input-mode-icon-esc {
+  opacity: 0.5;
+}
+
+/* The enter icon additionally stays dim until checkConnectTarget validates
+ * the typed host. */
+#context-connect-icon-enter {
+  opacity: 0.5;
+}
+
+#context-connect-toggle[data-state="ok"] #context-connect-icon-enter {
+  opacity: 1;
+}
+
+/* ---- DID line ---- */
+
+.did-icon {
+  flex-shrink: 0;
+  margin: 0.25rem;
+  color: #dc2929;
+}
+
+/* One-shot spin on #create-regenerate click (see resetCreateDraft in
+ * app.ts, which does the reflow-then-reclass trick to restart this even
+ * mid-spin) -- a single clockwise turn, not a continuous spinner. */
+@keyframes reload-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.reload-icon.spin-once {
+  transform-origin: 50% 50%;
+  animation: reload-icon-spin 0.9s ease;
+}
+
+.did-value {
+  min-width: 0;
+  min-height: 2rem;
+  overflow: hidden;
+  font-size: 1rem;
+  line-height: 2rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---- application tabs / sections ---- */
+
+.application-tabs {
+  display: flex;
+  gap: 0;
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.application-tabs [role="tab"] {
+  position: relative;
+  padding: 0.5rem 1rem;
+  color: var(--text-muted);
+  background: none;
+  border-radius: 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.application-tabs [role="tab"] + [role="tab"]::before {
+  position: absolute;
+  left: 0;
+  color: var(--border-strong);
+  content: "|";
+}
+
+.application-tabs [role="tab"]:hover {
+  color: var(--text);
+  background: none;
+  border-color: transparent;
+}
+
+.application-tabs [role="tab"].active {
+  color: var(--heading);
+}
+
+.application-tabs [role="tab"].active::after {
+  position: absolute;
+  right: 0.7rem;
+  bottom: -0.05rem;
+  left: 0.7rem;
+  height: 0.1rem;
+  background: var(--heading);
+  content: "";
+}
+
+[data-panel="home"] > .application-pane > h3 {
+  margin: 1.6rem 0 0.8rem;
+}
+
+[data-panel="home"] > .application-pane.wallet-identities {
+  margin-top: 0;
+}
+
+/* ---- about page (plain h1/p prose, no other markup) ---- */
+
+h1 {
+  font-family: "Geologica";
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+p {
+  font-family: system-ui;
+  margin-bottom: 0.5rem;
+}
+
+/* ---- mobile layout ---- */
+
+@media (max-width: 576px) {
+  .panel {
+    padding: 3rem calc(0 * var(--cc-w)) 2rem;
+  }
+
+  #create-form-area {
+    padding: 0rem 1rem 0rem 1rem;
+  }
+
+  /* Narrow columns make ragged/overflowing text more likely -- let the
+   * browser break words at hyphenation points (uses <html lang="en">). */
+  body {
+    -webkit-hyphens: auto;
+    hyphens: auto;
+  }
+
+  /* "Yes" -> a checkmark, and the blue chip shrinks to fit it -- the "Yes"
+   * text itself is hidden (font-size: 0) rather than removed, so the label
+   * stays in the DOM for anything (tests, screen readers via aria) that
+   * expects it. */
+  .creation-confirm-saved-label {
+    padding: 0.5rem 1rem;
+    font-size: 0;
+  }
+
+  .creation-confirm-saved-label::before {
+    content: "\2713";
+    font-size: 1rem;
+  }
+}
+

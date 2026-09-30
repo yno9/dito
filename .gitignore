@@ -1,0 +1,50 @@
+# Allowlist: everything is ignored unless it is listed here. The public repo holds
+# only the source, tests, license and the docs that explain them. Deployment
+# config, operations notes, local tooling and copies of third-party
+# specifications stay on the maintainer's machine.
+
+/*
+
+# project
+!/.gitignore
+!/LICENSE
+!/README.md
+!/ARC.md
+!/SPEC-webvh-hosting.md
+!/package.json
+!/bun.lock
+!/bunfig.toml
+!/tsconfig.json
+!/build.ts
+
+# source
+!/client/
+!/public/
+!/packages/
+!/server/
+!/tests/
+!/scripts/
+
+# ...but not these, wherever they are
+node_modules/
+dist/
+build/
+data/
+test/logs/
+.DS_Store
+*.log
+*.bak
+*.bak-*
+.env
+.env.*
+.dev.vars
+*.pem
+*.key
+*.local.json
+
+# not in this repository (the mail relay lives elsewhere)
+/server/mail/
+
+# operational scripts (only the local dev server is public)
+/scripts/*
+!/scripts/dev-static-server.ts

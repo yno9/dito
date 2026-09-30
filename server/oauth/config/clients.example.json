@@ -1,0 +1,23 @@
+[
+  {
+    "client_id": "forgejo",
+    "client_secret": "CHANGE-ME-BEFORE-DEPLOYMENT",
+    "redirect_uris": [
+      "https://forgejo.example.com/user/oauth2/dito/callback"
+    ]
+  },
+  {
+    "client_id": "outline",
+    "client_secret": "CHANGE-ME-BEFORE-DEPLOYMENT",
+    "redirect_uris": [
+      "https://wiki.example.com/auth/oidc.callback"
+    ]
+  },
+  {
+    "client_id": "hievents",
+    "client_secret": "CHANGE-ME-BEFORE-DEPLOYMENT",
+    "redirect_uris": [
+      "https://form.example.com/api/auth/did/callback"
+    ]
+  }
+]

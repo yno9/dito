@@ -1,0 +1,342 @@
+<section class="panel" data-route-page="/">
+  <section id="overview-null"></section>
+  <div class="eyecatch-header">
+    digital identity<br>
+    in your hands
+  </div>
+  <div id="eyecatch">
+    <strong>How?</strong> — Make it portable. Easily exportable and importable, and publishable online without being locked in. Here is a single-file webapp built for that.
+
+  </div>
+  <div id="create-form-area" class="hidden">
+    <!-- ## h2 / [field] — Your disposable ID
+         #create-regenerate is now just the heading's label+icon -- clicking
+         the field value below no longer regenerates the identity. -->
+    <div class="field-block disposable-id-block">
+      <h2 class="field-heading">
+        <button
+          type="button"
+          id="create-regenerate"
+          aria-label="Generate a new identity"
+        >
+          <span class="field-heading-label">
+            did:web ID
+            <span
+              id="create-regenerate-feedback"
+              class="copy-feedback hidden"
+              role="status"
+            >
+              Regenerated.
+            </span>
+          </span>
+          <svg
+            class="did-icon reload-icon"
+            viewBox="0 0 24 24"
+            width="24"
+            height="24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path
+              d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+            ></path>
+          </svg>
+        </button>
+      </h2>
+      <div id="create-identity-did" class="field-value did-value"></div>
+    </div>
+
+    <form id="create-load-form" method="get">
+      <!-- Restored to the exact shape of the last build where password
+           managers actually fired (2026-09-13, commit d9ec4cd): offscreen
+           username label, and the password field living inside a
+           recovery-field-wrap alongside its own eye-toggle/copy buttons as
+           siblings, not off in the heading row. Several partial rewrites
+           since then (visible username, textarea+hidden-input, POST,
+           label-only) were each tried and none alone fixed it -- reverting
+           the whole shape at once is the only version with a track record. -->
+      <label class="offscreen-field">
+        Identity
+        <input
+          id="create-username"
+          name="username"
+          type="text"
+          autocomplete="username"
+          class="recovery-field"
+        />
+      </label>
+
+      <!-- ## h2 / [field] — Passphrase
+           A real, VISIBLE input[type=password] -- not a <textarea>, and
+           not paired with any hidden decoy input either (both a clip-based
+           1x1px hidden password field and one stacked full-size under the
+           textarea were tried and neither got recognized -- only a real,
+           on-screen input[type=password] does). That means no line-wrap
+           for the 24-word mnemonic; it scrolls horizontally in one line
+           instead, masked by default and toggled via the eye button.
+           showDraftPhrase() below never touches this field's `type` after
+           render (stays "password"; the eye toggle flips it to "text")
+           -- attribute churn right after the field is detected is also
+           part of what stopped password managers from recognizing it. -->
+      <label
+        id="creation-passphrase-row"
+        class="field-block passphrase-block"
+        data-for="master-mnemonic"
+      >
+        <span class="field-heading">
+          <span class="field-heading-label">
+            passphrase
+            <span id="master-mnemonic-copy-hint">(copy &amp; save required)</span>
+            <span
+              id="master-mnemonic-copy-feedback"
+              class="copy-feedback hidden"
+              role="status"
+            >
+              copied.
+            </span>
+          </span>
+        </span>
+        <span class="recovery-field-row">
+          <span id="master-mnemonic-wrap" class="recovery-field-wrap">
+            <input
+              id="master-mnemonic"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              placeholder="Passphrase"
+              class="recovery-field passphrase-field"
+            />
+            <!-- #master-mnemonic itself always stays a real, on-screen
+                 input[type=password] -- that's the one thing every attempt
+                 at hiding/duplicating it broke password managers. This is
+                 a separate, purely cosmetic wrapped view: shown ONLY once
+                 the eye toggle has already flipped #master-mnemonic to
+                 type="text" (so at the moment password managers detect the
+                 field, on page load, it's a plain visible input same as
+                 always -- this only exists on top of it afterward, on
+                 explicit user action). Kept in sync + shown/hidden by the
+                 .recovery-eye-toggle click handler in app.ts. -->
+            <textarea
+              id="master-mnemonic-display"
+              readonly
+              tabindex="-1"
+              aria-hidden="true"
+              class="passphrase-display-overlay hidden"
+            ></textarea>
+            <button
+              type="button"
+              class="recovery-eye-toggle"
+              data-for="master-mnemonic"
+              aria-label="Show passphrase"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+                <line
+                  id="master-mnemonic-eye-slash"
+                  x1="2"
+                  y1="2"
+                  x2="22"
+                  y2="22"
+                ></line>
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="recovery-copy passphrase-copy-btn"
+              data-for="master-mnemonic"
+              aria-label="Copy passphrase"
+            >
+              <svg
+                class="copy-icon"
+                viewBox="0 0 24 24"
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+                <path
+                  d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                ></path>
+              </svg>
+            </button>
+          </span>
+        </span>
+      </label>
+
+      <!-- ## h2 / [field] — Alias -->
+      <div id="creation-alias-create-row" class="field-block alias-block">
+        <h2 id="creation-alias-row" class="field-heading alias-disabled">
+          <label class="field-heading-label" for="creation-alias">
+            alias <span class="alias-hint">(can be changed later)</span>
+          </label>
+          <button
+            id="creation-alias-toggle"
+            class="creation-alias-toggle"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-label="Use alias"
+          ></button>
+        </h2>
+        <div class="field-value-row">
+          <input
+            id="creation-alias"
+            type="text"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+            autocomplete="off"
+            aria-label="Alias"
+            class="field-value recovery-field"
+          />
+          <span
+            id="creation-alias-status"
+            class="creation-alias-status alias-status-icon hidden"
+            role="status"
+            aria-label="Alias availability unknown"
+          ></span>
+        </div>
+        <div id="creation-create-actions" class="actions">
+          <button id="publish-create" class="primary" type="button">
+            Create your ID
+          </button>
+        </div>
+        <div id="creation-confirm-actions" class="actions confirm-pill hidden">
+          <button id="creation-confirm-saved" class="primary" type="submit">
+            <span class="creation-confirm-prompt">Saved the passphrase?</span>
+            <span class="creation-confirm-saved-label">Yes</span>
+          </button>
+        </div>
+        <!-- Import: a plain hyperlink-style button under Create. -->
+        <button
+          type="button"
+          id="header-load-toggle"
+          class="creation-import-link"
+          aria-pressed="false"
+        >
+          Import did:webvh
+        </button>
+      </div>
+    </form>
+    <output id="create-result"></output>
+  </div>
+</section>
+
+<!-- Dim scrim behind load card -->
+<div id="load-glass-scrim" class="load-glass-scrim hidden" aria-hidden="true"></div>
+
+<!-- Bottom sheet: Load — 4 rows -->
+<div
+  id="load-glass-card"
+  class="load-glass-card wallet-session hidden"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="load-glass-title"
+>
+  <h3 id="load-glass-title" class="wallet-authorize-heading load-glass-heading">
+    <span class="wallet-authorize-heading-prefix">Import your identity</span>
+    <button
+      type="button"
+      id="load-glass-close"
+      class="wallet-authorize-close"
+      aria-label="Cancel"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M18 6 6 18"></path>
+        <path d="m6 6 12 12"></path>
+      </svg>
+    </button>
+  </h3>
+
+  <div id="creation-load-row" class="load-glass-row">
+    <div class="load-glass-field-wrap">
+      <input
+        id="creation-load-source"
+        type="text"
+        placeholder="DID URL or Local jwe file"
+        spellcheck="false"
+        autocapitalize="off"
+        autocorrect="off"
+        autocomplete="off"
+        aria-label="Identity source"
+        class="load-card-input"
+      />
+      <button
+        type="button"
+        id="load-file-select"
+        class="load-file-select"
+        aria-label="Select JWE file"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"></path>
+        </svg>
+      </button>
+      <input
+        id="creation-load-file"
+        class="file-input-hidden"
+        type="file"
+        accept=".jwe,application/jose,text/plain"
+        tabindex="-1"
+        aria-hidden="true"
+      />
+      <span
+        id="creation-load-url-status"
+        class="creation-load-url-status hidden"
+        role="status"
+        aria-label="DID document not checked"
+      ></span>
+    </div>
+  </div>
+
+  <div id="passphrase-slot-load" class="load-glass-row passphrase-slot-load"></div>
+
+  <div id="creation-load-actions" class="actions hidden">
+    <button id="creation-load-submit" class="primary wallet-authorize-approve" type="button" disabled>
+      import
+    </button>
+  </div>
+</div>

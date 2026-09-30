@@ -1,0 +1,5 @@
+{
+  "client_id": "forgejo",
+  "client_secret": "CHANGE-ME-BEFORE-DEPLOYMENT",
+  "redirect_uris": ["https://forgejo.example.com/user/oauth2/dito/callback"]
+}

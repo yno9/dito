@@ -1,0 +1,6 @@
+{
+  "name": "@did-md/dito-cli",
+  "private": true,
+  "type": "module",
+  "bin": { "dito": "dito.ts" }
+}

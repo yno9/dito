@@ -1,0 +1,315 @@
+<div id="network-activity-bar" class="network-activity-bar" aria-hidden="true"></div>
+<div id="network-activity-domain" class="network-activity-domain" aria-hidden="true"></div>
+
+<!-- Same welcome->normal scroll-shrink brand as home-header.html (shared
+     CSS, header.home-header-root -- see styles.css), not a dashboard-only
+     variant: at the top of the page this looks exactly like home's welcome
+     state, and settles into the same small centered wordmark once scrolled.
+     Decorative here (pointer-events:none, no click handler) --
+     #context-window's own left column is still the actual brand/context-icon
+     slot; this echoes the wordmark the same way home's does, and fades out
+     while a context-window view is open (see the :has() rule in
+     styles.css) so it never sits under real UI. -->
+<div class="site-header-brand">
+  <span class="site-header-logo">
+    <span class="site-header-logo-text">〃dito</span>
+  </span>
+  <p class="site-header-subtitle">A digital ID toolkit</p>
+</div>
+
+<!-- Context window (now in header) -->
+<div id="context-window">
+  <div class="context-window-column left">
+    <div class="context-icon-column">
+      <span id="context-icon" class="context-icon" aria-hidden="true">
+        <span id="context-icon-logo">dito</span>
+        <svg
+          id="context-icon-file"
+          class="hidden"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <svg
+          id="context-icon-unlock"
+          class="hidden"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <rect x="4" y="11" width="16" height="10" rx="2"></rect>
+          <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+        </svg>
+        <svg
+          id="context-icon-profile"
+          class="hidden"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="8" r="4"></circle>
+          <path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path>
+        </svg>
+        <svg
+          id="context-icon-search"
+          class="hidden"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </span>
+      <!-- Edit-alias mode: toggle. On = the field's text is a did.md
+           username (".did.md" follows it); off = a full custom host. -->
+      <button
+        id="context-server-toggle"
+        class="context-server-toggle hidden"
+        type="button"
+        aria-pressed="true"
+        aria-label="Host on did.md"
+      >did.md</button>
+    </div>
+  </div>
+
+  <div class="context-window-column middle context-omnibox">
+    <!-- Toast overlay: fills this whole column, on top of whichever view
+         is currently showing, whenever something on the page with a
+         data-toast attribute is hovered/focused -- see the [data-toast]
+         wiring in app.ts. Not tied to any one view/context; works the same
+         regardless of what's showing underneath it. -->
+    <div id="context-toast" class="context-toast" aria-hidden="true"></div>
+
+    <!-- Default (idle) view: empty -- clicking anywhere in it still opens
+         the command line (see the click handler in app.ts). Connect lives
+         in the menu view below instead of here (see #context-menu-view);
+         Files/Export moved further still, to their own "Files" application
+         tab (see #files-manager in dashboard.html). Unload's own trigger
+         button is still in the menu view too, but its confirmation no
+         longer renders here at all -- it's a modal-ish decision, not
+         header-scale content, so it shows in the Files tab instead (see
+         #files-unload-confirm there, and setUnloadView() in app.ts, which
+         switches to that tab when it opens this view). -->
+    <div id="context-actions-view" class="data-card-copy context-actions-row"></div>
+
+    <!-- Menu view: opened by the hamburger button instead of the old
+         absolute dropdown -- same row as every other view here, so it
+         shares the same "click empty space -> command line" affordance
+         (see the click handler in app.ts) as the default view above. -->
+    <div id="context-menu-view" class="data-card-copy context-actions-row hidden">
+      <button id="context-connect-menu" type="button" class="context-connect-button hidden">Connect</button>
+      <button id="context-unload-menu" type="button" class="context-connect-button danger">Unload</button>
+    </div>
+
+    <!-- Command line view -->
+    <div id="context-command-view" class="data-card-copy context-command-row hidden">
+      <input
+        id="context-command-input"
+        type="text"
+        placeholder="files · export · unload · connect <host> · disconnect"
+        autocomplete="off"
+        spellcheck="false"
+        autocapitalize="off"
+        autocorrect="off"
+      />
+      <!-- Command submit/esc button moved to right column (see #context-actions) -->
+    </div>
+
+    <!-- Connect / alias edit form -->
+    <div
+      id="context-connect-form"
+      class="data-card-copy context-command-row hidden"
+    >
+      <div class="connect-field">
+        <span class="connect-prefix">
+          <span id="connect-prefix-text" aria-hidden="true">hosts</span>
+          <span
+            id="context-connect-status"
+            class="alias-status-icon hidden"
+            role="status"
+            aria-label="Alias availability unknown"
+          ></span>
+        </span>
+        <div class="connect-input">
+          <input
+            id="context-connect-url"
+            type="text"
+            placeholder="example.did.md"
+            autocomplete="off"
+            data-protonpass-ignore="true"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore
+            data-form-type="other"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+          />
+          <div class="connect-suffix" aria-hidden="true"><span id="connect-suffix-mirror"></span><span id="connect-suffix-ghost"></span></div>
+        </div>
+      </div>
+      <!-- Connect trailing actions moved to right column (see #context-actions) -->
+    </div>
+
+  </div>
+
+  <div class="context-window-column right">
+    <!-- Contextual actions (back/return/submit) -- appears in place of hamburger when needed -->
+    <div id="context-actions" class="hidden">
+      <!-- Command submit/esc -->
+      <button
+        id="context-command-submit"
+        class="context-connect-button context-connect-confirm"
+        type="button"
+        aria-label="Back"
+      >
+        <svg
+          id="context-command-icon-esc"
+          class="input-mode-icon-esc"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <svg
+          id="context-command-icon-return"
+          class="input-mode-icon-enter hidden"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="9 10 4 15 9 20"></polyline>
+          <path d="M20 4v7a4 4 0 0 1-4 4H4"></path>
+        </svg>
+      </button>
+
+      <!-- Connect trailing actions (status + esc/enter) -->
+      <span class="context-connect-trailing">
+        <button
+          id="context-connect-toggle"
+          class="context-connect-button context-connect-confirm hidden"
+          type="button"
+          aria-label="Cancel"
+        >
+          <svg
+            id="context-connect-icon-esc"
+            class="input-mode-icon-esc"
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          <svg
+            id="context-connect-icon-enter"
+            class="input-mode-icon-enter hidden"
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="9 10 4 15 9 20"></polyline>
+            <path d="M20 4v7a4 4 0 0 1-4 4H4"></path>
+          </svg>
+        </button>
+      </span>
+
+      <!-- Menu view close button -->
+      <button
+        id="context-menu-close"
+        class="context-connect-button context-connect-confirm"
+        type="button"
+        aria-label="Close"
+      >
+        <svg
+          class="input-mode-icon-esc"
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Default: hamburger menu button (appears when no contextual action).
+         Clicking it opens #context-menu-view inline in the middle column
+         (see setMenuView in app.ts) instead of the absolute dropdown this
+         used to open. -->
+    <button
+      id="context-menu-button"
+      class="data-card-menu-button"
+      type="button"
+      aria-label="Hosted data menu"
+      aria-expanded="false"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="18"
+        height="18"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="5" r="1.5" />
+        <circle cx="12" cy="12" r="1.5" />
+        <circle cx="12" cy="19" r="1.5" />
+      </svg>
+    </button>
+  </div>
+</div>

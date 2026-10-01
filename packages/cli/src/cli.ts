@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { buildDidJson } from "../../wallet/src/github-host.ts";
+import { hostForDid } from "../../wallet/src/host.ts";
 import { Identity } from "../../wallet/src/identity.ts";
 import { didToLogUrl, parseLog, resolveDidWebvh, resolveLog } from "../../webvh/src/index.ts";
 
@@ -33,6 +34,7 @@ Usage: dito <command> [options]
   fetch <did>               Download a published log to --log (public; no secret needed)
   export                    Write .well-known/did.jsonl + did.json from the log (no secret needed)
   export --jwe              Write <scid>.jwe: log + keyring wrapped by the mnemonic (needs the mnemonic)
+  publish                   PUT the whole log to the host its DID names (no secret; GitHub hosts need $GITHUB_TOKEN)
   import <scid>.jwe         Restore the log from a .jwe with the mnemonic
   domain <host>             Re-home on your own domain/apex, write .well-known/did.jsonl + did.json
   connect <username>        Host on <username>.did.md   (--domain to change)
@@ -177,6 +179,17 @@ export async function run(argv: string[], io: IO): Promise<number> {
         writeFileSync(join(out, "did.jsonl"), text.endsWith("\n") ? text : `${text}\n`);
         writeFileSync(join(out, "did.json"), buildDidJson(resolved.doc, resolved.did));
         emit({ did: resolved.did, versionId: resolved.meta.versionId, wrote: out }, `Wrote did.jsonl and did.json for ${resolved.did} (${resolved.meta.versionId}) to ${out}/`);
+        return 0;
+      }
+      case "publish": {
+        // Needs no secret: PUT of the full log, which the host validates itself.
+        const entries = parseLog(readLog());
+        const did = (await resolveLog(entries)).did;
+        const result = await hostForDid(did).publish({ entries: entries as never, mode: "replace", credential: token(), message: `Publish ${entries.at(-1)!.versionId}` });
+        // Read it back from the DID's own location and verify, as the protocol asks.
+        const live = await resolveDidWebvh(did);
+        emit({ did, logUrl: result.logUrl, versionId: live.meta.versionId, verified: live.meta.versionId === entries.at(-1)!.versionId },
+          `Published ${did}\n${result.logUrl}\nverified: ${live.meta.versionId}`);
         return 0;
       }
       case "import": {

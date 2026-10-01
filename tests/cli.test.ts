@@ -126,3 +126,28 @@ test("export --jwe / import: <scid>.jwe + mnemonic restores an apex (username-le
   await run(["new", "--log", join(d, "x.jsonl"), "--json"], other.io);
   expect(await run(["import", wrote, "--log", join(d, "y.jsonl")], harness({ DITO_MNEMONIC: JSON.parse(other.out).mnemonic }).io)).not.toBe(0);
 });
+
+test("publish: PUTs the log to a third-party host at an apex domain, then re-publishes after an update", async () => {
+  const { createReferenceHost } = await import("../packages/webvh/src/index.ts");
+  const handler = createReferenceHost();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => handler(new Request(input, init))) as typeof fetch;
+  try {
+    const d = dir(), log = join(d, "did.jsonl");
+    const made = harness();
+    await run(["new", "--log", log, "--json"], made.io);
+    const env = { DITO_MNEMONIC: JSON.parse(made.out).mnemonic };
+    await run(["domain", "digitalcommons.example", "--log", log, "--out", d], harness(env).io);
+
+    const first = harness();
+    expect(await run(["publish", "--log", log, "--json"], first.io)).toBe(0);
+    const result = JSON.parse(first.out);
+    expect(result.logUrl).toBe("https://digitalcommons.example/.well-known/did.jsonl");
+    expect(result.verified).toBe(true);
+
+    await run(["rotate", "--log", log, "--local"], harness(env).io);
+    const second = harness();
+    expect(await run(["publish", "--log", log, "--json"], second.io)).toBe(0);
+    expect(JSON.parse(second.out).versionId.startsWith("3-")).toBe(true);
+  } finally { globalThis.fetch = realFetch; }
+});

@@ -60,3 +60,38 @@ test("failure modes: refuses to overwrite, wrong mnemonic, tampered log, missing
   expect(await run(["frobnicate"], harness().io)).toBe(2);
   expect(mnemonic).toBeTruthy();
 });
+
+test("domain: re-home on an apex (BYO domain) offline, emitting did.jsonl + did:web did.json that verify", async () => {
+  const d = dir(), log = join(d, "did.jsonl");
+  const made = harness();
+  await run(["new", "--log", log, "--json"], made.io);
+  const env = { DITO_MNEMONIC: JSON.parse(made.out).mnemonic };
+
+  const moved = harness(env);
+  expect(await run(["domain", "digitalcommons.jp", "--log", log, "--out", d, "--json"], moved.io)).toBe(0);
+  const result = JSON.parse(moved.out);
+  expect(result.did.endsWith(":digitalcommons.jp")).toBe(true);
+  expect(result.didWeb).toBe("did:web:digitalcommons.jp");
+
+  const didJson = JSON.parse(readFileSync(join(d, ".well-known", "did.json"), "utf8"));
+  expect(didJson.id).toBe("did:web:digitalcommons.jp");
+  expect(await run(["verify", join(d, ".well-known", "did.jsonl")], harness().io)).toBe(0);
+
+  expect(await run(["domain", "not a host", "--log", log, "--out", d], harness(env).io)).not.toBe(0);
+});
+
+test("export: regenerates did.jsonl + did.json after an update, without a secret", async () => {
+  const d = dir(), log = join(d, "did.jsonl");
+  const made = harness();
+  await run(["new", "--log", log, "--json"], made.io);
+  const env = { DITO_MNEMONIC: JSON.parse(made.out).mnemonic };
+  await run(["domain", "digitalcommons.jp", "--log", log, "--out", d], harness(env).io);
+  expect(await run(["service", "add", "#files", "relativeRef", "https://digitalcommons.jp/", "--log", log, "--local"], harness(env).io)).toBe(0);
+
+  const out = join(d, "site");
+  expect(await run(["export", "--log", log, "--out", out], harness().io)).toBe(0);
+  const didJson = JSON.parse(readFileSync(join(out, ".well-known", "did.json"), "utf8"));
+  expect(didJson.id).toBe("did:web:digitalcommons.jp");
+  expect(didJson.service.some((s: any) => s.id === "#files")).toBe(true);
+  expect(await run(["verify", join(out, ".well-known", "did.jsonl")], harness().io)).toBe(0);
+});

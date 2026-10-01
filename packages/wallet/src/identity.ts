@@ -22,6 +22,7 @@ import {
   spareFromMasterSeed,
   type ControllerKey,
 } from "./did-webvh.ts";
+import { buildDidJson } from "./github-host.ts";
 import { hostForDid, isProvisionalHostlessDid, type IdentityHost, type PublishResult } from "./host.ts";
 import { githubDidLocation, publishToGitHub, verifyToken, type PublishProgress } from "./github-host.ts";
 import type { Entry } from "./webvh-core.ts";
@@ -152,7 +153,7 @@ export class Identity {
   }
 
   /** The portability entry that gives this identity `<username>.<domain>`. */
-  async prepareMove(target: { username: string; domain: string }): Promise<PreparedStep> {
+  async prepareMove(target: { username?: string; domain: string }): Promise<PreparedStep> {
     const moved = await preparePortableImport({ entries: this._entries, ...target, masterSeed: this.masterSeed });
     return { entries: [...this._entries, moved.entry], entry: moved.entry, nextSpareIndex: moved.nextSpareIndex, previousDid: this.did };
   }
@@ -197,6 +198,22 @@ export class Identity {
     const previous = { did: this.did, sign: this._sign };
     await this.commit(step);
     return { ...result, ...(await this.removeOld(previous.did, previous.sign)) };
+  }
+
+  /**
+   * Bring-your-own domain: re-home the identity on `host` itself (apex or any
+   * subdomain) locally. Nothing is published; the caller serves the log
+   * (`did.jsonl`) and the did:web mirror (`did.json`) under
+   * `https://<host>/.well-known/`, or PUTs the log to a host that speaks the
+   * hosting protocol. The old host copy is not touched.
+   */
+  async moveToDomain(host: string): Promise<{ did: string; didWeb: string; didJson: string; previousDid: string }> {
+    host = host.trim().toLowerCase();
+    if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host)) throw new Error(`"${host}" is not a fully-qualified domain name.`);
+    const step = await this.prepareMove({ domain: host });
+    await this.commit(step);
+    const did = step.entry.state.id as string;
+    return { did, didWeb: `did:web:${host}`, didJson: buildDidJson(step.entry.state, did), previousDid: step.previousDid! };
   }
 
   /** Host on `<login>.github.io` (login taken from the token). */

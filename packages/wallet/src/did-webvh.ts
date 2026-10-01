@@ -206,8 +206,13 @@ export function spareFromMnemonic(value: string): ControllerKey {
   return controllerFromPrivate(seedFromMnemonic(value, "Spare Key mnemonic"));
 }
 
-function didFor(scid: string, username: string, domain: string): string {
-  return `did:webvh:${scid}:${username}.${domain}`;
+/** `<username>.<domain>`, or the bare `domain` (an apex / bring-your-own host) when there is no username. */
+function hostOf(username: string | undefined, domain: string): string {
+  return username ? `${username}.${domain}` : domain;
+}
+
+function didFor(scid: string, username: string | undefined, domain: string): string {
+  return `did:webvh:${scid}:${hostOf(username, domain)}`;
 }
 
 export async function signEntry(unsigned: object, privateKey: Uint8Array, verificationKey: string, created: string): Promise<any> {
@@ -328,10 +333,10 @@ export async function buildGenesis(args: {
  * portability entry with their own current update-key implementation.
  */
 export async function preparePortableImport(args: {
-  entries: any[]; username: string; domain: string; masterSeed: Uint8Array;
+  entries: any[]; username?: string; domain: string; masterSeed: Uint8Array;
 }): Promise<{ entry: any; state: any; did: string; root: ControllerKey; nextSpareIndex: number }> {
   if (!Array.isArray(args.entries) || !args.entries.length) throw new Error("The DID log is empty.");
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(args.username)) throw new Error("Username must be a lowercase DNS-label-like identifier.");
+  if (args.username !== undefined && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(args.username)) throw new Error("Username must be a lowercase DNS-label-like identifier.");
   const first = args.entries[0];
   const latest = args.entries.at(-1);
   if (!first?.parameters || typeof first.parameters.scid !== "string") throw new Error("The DID log has no genesis SCID.");
@@ -370,7 +375,7 @@ export async function preparePortableImport(args: {
     state,
     masterSeed: args.masterSeed,
     currentSpareIndex: nextSpareIndex,
-    domain: `${args.username}.${args.domain}`,
+    domain: hostOf(args.username, args.domain),
   });
   if (prepared.entry.state.id !== did) throw new Error("The moved DID does not match the requested location.");
   return { entry: prepared.entry, state: prepared.entry.state, did, root, nextSpareIndex: prepared.nextSpareIndex };
@@ -425,7 +430,7 @@ export async function preparePortableJwkImport(args: {
   return { entry, state: entry.state, did, preRotationDisabled: usesPreRotation };
 }
 
-function retargetPortableDidDocument(source: any, oldDid: string, did: string, username: string, domain: string): any {
+function retargetPortableDidDocument(source: any, oldDid: string, did: string, username: string | undefined, domain: string): any {
   const replace = (value: any): any => {
     if (typeof value === "string") return value.split(oldDid).join(did);
     if (Array.isArray(value)) return value.map(replace);
@@ -443,8 +448,8 @@ function retargetPortableDidDocument(source: any, oldDid: string, did: string, u
   if (Array.isArray(state.service)) {
     for (const service of state.service) {
       if (!service || typeof service !== "object") continue;
-      if (service.id === "#files" || service.id === `${did}#files`) service.serviceEndpoint = `https://${username}.${domain}/`;
-      if (service.id === "#whois" || service.id === `${did}#whois`) service.serviceEndpoint = `https://${username}.${domain}/whois.vp`;
+      if (service.id === "#files" || service.id === `${did}#files`) service.serviceEndpoint = `https://${hostOf(username, domain)}/`;
+      if (service.id === "#whois" || service.id === `${did}#whois`) service.serviceEndpoint = `https://${hostOf(username, domain)}/whois.vp`;
     }
   }
   return state;

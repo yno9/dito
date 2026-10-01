@@ -8,8 +8,10 @@
  *           A GitHub token comes from $GITHUB_TOKEN (or --token-env NAME).
  * Output:   human text by default; --json prints one JSON object (agents).
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { buildDidJson } from "../../wallet/src/github-host.ts";
 import { Identity } from "../../wallet/src/identity.ts";
 import { didToLogUrl, parseLog, resolveDidWebvh, resolveLog } from "../../webvh/src/index.ts";
 
@@ -29,6 +31,8 @@ Usage: dito <command> [options]
   show                      Print the DID, host and DID Document (no secret needed)
   verify [file|url|did]     Validate a log (default: --log); a did:webvh DID is fetched with its witness file
   fetch <did>               Download a published log to --log (public; no secret needed)
+  export                    Write .well-known/did.jsonl + did.json from the log (no secret needed)
+  domain <host>             Re-home on your own domain/apex, write .well-known/did.jsonl + did.json
   connect <username>        Host on <username>.did.md   (--domain to change)
   github                    Host on <login>.github.io   (token from $GITHUB_TOKEN)
   rotate                    Rotate the Sign key
@@ -41,6 +45,8 @@ Options
   --mnemonic-file <file>    Read the 24-word mnemonic from a file ($DITO_MNEMONIC also works)
   --json                    Machine-readable output
   --api <url>               new: wallet API for the #udi-wallet-issuer service
+  --local                   rotate/service: update the log only, never contact the host (use with export)
+  --out <dir>               domain/export: output directory (default .)
   --domain <domain>         connect: hosting domain (default did.md)
   --token-env <NAME>        github/rotate/...: env var holding the GitHub token
 `;
@@ -58,6 +64,8 @@ export async function run(argv: string[], io: IO): Promise<number> {
         json: { type: "boolean", default: false },
         api: { type: "string" },
         domain: { type: "string" },
+        out: { type: "string" },
+        local: { type: "boolean" },
         "token-env": { type: "string", default: "GITHUB_TOKEN" },
         help: { type: "boolean", short: "h", default: false },
       },
@@ -135,6 +143,30 @@ export async function run(argv: string[], io: IO): Promise<number> {
           `Published ${identity.did}\n${result.logUrl}${result.cleanupError ? `\nwarning: previous host not cleaned up: ${result.cleanupError.message}` : ""}`);
         return 0;
       }
+      case "domain": {
+        if (!rest[0]) throw new UsageError("Usage: dito domain <host> [--out <dir>]   e.g. dito domain digitalcommons.jp");
+        const identity = await open();
+        const moved = await identity.moveToDomain(rest[0]);
+        save(identity);
+        const out = join(values.out ?? ".", ".well-known");
+        mkdirSync(out, { recursive: true });
+        writeFileSync(join(out, "did.jsonl"), identity.logText());
+        writeFileSync(join(out, "did.json"), moved.didJson);
+        emit({ ...summary(identity), didWeb: moved.didWeb, previousDid: moved.previousDid, wrote: out },
+          `${moved.did}\n${moved.didWeb}\nWrote did.jsonl and did.json to ${out}/\nServe them at https://${rest[0].toLowerCase()}/.well-known/ (CORS: Access-Control-Allow-Origin: *), then: dito verify ${moved.did}`);
+        return 0;
+      }
+      case "export": {
+        const text = readLog();
+        const log = parseLog(text);
+        const resolved = await resolveLog(log);
+        const out = join(values.out ?? ".", ".well-known");
+        mkdirSync(out, { recursive: true });
+        writeFileSync(join(out, "did.jsonl"), text.endsWith("\n") ? text : `${text}\n`);
+        writeFileSync(join(out, "did.json"), buildDidJson(resolved.doc, resolved.did));
+        emit({ did: resolved.did, versionId: resolved.meta.versionId, wrote: out }, `Wrote did.jsonl and did.json for ${resolved.did} (${resolved.meta.versionId}) to ${out}/`);
+        return 0;
+      }
       case "github": {
         const value = token();
         if (!value) throw new UsageError(`Set ${values["token-env"]} to a GitHub classic PAT with the repo scope.`);
@@ -157,8 +189,8 @@ export async function run(argv: string[], io: IO): Promise<number> {
             edit = state => ({ ...state, service: (state.service ?? []).filter((s: any) => s.id !== id) });
           } else throw new UsageError("Usage: dito service add <id> <type> <endpoint> | dito service remove <id>");
         }
-        if (identity.isProvisional) {
-          // No host yet: the change is local until `connect`/`github`.
+        if (identity.isProvisional || values.local) {
+          // No host yet, or a self-hosted domain (`--local`): the change stays in the log; `dito export` writes the files to serve.
           await identity.commit(await identity.prepareUpdate(edit ? edit(JSON.parse(JSON.stringify(identity.state))) : identity.state));
         } else {
           await identity.publishUpdate(edit, { credential: token() });

@@ -150,6 +150,10 @@ test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", asy
     expect(payload.redirect_uri).toBeUndefined();
     expect(typeof payload.nonce).toBe("string");
     expect(payload.nonce.length).toBeGreaterThan(0);
+    // The downstream app, as the bridge asserts it inside its signed request: a name (its host
+    // when its config has none) and its home, so the wallet can show name, domain and "via".
+    const home = new URL(forgejoRedirect);
+    expect(payload.client_metadata).toEqual({ client_name: home.host, client_uri: home.origin });
   });
 
   test("PLAN8: POSTing a valid id_token to /authorize/direct-callback completes the downstream flow", async () => {

@@ -29,6 +29,7 @@ import {
   savePortableApplications,
   saveWalletDeviceBinding,
   saveWalletOAuthGrant,
+  deleteWalletOAuthGrants,
   saveDidLogSnapshot,
   unlockMasterStoredIdentity,
   unlockPasswordStoredIdentity,
@@ -386,12 +387,15 @@ function updateIdentityOptionsVisibility() {
 function fieldGroup(heading, entries) {
   const group = document.createElement("div");
   group.className = "field-group";
-  const title = document.createElement("h4");
-  title.textContent = heading;
   const details = document.createElement("dl");
   details.className = "fields";
   for (const [label, value] of entries) details.append(fact(label, value));
-  group.append(title, details);
+  if (heading) {
+    const title = document.createElement("h4");
+    title.textContent = heading;
+    group.append(title);
+  }
+  group.append(details);
   return group;
 }
 
@@ -687,6 +691,28 @@ let hoverToastActive = false;
 let actionToast = null; // { message, error } | null -- whatever's currently "live"
 let actionToastTimer = null;
 
+// The Authorize card and the system-message toast are both bottom sheets, and
+// two at once cover each other. So the card is treated as the system-message
+// surface while it is open: text messages are shown inside it (its own
+// #wallet-authorize-message line) and the toast sheet stays closed; when the
+// card closes, that line is cleared and messages use the toast again.
+function authorizeCardOpen() {
+  const panel = query("#wallet-authorize-panel");
+  return Boolean(panel && !panel.classList.contains("hidden"));
+}
+
+function setAuthorizeMessage(message, error) {
+  const line = query("#wallet-authorize-message");
+  if (!line) return;
+  line.textContent = message ?? "";
+  line.classList.toggle("hidden", !message);
+  line.classList.toggle("error", Boolean(message) && Boolean(error));
+}
+
+// What the toast is currently telling the user (null when nothing), so a
+// message that is up when the Authorize card opens can move into the card.
+let shownToast = null;
+
 function paintContextToast(message, error) {
   // Lives directly under <body>, not in a header template: a header ancestor
   // with a transform/filter would make "fixed" relative to it, not the
@@ -706,6 +732,12 @@ function paintContextToast(message, error) {
       <svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
     </button><span class="context-toast-text"></span>`;
     toast.querySelector(".context-toast-close").addEventListener("click", dismissActionToast);
+  }
+  shownToast = message ? { message, error: Boolean(error) } : null;
+  if (authorizeCardOpen()) {
+    setAuthorizeMessage(message, error);
+    toast.classList.remove("is-open");
+    return;
   }
   if (message) {
     toast.querySelector(".context-toast-text").textContent = message;
@@ -731,6 +763,10 @@ function showActionToast(message, error = false) {
 // Outside click or Escape dismisses the toast right away; clicks on the
 // toast itself do nothing.
 function dismissActionToast() {
+  // While the Authorize card is the open sheet, its message belongs to the card:
+  // clicking the card (or anywhere else on the page) must not wipe it. It goes
+  // when the card closes, when a new message replaces it, or after 60 s.
+  if (authorizeCardOpen()) return;
   if (!actionToast && !hoverToastActive) return;
   if (actionToastTimer) clearTimeout(actionToastTimer);
   actionToastTimer = null;
@@ -1119,7 +1155,8 @@ function fact(label, value, valueClass = "") {
   const term = document.createElement("dt");
   term.textContent = label;
   const description = document.createElement("dd");
-  description.textContent = value;
+  if (value instanceof Node) description.append(value);
+  else description.textContent = value;
   if (valueClass) description.className = valueClass;
   fragment.append(term, description);
   return fragment;
@@ -1142,6 +1179,72 @@ function grantDate(value) {
   return Number.isNaN(time) ? value : new Date(time).toLocaleString();
 }
 
+// Scope as tags (same look as the Authorize card).
+function scopeTags(scopes) {
+  const box = document.createElement("span");
+  box.className = "scope-tags";
+  box.append(...scopes.map(scope => { const tag = document.createElement("code"); tag.textContent = scope; return tag; }));
+  return box;
+}
+
+// The card heading: the name given when approving (else what the app calls itself, else its
+// host), with a pencil to rename it. The name is browser-local, stored with the grant.
+function appNameHeading(grants, bindingsByDevice, clientName) {
+  const heading = document.createElement("h4");
+  heading.className = "device-card-name";
+  const fallback = didHost(clientName) ?? clientName;
+  const stored = grants.find(grant => grant.label)?.label
+    ?? grants.map(grant => bindingsByDevice.get(`${grant.did}\n${grant.deviceJkt}`)?.label).find(Boolean);
+  const text = document.createElement("span");
+  text.textContent = stored ?? fallback;
+  const input = document.createElement("input");
+  input.className = "hidden";
+  input.maxLength = 160;
+  input.setAttribute("aria-label", "App name (stored only in this browser)");
+  for (const [name, value] of [["autocomplete", "off"], ["data-1p-ignore", ""], ["data-lpignore", "true"], ["data-bwignore", ""], ["data-form-type", "other"], ["data-protonpass-ignore", "true"]]) input.setAttribute(name, value);
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "wallet-authorize-edit";
+  edit.setAttribute("aria-label", "Rename");
+  edit.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>`;
+  edit.addEventListener("mousedown", event => event.preventDefault());
+  let editing = false;
+  const finish = async save => {
+    if (!editing) return;
+    editing = false;
+    const label = input.value.trim() || fallback;
+    input.classList.add("hidden");
+    text.classList.remove("hidden");
+    if (!save || label === text.textContent) return;
+    try {
+      for (const grant of grants) {
+        await saveWalletOAuthGrant({ ...grant, label });
+        const binding = bindingsByDevice.get(`${grant.did}\n${grant.deviceJkt}`);
+        if (binding) await saveWalletDeviceBinding({ ...binding, label });
+      }
+      text.textContent = label;
+    } catch (error) {
+      output("#loaded-identity-message", `Could not rename: ${errorMessage(error)}`, true);
+    }
+  };
+  edit.addEventListener("click", () => {
+    if (editing) { void finish(true); return; }
+    editing = true;
+    input.value = text.textContent;
+    text.classList.add("hidden");
+    input.classList.remove("hidden");
+    input.focus();
+    input.select();
+  });
+  input.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); void finish(true); }
+    else if (event.key === "Escape") { event.stopPropagation(); void finish(false); }
+  });
+  input.addEventListener("blur", () => void finish(true));
+  heading.append(text, input, edit);
+  return heading;
+}
+
 async function renderWalletGrants() {
   const target = query("#wallet-grant-list");
   if (!target) return;
@@ -1161,20 +1264,25 @@ async function renderWalletGrants() {
     // same app -- not repeat approvals from the same one.
     const byClient = new Map();
     for (const grant of oauthGrants) {
-      const forClient = byClient.get(grant.clientId) ?? [];
+      // Apps behind one relying party (Forgejo and Outline behind one bridge) share a clientId; appKey splits them.
+      const key = `${grant.clientId}\n${grant.appKey ?? ""}`;
+      const forClient = byClient.get(key) ?? [];
       forClient.push(grant);
-      byClient.set(grant.clientId, forClient);
+      byClient.set(key, forClient);
     }
     for (const grants of byClient.values()) {
-      const [{ clientName, did }] = grants;
+      const [{ clientName }] = grants;
       const card = document.createElement("div");
       card.className = "record-card device-card";
-      const title = document.createElement("h4");
-      title.textContent = clientName;
-      const identity = document.createElement("dl");
-      identity.className = "fields";
-      identity.append(fact("Identity", did));
-      card.append(title, identity);
+      card.append(appNameHeading(grants, bindingsByDevice, clientName));
+      // Where the app lives (as its relying party asserted) and who vouched for that.
+      const appKey = grants.find(grant => grant.appKey)?.appKey;
+      if (appKey) {
+        const source = document.createElement("p");
+        source.className = "hint app-card-source";
+        source.textContent = `${appKey} · via ${didHost(grants[0].clientId) ?? grants[0].clientId}`;
+        card.append(source);
+      }
       for (const grant of grants) {
         const binding = bindingsByDevice.get(`${grant.did}\n${grant.deviceJkt}`);
         // Both are stored under the same capability id (see saveWalletOAuthGrant
@@ -1184,10 +1292,12 @@ async function renderWalletGrants() {
         const applicationReferences = portableApplications.filter(application => application.id === grant.id);
         const usedServices = [...new Set(applicationReferences.flatMap(application => (application.services ?? []).map(service => service.id)))];
         const usedKeys = [...new Set(applicationReferences.flatMap(application => application.keyIds))];
-        const device = fieldGroup(binding?.label ?? (grant.deviceJkt ? "Device" : "Session"), [
-          ["Scope", grant.scope.join(", ")],
+        // The app's name is the card's heading; a per-device heading only earns its place when
+        // the same app has several devices/sessions to tell apart.
+        const device = fieldGroup(grants.length > 1 ? (binding?.label ?? (grant.deviceJkt ? "Device" : "Session")) : null, [
+          ["Scope", scopeTags(grant.scope)],
           ...(binding?.didCommKeyId ? [["DIDComm key", binding.didCommKeyId]] : []),
-          [grant.deviceJkt ? "Device thumbprint" : "Session", grant.deviceJkt ?? `${grant.clientName} session (no device key)`],
+          [grant.deviceJkt ? "Device thumbprint" : "Session", grant.deviceJkt ?? grant.clientName],
           ["Capability ID", grant.id],
         ]);
         const meta = document.createElement("p");
@@ -1200,6 +1310,20 @@ async function renderWalletGrants() {
         ]));
         card.append(device);
       }
+      // There is no revocation (a capability is short-lived and expires by itself): this only
+      // removes the record kept in this browser.
+      const forget = document.createElement("button");
+      forget.type = "button";
+      forget.className = "link-like";
+      forget.textContent = "Forget this app";
+      forget.title = "Removes this record from this browser. It does not revoke access; the session expires on its own.";
+      forget.addEventListener("click", async () => {
+        try {
+          await deleteWalletOAuthGrants(grants.map(grant => grant.id));
+          await renderWalletGrants();
+        } catch (error) { output("#loaded-identity-message", `Could not forget: ${errorMessage(error)}`, true); }
+      });
+      card.append(forget);
       target.append(card);
     }
   } catch (error) {
@@ -3325,18 +3449,53 @@ async function loadIdentity(username, enteredMaster, password = "") {
   }
 }
 
+// The application's name as the person will see it: what it calls itself (via the RP's signed
+// request), else its host, else its identifier. Editable; the edit is the device label saved with
+// the grant.
+function authorizeDefaultName() {
+  const request = walletAuthorization;
+  return request.clientDisplayName ?? request.clientDisplayHost ?? didHost(request.clientName) ?? request.clientName;
+}
+
+function showAuthorizeName() {
+  const label = query("#wallet-authorize-device-label").value.trim() || authorizeDefaultName();
+  query("#wallet-authorize-name").textContent = label;
+  query("#wallet-authorize-title").textContent = label;
+}
+
+function setAuthorizeNameEditing(editing) {
+  const input = query("#wallet-authorize-device-label");
+  if (!editing && !input.value.trim() && walletAuthorization) input.value = authorizeDefaultName();
+  query("#wallet-authorize-name").classList.toggle("hidden", editing);
+  input.classList.toggle("hidden", !editing);
+  if (editing) { input.focus(); input.select(); }
+  else if (walletAuthorization) showAuthorizeName();
+}
+
 function renderWalletAuthorization() {
   const panel = query("#wallet-authorize-panel");
   if (!panel) return;
+  const wasOpen = !panel.classList.contains("hidden");
   panel.classList.toggle("hidden", !walletAuthorization);
+  if (wasOpen !== Boolean(walletAuthorization)) {
+    // One bottom sheet at a time: opening moves a live message into the card,
+    // closing drops the in-card line.
+    if (walletAuthorization) {
+      if (shownToast) paintContextToast(shownToast.message, shownToast.error);
+      else setAuthorizeMessage("", false);
+    } else {
+      setAuthorizeMessage("", false);
+      shownToast = null;
+    }
+  }
   if (!walletAuthorization) return;
   // clientName is a did:webvh identifier for a SIOPv2 relying party (its own
   // client_name never having been registered anywhere) -- show just its
   // host segment (e.g. "oidc-bridge.did.md") instead of the full DID, same
   // as elsewhere in this app. Non-DID client names (an OAuth client_name
   // string) pass through unchanged, since didHost returns null for those.
-  query("#wallet-authorize-title").textContent = didHost(walletAuthorization.clientName) ?? walletAuthorization.clientName;
-  query("#wallet-authorize-did").textContent = walletAuthorization.did ?? (loaded?.entries.at(-1).state.id ?? walletAuthorization.loginHint);
+
+  query("#wallet-authorize-app").textContent = walletAuthorization.clientDisplayHost ?? "";
   const scopes = query("#wallet-authorize-scope");
   scopes.replaceChildren(...walletAuthorization.scope.map(scope => {
     const code = document.createElement("code"); code.textContent = scope; return code;
@@ -3359,21 +3518,23 @@ function renderWalletAuthorization() {
   derivedLabel.classList.toggle("hidden", !derivedRequests.length);
   derived.classList.toggle("hidden", !derivedRequests.length);
   if (derivedRequests.length) { const list = document.createElement("ul"); list.replaceChildren(...derivedRequests.map(request => { const item = document.createElement("li"); item.textContent = `Derive a private value from your Root key: ${request.purpose}`; return item; })); derived.replaceChildren(list); }
-  query("#wallet-authorize-device").textContent = walletAuthorization.deviceJkt ?? `${walletAuthorization.clientName} session (no device key)`;
+  // The device key if the application supplied one, otherwise the requesting application
+  // itself (its full DID for a did:webvh client).
+  query("#wallet-authorize-device").textContent = walletAuthorization.deviceJkt ?? walletAuthorization.clientName;
   const deviceLabel = query("#wallet-authorize-device-label");
   const requestKey = walletAuthorization.state ?? walletAuthorization.requestId ?? "";
   if (deviceLabel.dataset.requestKey !== requestKey) {
-    deviceLabel.value = walletAuthorization.clientName;
+    deviceLabel.value = authorizeDefaultName();
     deviceLabel.dataset.requestKey = requestKey;
   }
+  showAuthorizeName();
   // renderWalletAuthorization re-runs on every unrelated renderSync (tab
   // switches, unlock, etc.), not just when a genuinely new request arrives
   // -- reset the card to its collapsed/not-editing default only the first
   // time this particular request is rendered, the same guard deviceLabel's
   // own value reset above already uses.
   if (panel.dataset.requestKey !== requestKey) {
-    query("#wallet-authorize-details").classList.add("hidden");
-    query("#wallet-authorize-device-edit").classList.add("hidden");
+    setAuthorizeNameEditing(false);
     panel.dataset.requestKey = requestKey;
   }
   query("#wallet-authorize-expires").textContent = new Date(Date.now() + DEVICE_CAPABILITY_GRANT_MS).toLocaleString();
@@ -3387,7 +3548,7 @@ function renderWalletAuthorization() {
     // discover that the tab auto-locked. Its click handler opens the same
     // header unlock prompt and shakes the lock icon.
     approve.disabled = false;
-    status.textContent = "This identity is locked. Approve will ask you to unlock it first.";
+    status.textContent = "";
   } else if (walletAuthorization.did && loaded.entries.at(-1).state.id !== walletAuthorization.did) {
     approve.disabled = true;
     status.textContent = "A different identity is loaded in this tab. Load the identity requested above.";
@@ -3396,8 +3557,11 @@ function renderWalletAuthorization() {
     status.textContent = "A different identity is loaded in this tab. Load the identity requested by this application.";
   } else {
     approve.disabled = false;
-    status.textContent = "This identity is loaded in this tab. Approval signs a public capability; no private key will be sent to the client.";
+    status.textContent = "";
   }
+  // Nothing to say when all is well (loaded, or locked and Approve will ask for the
+  // passphrase): only problems get a line, and an empty one would leave a gap.
+  status.classList.toggle("hidden", !status.textContent);
 }
 
 const PENDING_AUTHORIZE_SEARCH_KEY = "did-md-pending-authorize-search";
@@ -3514,7 +3678,17 @@ async function jarAuthorizationParameters(clientId, jwt) {
     if (!login) throw new Error("The login hint must be a did.md hostname.");
     username = login.groups.username;
   }
+  // What the application calls itself (OID4VP client_metadata.client_name, inside the RP's signed request).
+  const rawName = payload.client_metadata?.client_name;
+  const clientDisplayName = typeof rawName === "string" && rawName.trim() && rawName.length <= 160 ? rawName.trim() : undefined;
+  // The app's home as the RP asserts it (client_uri): only its host is kept, and only for https.
+  let clientDisplayHost;
+  try {
+    const uri = new URL(payload.client_metadata?.client_uri ?? "");
+    if (uri.protocol === "https:" && !uri.username && !uri.password && uri.host.length <= 160) clientDisplayHost = uri.host;
+  } catch { /* absent or malformed: no domain shown */ }
   return {
+    clientDisplayName, clientDisplayHost,
     clientId, responseType: payload.response_type, responseMode: directPost ? "direct_post" : undefined,
     codeChallenge: payload.code_challenge,
     deviceJkt: payload.dpop_jkt, loginHint: payload.login_hint, username,
@@ -3583,6 +3757,9 @@ async function oauthAuthorizationParameters() {
   };
 }
 
+// Settles when the boot-time read of the stored identity has finished.
+let identityRestored = Promise.resolve();
+
 async function beginOAuthAuthorization() {
   if (location.pathname !== "/authorize") return;
   // An invalid request must not leave its explanation hidden on the default
@@ -3618,7 +3795,11 @@ async function beginOAuthAuthorization() {
     walletAuthorization = { ...request, clientName };
     renderSync();
     selectTab("home");
-    if (!loaded) {
+    // Only when there is no identity at all. A stored but locked identity already
+    // has one (Approve will ask for its passphrase), so telling the person to
+    // "create or load an identity" would be wrong.
+    await identityRestored;
+    if (!loaded && !storedIdentityRecord) {
       // No identity at all yet lands on the creation screen (see
       // renderRoute's hasIdentity check) -- show this in ITS OWN output
       // field, not #wallet-result, which sits below the (now collapsed,
@@ -3627,7 +3808,7 @@ async function beginOAuthAuthorization() {
       // 2026-09-14). A stored-but-locked identity still lands on the
       // dashboard, where #wallet-result is the right (only) place for it.
       const message = `Create or load an identity to authorize ${clientName}; no private key will be sent to the application.`;
-      output(storedIdentityRecord ? "#wallet-result" : "#create-result", message);
+      output("#create-result", message);
     }
   } catch (error) {
     output("#wallet-result", errorMessage(error), true);
@@ -3672,7 +3853,17 @@ async function oauthDeliver(request, values) {
   // OID4VP's direct_post response mode.
   if (request.responseMode === "direct_post") {
     const response = await fetch(request.responseUri, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(payload) });
-    if (!response.ok) throw new Error(`direct_post delivery failed: ${response.status} ${await response.text()}`);
+    if (!response.ok) {
+      const text = await response.text();
+      let detail = text;
+      try { detail = JSON.parse(text)?.error_description ?? text; } catch { /* not JSON: show it as is */ }
+      // The relying party's request state lives a few minutes and works once: an old
+      // tab, a reload after a wait, or a second Approve all end up here.
+      if (/state is invalid/i.test(detail)) {
+        throw new Error("This sign-in request has expired or was already used. Go back to the application and start again.");
+      }
+      throw new Error(`The application did not accept the response (${response.status}): ${detail}`);
+    }
     const completed = await response.json();
     let completedRedirect;
     try { completedRedirect = new URL(completed?.redirect_uri ?? ""); } catch { throw new Error("The relying party returned an invalid direct_post response."); }
@@ -3804,7 +3995,7 @@ async function approveAuthorization() {
       ...(walletAuthorization.scope.includes("email") ? { email: `${username}@users.did.invalid`, email_verified: false } : {}),
     }, { privateKey: loaded.root.privateKey, did })
     : undefined;
-  await saveWalletOAuthGrant({ id: capability.id, did, clientId: capability.audience, clientName: walletAuthorization.clientName, ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}), scope: capability.scope, issuedAt: capability.issuedAt, expiresAt: capability.expiresAt });
+  await saveWalletOAuthGrant({ id: capability.id, did, clientId: capability.audience, clientName: walletAuthorization.clientName, label: requestedDeviceLabel(authorizeDefaultName()), ...(walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ? { appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName } : {}), ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}), scope: capability.scope, issuedAt: capability.issuedAt, expiresAt: capability.expiresAt });
   if (capability.deviceJkt) await saveAuthorizedDeviceBinding({ did, deviceJkt: capability.deviceJkt, clientName: walletAuthorization.clientName, didCommKeyId: edit?.verificationMethods[0]?.id });
   await saveApplicationAuthorizationMetadata({ capability, edit });
   // PLAN7: "vp_token id_token" delivers straight to the RP -- no
@@ -4462,7 +4653,9 @@ if (location.search && location.pathname !== "/authorize") {
 renderRoute();
 window.addEventListener("popstate", renderRoute);
 if (location.protocol === "file:") window.addEventListener("hashchange", renderRoute);
-void restoreStoredIdentityRecord();
+// beginOAuthAuthorization must know whether a stored identity exists before it
+// decides the person has none, so it waits for this read (see identityRestored).
+identityRestored = restoreStoredIdentityRecord();
 void renderLoadedIdentity();
 void beginOAuthAuthorization();
 
@@ -5029,21 +5222,22 @@ query("#wallet-authorize-cancel").addEventListener("click", () => {
 
 query("#wallet-authorize-edit-device").addEventListener("click", event => {
   event.stopPropagation();
-  const editor = query("#wallet-authorize-device-edit");
-  const opening = editor.classList.contains("hidden");
-  editor.classList.toggle("hidden", !opening);
-  if (opening) query("#wallet-authorize-device-label").focus();
+  setAuthorizeNameEditing(query("#wallet-authorize-device-label").classList.contains("hidden"));
 });
+// Keep focus in the input when the pencil is pressed, so the click closes the editor
+// (instead of blur closing it and the click reopening it).
+query("#wallet-authorize-edit-device").addEventListener("mousedown", event => event.preventDefault());
+{
+  const input = query("#wallet-authorize-device-label");
+  let before = "";
+  input.addEventListener("focus", () => { before = input.value; });
+  input.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); setAuthorizeNameEditing(false); }
+    else if (event.key === "Escape") { event.stopPropagation(); input.value = before; setAuthorizeNameEditing(false); }
+  });
+  input.addEventListener("blur", () => setAuthorizeNameEditing(false));
+}
 
-// Everywhere else on the card (the title/status text, the empty padding --
-// anything not the edit-device button, the device-label editor, or an
-// action button) expands it to show the full DID/scope/device-change
-// details, collapsed by default so the common case (a familiar app,
-// nothing to double check) reads as just a name and an Approve button.
-query("#wallet-authorize-panel").addEventListener("click", event => {
-  if (event.target.closest("button, input, label")) return;
-  query("#wallet-authorize-details").classList.toggle("hidden");
-});
 
 // The card is a fixed bottom sheet, not part of normal document flow, so it
 // can cover page content (the Create button, the Alias toggle, ...) with no
@@ -5158,19 +5352,13 @@ function renderApplicationKeysList() {
   list.replaceChildren();
   const state = loaded?.entries?.at(-1)?.state ?? publicApplicationState;
   const allMethods = Array.isArray(state?.verificationMethod) ? state.verificationMethod : [];
-  // This is the identity's complete key directory. Application metadata adds
-  // context to relevant keys but must not hide Root/authentication methods.
-  const methods = allMethods;
-  // Keep the tab available for an empty public DID Document; its selected
-  // state, not data availability, controls whether this pane is visible.
+  // Authentication methods (e.g. the Root key, pass-1) are shown on the Keys
+  // tab, so they are left out here rather than listed twice.
+  const authentication = Array.isArray(state?.authentication) ? state.authentication : [];
+  const methods = allMethods.filter(method => !authentication.includes(method.id));
+  // The selected tab, not data availability, controls whether this pane is
+  // visible; an empty list simply renders nothing.
   manager.classList.toggle("hidden", currentApplicationTab !== "docs");
-  if (!methods.length) {
-    const empty = document.createElement("p");
-    empty.className = "hint";
-    empty.textContent = "No application keys yet.";
-    list.append(empty);
-    return;
-  }
   for (const method of methods) {
     const relationships = VERIFICATION_RELATIONSHIPS.filter(name => Array.isArray(state[name]) && state[name].includes(method.id));
     const owner = portableApplications.find(application => application.keyIds.includes(method.id));

@@ -725,7 +725,7 @@ button {
 }
 
 button.primary:not(#publish-create) {
-  background: var(--ink);
+  background: var(--accent);
   color: #fff;
   box-shadow: none;
 }
@@ -1698,7 +1698,7 @@ button#creation-confirm-saved.primary {
   margin: 0;
   border: 0;
   border-radius: 0.5rem;
-  background: var(--ink);
+  background: var(--accent);
   color: #fff;
   box-shadow: none;
 }
@@ -2280,9 +2280,6 @@ button#github-host-publish.primary {
 
 /* ---- field groups / record cards ---- */
 
-.field-group {
-  margin-top: 1.2rem;
-}
 
 .field-group:first-child {
   margin-top: 0;
@@ -2303,6 +2300,9 @@ button#github-host-publish.primary {
  * quiet card keeps that relationship legible without making the page heavy. */
 .record-card {
   display: grid;
+  /* One column that may shrink: with the default `auto` track, a long unbreakable
+   * string (a DID) sets the track's minimum and pushes the card past its container. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
 
   padding: 1.5rem;
@@ -3145,3 +3145,156 @@ p {
   }
 }
 
+
+/* System message shown inside the Authorize card while it is the open bottom sheet. */
+#wallet-authorize-message {
+  margin: 0;
+}
+
+#wallet-authorize-message.error {
+  color: var(--danger);
+}
+
+#wallet-authorize-details{
+  padding:0.25rem;
+}
+
+/* Authorize card details: always visible, a tidy label/value grid. */
+#wallet-authorize-details dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.5rem 1.25rem;
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+#wallet-authorize-details dt {
+  color: var(--muted);
+}
+
+#wallet-authorize-details dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* Rows with nothing to show (e.g. the DID while nothing is known) disappear. */
+#wallet-authorize-details dd:empty,
+#wallet-authorize-details dt:has(+ dd:empty) {
+  display: none;
+}
+
+#wallet-authorize-scope,
+.scope-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+#wallet-authorize-scope code,
+.scope-tags code {
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.5rem;
+  background: rgb(0 0 0 / 6%);
+  font: inherit;
+}
+
+#wallet-authorize-details ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+@media (max-width: 576px) {
+  #wallet-authorize-details dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.1rem;
+  }
+
+  #wallet-authorize-details dt:not(:first-child) {
+    margin-top: 0.45rem;
+  }
+}
+
+/* Long identifiers in any card wrap instead of overflowing. */
+.record-card h4,
+.record-card dt,
+.record-card dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Authorize card: the editable name (value, pencil, inline input). */
+#wallet-authorize-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+#wallet-authorize-name-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.2rem 0.5rem;
+  border: 0.05rem solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+}
+
+.wallet-authorize-edit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  padding: 0.2rem;
+  border: 0;
+  border-radius: 0.2rem;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.wallet-authorize-edit:hover,
+.wallet-authorize-edit:focus-visible {
+  color: var(--ink);
+  background: rgb(0 0 0 / 6%);
+}
+
+/* Apps card heading: the app's name, a pencil, and an inline input while renaming. */
+.device-card-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.device-card-name input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.2rem 0.5rem;
+  border: 0.05rem solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+}
+
+/* Apps card: where the app lives / who vouched, and the forget link. */
+.app-card-source {
+  margin: -0.5rem 0 0;
+}
+
+.device-card > .link-like {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.device-card > .link-like:hover {
+  color: var(--ink);
+}

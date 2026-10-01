@@ -94,6 +94,13 @@ export type WalletOAuthGrant = {
   scope: string[];
   issuedAt: string;
   expiresAt: string;
+  /** The name the person gave this app when approving (editable later); browser-local. */
+  label?: string;
+  /** What the app called itself when it asked (via its RP's signed request), when it is one of
+   * several apps behind one relying party (e.g. Forgejo and Outline behind one OIDC bridge). It
+   * tells such apps apart: they share `clientId`, so a new grant only replaces one with the same
+   * `appKey`. */
+  appKey?: string;
   /** Present only when this is restored audit metadata, never a credential. */
   importedAt?: string;
 };
@@ -345,6 +352,8 @@ function oauthGrantIsValid(value: any): value is WalletOAuthGrant {
     && (value.deviceJkt === undefined || typeof value.deviceJkt === "string")
     && Array.isArray(value.scope) && value.scope.every(scope => typeof scope === "string")
     && typeof value.issuedAt === "string" && typeof value.expiresAt === "string"
+    && (value.label === undefined || (typeof value.label === "string" && value.label.length <= 160))
+    && (value.appKey === undefined || (typeof value.appKey === "string" && value.appKey.length <= 160))
     && (value.importedAt === undefined || typeof value.importedAt === "string");
 }
 
@@ -367,10 +376,31 @@ export async function saveWalletOAuthGrant(grant: WalletOAuthGrant): Promise<voi
         const cursor = cursorRequest.result;
         if (!cursor) return;
         const existing = cursor.value as WalletOAuthGrant;
-        if (existing.did === grant.did && existing.clientId === grant.clientId && existing.deviceJkt === grant.deviceJkt) cursor.delete();
+        // Never delete the grant being saved: the put below is queued before this cursor
+        // reaches its key, so without the id check the cursor could delete it too (both the
+        // old and the new grant vanished, roughly half the time).
+        if (existing.id !== grant.id && existing.did === grant.did && existing.clientId === grant.clientId
+          && existing.deviceJkt === grant.deviceJkt && existing.appKey === grant.appKey) cursor.delete();
         cursor.continue();
       };
       store.put({ ...grant });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("Local authorization storage failed."));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Forget local authorization records by id. (There is no revocation: a capability is short-lived
+ * and simply expires; this only removes the record kept in this browser.) */
+export async function deleteWalletOAuthGrants(ids: string[]): Promise<void> {
+  const db = await grantDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(GRANT_STORE_NAME, "readwrite");
+      const store = transaction.objectStore(GRANT_STORE_NAME);
+      for (const id of ids) store.delete(id);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error ?? new Error("Local authorization storage failed."));
     });

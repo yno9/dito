@@ -75,7 +75,11 @@ export class DitoClient {
   // above, still used when this.responseUri is unset) for the RP-DID path:
   // there is no `code` to protect, so no PKCE either. Only reachable once
   // this.responseUri is set -- see server.ts's explicit-opt-in comment.
-  directPostAuthorizationUrl(state: string, nonce: string): string {
+  // app: the downstream application (Forgejo, ...) as this bridge asserts it: its display name and
+  // its home (`client_uri`, RFC 7591), carried as OID4VP `client_metadata` inside the signed request.
+  // The wallet can verify the request really came from this bridge's DID, not that the app is who
+  // the bridge says -- it shows the two apart (name, domain, and "via" the bridge).
+  directPostAuthorizationUrl(state: string, nonce: string, app?: { name?: string; uri?: string }): string {
     if (!this.rpDidKey) throw new Error("direct_post authorization requires an RP DID key");
     if (!this.responseUri) throw new Error("direct_post authorization requires a response_uri");
     const jwt = createSelfIssuedIdToken({
@@ -85,6 +89,7 @@ export class DitoClient {
       // the capability document; scope gates id_token issuance -- see
       // client/app.ts's approveAuthorization).
       scope: "openid profile email",
+      ...(app && (app.name || app.uri) ? { client_metadata: { ...(app.name ? { client_name: app.name } : {}), ...(app.uri ? { client_uri: app.uri } : {}) } } : {}),
       dcql_query: { credentials: [{ id: "capability", format: "vc+di", meta: { type_values: [["VerifiableCredential", "did.md/DeviceCapability"]] } }] },
     }, { privateKey: new Uint8Array(Buffer.from(this.rpDidKey.privateKey, "base64url")), did: this.rpDidKey.did });
     const url = new URL(this.authorizationEndpoint); url.search = new URLSearchParams({ client_id: this.rpDidKey.did, response_type: "vp_token id_token", request: jwt }).toString();

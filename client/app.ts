@@ -1474,7 +1474,7 @@ function fitDidHead(headElement) {
     + parseFloat(buttonStyle.paddingLeft) + parseFloat(buttonStyle.paddingRight)
     + (colon?.getBoundingClientRect().width ?? 0)
     + (alias?.getBoundingClientRect().width ?? 0);
-  const available = row.clientWidth - reserved;
+  const available = row.clientWidth - reserved - 1;
   if (available <= 0) { headElement.textContent = ""; headElement.style.maxWidth = "0px"; return; }
   didHeadMeasureContext ??= document.createElement("canvas").getContext("2d");
   const style = getComputedStyle(headElement);
@@ -1493,6 +1493,15 @@ function fitDidHead(headElement) {
   }
   headElement.style.maxWidth = `${available}px`;
   headElement.textContent = `${full.slice(0, low)}${ellipsis}`;
+}
+
+// Fira Code is a web font: the canvas above measures with whatever is loaded right now, so a
+// line fitted before the font arrived is too wide afterwards, and nothing resizes to re-run
+// it. Refit once the fonts are in.
+{
+  const refit = () => { const head = document.getElementById("identity-did"); if (head) fitDidHead(head); };
+  document.fonts?.addEventListener("loadingdone", refit);
+  void document.fonts?.ready.then(refit);
 }
 
 // Splits "did:webvh:{scid}:{alias}" across the three independently

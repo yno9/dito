@@ -5082,6 +5082,23 @@ query("#master-mnemonic").addEventListener("mousedown", (event) => {
   if (!query("#create-load-form").classList.contains("creation-load-mode")) event.preventDefault();
 });
 
+// "import" on the Load form: a `<scid>.jwe` plus its mnemonic (the one field
+// below the file row -- it is also the local password, as in loadFromOnlineDid).
+onClick("#creation-load-submit", "#wallet-result", async () => {
+  const file = query("#creation-load-file").files?.[0];
+  if (!file) throw new Error("Choose a .jwe file to import.");
+  const mnemonic = query("#master-mnemonic").value.trim();
+  const masterSeed = seedFromMnemonic(mnemonic, "Passphrase");
+  try {
+    const imported = await importIdentityContainer((await file.text()).trim(), masterSeed, { password: mnemonic });
+    const identity = imported.identities[0];
+    // The log in the container is cached locally; the host (if any) is fetched first and this snapshot is the fallback.
+    await unlockIdentity(identity.username ?? await storageKeyForDid(identity.did), mnemonic);
+  } finally {
+    wipe(masterSeed);
+  }
+});
+
 query("#creation-load-file").addEventListener("change", (event) => {
   const file = event.target.files?.[0];
   query("#creation-load-source").value = file ? `file://${file.name}` : "";

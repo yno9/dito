@@ -51,6 +51,8 @@ import {
   isGitHubHostedDid as isGitHubHostedDidHost,
 } from "../packages/wallet/src/host.ts";
 import { verifyMasterOwnsLog } from "../packages/wallet/src/identity.ts";
+import { parseLoginHost, didIsHostedAt } from "../packages/wallet/src/login-hint.ts";
+import { withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
 import { WebvhHostingClient, currentParameters, parseLog as parseWebvhLog, resolveLog } from "../packages/webvh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
 import dashboardHeaderTemplate from "./pages/dashboard-header.html";
@@ -1804,14 +1806,6 @@ function hostLogUrl(did) {
   return hostForDid(did).logUrl(did);
 }
 
-// Same idea as endpoint(), for a resource served at the host's root instead
-// of under .well-known (e.g. routing.json).
-function rootResource(did, file) {
-  const username = didMdUsername(did);
-  if (!username) throw new Error("This identity is not hosted on did.md.");
-  return `https://${username}.${DOMAIN}/${file}`;
-}
-
 // The did:webvh log mechanics (parse, validate, parameters) are didwebvh-ts's,
 // through packages/webvh.
 function parseLog(text) {
@@ -1830,29 +1824,10 @@ async function publish(url, method, body) {
   return response;
 }
 
-function sameDidDocumentReference(did, left, right) {
-  const absolute = value => typeof value === "string" && value.startsWith("#") ? `${did}${value}` : value;
-  return absolute(left) === absolute(right);
-}
-
-function withRoutingInDidDocument(state, edit) {
-  const next = JSON.parse(JSON.stringify(state));
-  const isRemoved = id => edit.remove.some(removed => sameDidDocumentReference(state.id, id, removed));
-  const methods = (Array.isArray(next.verificationMethod) ? next.verificationMethod : []).filter(value => !isRemoved(value.id));
-  for (const method of edit.verificationMethods) { const index = methods.findIndex(value => sameDidDocumentReference(state.id, value.id, method.id)); if (index < 0) methods.push(method); else methods[index] = method; }
-  next.verificationMethod = methods;
-  const keyAgreement = (Array.isArray(next.keyAgreement) ? next.keyAgreement : []).filter(id => !isRemoved(id));
-  for (const method of edit.verificationMethods) if (!keyAgreement.some(id => sameDidDocumentReference(state.id, id, method.id))) keyAgreement.push(method.id);
-  if (keyAgreement.length) next.keyAgreement = keyAgreement;
-  const services = (Array.isArray(next.service) ? next.service : []).filter(value => !isRemoved(value.id));
-  for (const service of edit.services) { const index = services.findIndex(value => sameDidDocumentReference(state.id, value.id, service.id)); if (index < 0) services.push(service); else services[index] = service; }
-  next.service = services;
-  return next;
-}
-
-/** A routing change is also a did:webvh state change during this temporary
- * compatibility mode. The Wallet, never the host, creates the signed entry. */
-async function publishRoutingDidUpdate(state) {
+/** An approved DID-document edit is a did:webvh state change: the signed log
+ * entry is the only place it is published. The Wallet, never the host,
+ * creates the signed entry. */
+async function publishDidDocumentEdit(state) {
   if (!loaded) throw new Error("Load an identity first.");
   const prepared = await preparePreRotatedUpdate({
     entries: loaded.entries, state, masterSeed: loaded.masterSeed, currentSpareIndex: loaded.currentSpareIndex,
@@ -1860,9 +1835,9 @@ async function publishRoutingDidUpdate(state) {
   const nextEntries = [...loaded.entries, prepared.entry];
   const published = await publishEntriesToCurrentHost(
     nextEntries,
-    `Publish routing ${prepared.entry.versionId}`,
+    `Publish DID document edit ${prepared.entry.versionId}`,
     "append",
-    () => publishRoutingDidUpdate(state),
+    () => publishDidDocumentEdit(state),
   );
   if (published !== "published") return;
   loaded.entries = nextEntries;
@@ -1871,19 +1846,6 @@ async function publishRoutingDidUpdate(state) {
   loaded.currentSpareIndex = prepared.nextSpareIndex;
   await persistMasterMetadata();
   updateKeyStatus();
-}
-
-async function publishRoutingResource(did, routing, created = new Date().toISOString()) {
-  if (!loaded) throw new Error("Load an identity first.");
-  const proof = await createDataIntegrityProof(routing, {
-    privateKey: loaded.sign.privateKey,
-    verificationMethod: `did:key:${loaded.sign.multikey}#${loaded.sign.multikey}`,
-    proofPurpose: "assertionMethod", created,
-  });
-  const response = await fetch(rootResource(did, "routing.json"), {
-    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...routing, proof }),
-  });
-  if (!response.ok) throw new Error(`Could not publish routing metadata (${response.status}): ${await response.text()}`);
 }
 
 function currentMasterPath() {
@@ -2353,7 +2315,7 @@ function updateIdentityHostRow() {
 // did.md. wipeGitHubPat() clears the in-memory copy only.
 const GITHUB_PAT_STORAGE_KEY = "did-md-github-pat";
 let githubPatInMemory = null;
-// Set when Docs/Keys (or routing) needs a GitHub write and no PAT is in
+// Set when Docs/Keys (or a DID-document edit) needs a GitHub write and no PAT is in
 // memory: the PAT dialog runs this instead of the initial host flow.
 let pendingGitHubPublish = null;
 // "host" = move/republish from the host icon; "update" = finish a Docs/Keys write.
@@ -3610,7 +3572,7 @@ function renderWalletAuthorization() {
   } else if (walletAuthorization.did && loaded.entries.at(-1).state.id !== walletAuthorization.did) {
     approve.disabled = true;
     status.textContent = "A different identity is loaded in this tab. Load the identity requested above.";
-  } else if (walletAuthorization.username && didMdUsername(loaded.entries.at(-1).state.id) !== walletAuthorization.username) {
+  } else if (walletAuthorization.loginHost && !didIsHostedAt(loaded.entries.at(-1).state.id, walletAuthorization.loginHost)) {
     approve.disabled = true;
     status.textContent = "A different identity is loaded in this tab. Load the identity requested by this application.";
   } else {
@@ -3730,11 +3692,10 @@ async function jarAuthorizationParameters(clientId, jwt) {
   // instead of a query parameter.
   const scope = [...new Set((payload.scope ?? "").split(" "))];
   if (!scope.length || scope.length > 16 || scope.some(item => !/^[A-Za-z][A-Za-z0-9:._/-]{0,95}$/.test(item))) throw new Error("The requested scope is invalid.");
-  let username;
+  let loginHost;
   if (payload.login_hint !== undefined) {
-    const login = /^(?<username>[a-z0-9](?:[a-z0-9-]{0,61})?)\.did\.md$/.exec(payload.login_hint);
-    if (!login) throw new Error("The login hint must be a did.md hostname.");
-    username = login.groups.username;
+    loginHost = parseLoginHost(payload.login_hint) ?? undefined;
+    if (!loginHost) throw new Error("The login hint must be the hostname an identity is published at.");
   }
   // What the application calls itself (OID4VP client_metadata.client_name, inside the RP's signed request).
   const rawName = payload.client_metadata?.client_name;
@@ -3749,7 +3710,7 @@ async function jarAuthorizationParameters(clientId, jwt) {
     clientDisplayName, clientDisplayHost,
     clientId, responseType: payload.response_type, responseMode: directPost ? "direct_post" : undefined,
     codeChallenge: payload.code_challenge,
-    deviceJkt: payload.dpop_jkt, loginHint: payload.login_hint, username,
+    deviceJkt: payload.dpop_jkt, loginHint: payload.login_hint, loginHost,
     redirectUri: payload.redirect_uri, responseUri: payload.response_uri, state: payload.state, nonce: payload.nonce,
     scope, authorizationDetails: oauthAuthorizationDetails(payload.authorization_details ?? null),
     capabilityType: typeValues[1],
@@ -3784,11 +3745,10 @@ async function oauthAuthorizationParameters() {
   // login_hint is optional: when present it pins the consent screen to one
   // specific locally-loaded identity; when absent, whichever identity is
   // already loaded in this tab is used, same as it always was for OIDC.
-  let username;
+  let loginHost;
   if (value.login_hint !== null) {
-    const login = /^(?<username>[a-z0-9](?:[a-z0-9-]{0,61})?)\.did\.md$/.exec(value.login_hint);
-    if (!login) throw new Error("The login hint must be a did.md hostname.");
-    username = login.groups.username;
+    loginHost = parseLoginHost(value.login_hint) ?? undefined;
+    if (!loginHost) throw new Error("The login hint must be the hostname an identity is published at.");
   }
   const authorizationDetails = oauthAuthorizationDetails(value.authorization_details);
   // capability_type: the RP-owned name for the capability document this
@@ -3809,7 +3769,7 @@ async function oauthAuthorizationParameters() {
   // covers both this page and a bare https://app.did.md/?alias.
   return {
     clientId: value.client_id, responseType: value.response_type, codeChallenge: usesCode ? value.code_challenge : undefined,
-    deviceJkt: value.dpop_jkt ?? undefined, loginHint: value.login_hint ?? undefined, username,
+    deviceJkt: value.dpop_jkt ?? undefined, loginHint: value.login_hint ?? undefined, loginHost,
     redirectUri: value.redirect_uri, state: value.state, nonce: value.nonce ?? undefined,
     scope, authorizationDetails, capabilityType,
   };
@@ -3952,37 +3912,22 @@ async function approveAuthorization() {
   if (!walletAuthorization) throw new Error("There is no pending authorization request.");
   if (!loaded) throw new Error("Load the requested identity before approving.");
   const did = loaded.entries.at(-1).state.id;
-  // login_hint (and so .username) is optional -- when the relying party
+  // login_hint (and so .loginHost) is optional -- when the relying party
   // didn't send one, whichever identity is already loaded in this tab is
   // the one being authorized, same as it always was for a conventional
   // (non-DPoP) client.
-  if (walletAuthorization.username && didMdUsername(did) !== walletAuthorization.username) throw new Error("The loaded identity does not match the authorization request.");
+  if (walletAuthorization.loginHost && !didIsHostedAt(did, walletAuthorization.loginHost)) throw new Error("The loaded identity does not match the authorization request.");
   const issuedAtMilliseconds = Date.now(); const issuedAt = new Date(issuedAtMilliseconds).toISOString();
   const edit = didDocumentEditDetail(walletAuthorization.authorizationDetails, did);
   const keyAuthorization = keyAuthorizationDetail(walletAuthorization.authorizationDetails);
   derivedSecretDetails(walletAuthorization.authorizationDetails); // validates before any network/signing work below
   if (edit && (edit.services.length || edit.verificationMethods.length || edit.remove.length)) {
-    // The did:webvh implicit `#files` service dereferences
-    // `<did>/routing.json` at this origin-root URL (never under .well-known).
-    const currentResponse = await fetch(rootResource(did, "routing.json"), { cache: "no-store" });
-    if (!currentResponse.ok && currentResponse.status !== 404) throw new Error(`Could not read existing routing metadata (${currentResponse.status}).`);
-    const existing = currentResponse.status === 404 ? {} : await currentResponse.json();
-    if (!existing || typeof existing !== "object" || Array.isArray(existing)) throw new Error("Existing routing metadata is invalid.");
-    const routing = { ...existing };
-    delete routing.proof;
-    const isRemoved = id => edit.remove.some(removed => sameDidDocumentReference(did, id, removed));
-    const methods = (Array.isArray(existing.keyAgreementVerificationMethod) ? existing.keyAgreementVerificationMethod : []).filter(value => !isRemoved(value.id));
-    for (const method of edit.verificationMethods) { const index = methods.findIndex(value => sameDidDocumentReference(did, value.id, method.id)); if (index < 0) methods.push(method); else methods[index] = method; }
-    const services = (Array.isArray(existing.service) ? existing.service : []).filter(value => !isRemoved(value.id));
-    for (const service of edit.services) { const index = services.findIndex(value => sameDidDocumentReference(did, value.id, service.id)); if (index < 0) services.push(service); else services[index] = service; }
-    routing.keyAgreementVerificationMethod = methods; routing.service = services;
-    const routingChanged = JSON.stringify({ ...existing, proof: undefined }) !== JSON.stringify(routing);
-    if (routingChanged) {
-      // Keep routing.json as a compatibility resource while also committing
-      // the requested material to the signed DID Document.
+    // The signed DID document is the source of truth for the edit; there is no
+    // separate routing.json resource, on did.md or any other host.
+    const nextState = withDidDocumentEdit(loaded.entries.at(-1).state, edit);
+    if (JSON.stringify(nextState) !== JSON.stringify(loaded.entries.at(-1).state)) {
       // This consumes one pre-rotated update key by design.
-      await publishRoutingDidUpdate(withRoutingInDidDocument(loaded.entries.at(-1).state, edit));
-      await publishRoutingResource(did, routing, issuedAt);
+      await publishDidDocumentEdit(nextState);
     }
   }
   // Sign only after a requested DID edit, so generation names the state that
@@ -5727,11 +5672,6 @@ async function publishPreparedEntry() {
   loaded.sign = await spareFromMasterSeed(loaded.masterSeed, loaded.currentSpareIndex);
   loaded.currentSpareIndex = pending.nextSpareIndex;
   await persistMasterMetadata();
-  // routing.json is a did.md-hosted root resource. Other hosts (GitHub user
-  // sites, bring-your-own domains) have no equivalent -- skip rather than fail the update.
-  if (pending.routingResource && didMdUsername(loaded.entries.at(-1).state.id)) {
-    await publishRoutingResource(loaded.entries.at(-1).state.id, pending.routingResource);
-  }
   await refreshIdentityViews();
   void renderLoadedIdentity();
   discardPending();
@@ -5739,7 +5679,7 @@ async function publishPreparedEntry() {
 }
 
 /**
- * One write path for Docs/Keys/routing updates. Picks the adapter via
+ * One write path for Docs/Keys/DID-document-edit updates. Picks the adapter via
  * hostForDid; a GitHub write without a PAT stashes `pendingGitHubPublish`
  * and opens the PAT dialog so the user can finish the same update.
  */

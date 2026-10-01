@@ -22,6 +22,7 @@ import {
   spareFromMasterSeed,
   type ControllerKey,
 } from "./did-webvh.ts";
+import { openIdentityContainer, sealIdentityContainer } from "./identity-container.ts";
 import { buildDidJson } from "./github-host.ts";
 import { hostForDid, isProvisionalHostlessDid, type IdentityHost, type PublishResult } from "./host.ts";
 import { githubDidLocation, publishToGitHub, verifyToken, type PublishProgress } from "./github-host.ts";
@@ -140,6 +141,24 @@ export class Identity {
   /** The recovery secret. Handle with care. */
   get mnemonic(): string { return mnemonicForSeed(this.masterSeed); }
   /** The public log as `did.jsonl` text. */
+  /** The identity as one portable `<scid>.jwe` (log + Master keyring), wrapped by the mnemonic itself. */
+  async exportContainer(): Promise<{ scid: string; jwe: string }> {
+    const first = this._entries[0] as any, latest = this._entries.at(-1) as any;
+    const scid = first.parameters.scid as string;
+    const jwe = await sealIdentityContainer({ scid, did: latest.state.id, rootKey: this._root.multikey, generation: latest.versionId, didJsonl: this.logText(), masterSeed: this.masterSeed });
+    return { scid, jwe };
+  }
+
+  /** Open an identity from a `<scid>.jwe` and its mnemonic; the log is verified against the mnemonic like `open`. */
+  static async fromContainer(options: { jwe: string; mnemonic: string }): Promise<Identity> {
+    const masterSeed = seedFromMnemonic(options.mnemonic, "Passphrase");
+    const container = await openIdentityContainer(options.jwe, masterSeed);
+    const identity = await Identity.open({ masterSeed, log: container.didJsonl });
+    const latest = identity.entries.at(-1) as any;
+    if (latest.state.id !== container.did || latest.versionId !== container.generation) throw new Error("The container's DID log does not match its manifest.");
+    return identity;
+  }
+
   logText(): string { return serializeLog(this._entries as never); }
 
   // ---- offline steps: prepare (pure) then commit (advance local state) ----

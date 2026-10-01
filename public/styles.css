@@ -1157,11 +1157,12 @@ button#creation-confirm-saved.primary {
   color: #002031;
   padding: 1rem;
   border-radius: 0.3rem;
+  margin-bottom:1rem;
 }
 
 #create-form-area {
-  padding: 2rem 2rem 1rem 2rem;
-  box-shadow: 0 0px 3px rgba(0, 0, 0, 0);
+  padding: 1.5rem 2rem 1rem 2rem;
+  box-shadow: 0 0px 3px rgba(0, 0, 0, 0.2);
   border-radius: 1rem;
 }
 
@@ -1202,6 +1203,11 @@ button#creation-confirm-saved.primary {
 .recovery-field-wrap:hover .passphrase-display-overlay {
   outline: 0.0625rem solid var(--hint);
   outline-offset: -0.0625rem;
+}
+
+/* The copy icon takes the outline's colour while the field is hovered. */
+.recovery-field-wrap:hover .passphrase-copy-btn {
+  color: var(--hint);
 }
 
 .field-value-row {
@@ -1703,6 +1709,13 @@ button#creation-confirm-saved.primary {
   box-shadow: none;
 }
 
+/* Approve in flight: the label is the ・ → ・・ → ・・・ animation, kept at full strength. */
+.wallet-authorize-approve.is-loading:disabled {
+  opacity: 1;
+  cursor: progress;
+  letter-spacing: 0.15em;
+}
+
 .load-glass-close {
   appearance: none;
   display: block;
@@ -2005,7 +2018,7 @@ button#creation-confirm-saved.primary {
 .identity-name-copy .edit-icon,
 .identity-name-copy .trash-icon {
   flex: 0 0 auto;
-  color: var(--text-muted);
+  color: #888888;
 }
 
 .identity-name-copy.copied .copy-icon {
@@ -2014,6 +2027,26 @@ button#creation-confirm-saved.primary {
 
 .record-card-heading .identity-name-copy:hover .trash-icon {
   color: var(--danger);
+}
+
+/* "Remove? [yes]" -- takes the trash icon's place in a card heading. */
+.record-card-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.record-card-confirm .link-like {
+  padding: 0rem 0.5rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--danger);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
 }
 
 /* -- github host icon: muted regardless of liveness (the connection icon
@@ -2336,12 +2369,17 @@ button#github-host-publish.primary {
  * across all of them together instead of per group. Each wrapper's own
  * .hidden toggle (display:none !important) still wins over this when a tab
  * isn't current, since !important outranks a plain display:contents. */
+/* Masonry: 1px rows, and each card spans as many as its height needs (packMasonry in
+ * app.ts), so the next card slides up under the shortest column instead of waiting for the
+ * tallest card of the row above. The 1rem row gap is added to each span, not set here. */
 .key-material-grid,
 .docs-columns {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  grid-auto-rows: 1px;
   align-items: start;
-  gap: 1rem;
+  column-gap: 1rem;
+  row-gap: 0;
 }
 
 #local-key-material-list,
@@ -2365,11 +2403,82 @@ button#github-host-publish.primary {
  * app.ts) as a flat, single-level tree under it. Monospace already applies
  * to the whole app (body's own font), which is what keeps the ├/└ connector
  * glyphs aligned -- no font-family override needed here. */
+/* Two columns: the tree on the left, as wide as its longest file name (never wrapped), and the
+ * actions stacked on the right, filling the rest of the card. The header wrapper melts away so
+ * its title and actions become grid items; anything else in the card (an open file, the
+ * password prompts) spans both columns. */
+.files-tree {
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 1rem;
+  row-gap: 1rem;
+  align-items: start;
+}
+
+.files-tree > * {
+  grid-column: 1 / -1;
+}
+
 .files-tree-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: contents;
+}
+
+.files-tree-root {
+  grid-column: 1;
+  grid-row: 1;
+  white-space: nowrap;
+}
+
+.files-tree > .files-tree-list {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.files-tree-header > .actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
   gap: 1rem;
+  justify-self: end;
+  align-self: start;
+}
+
+/* Export/Unload: two big buttons that split the whole right column between them. */
+.files-tree-header > #files-actions {
+  justify-self: end;
+  width: 100%;
+  max-width: 7rem;
+  align-self: stretch;
+  grid-template-rows: 1fr 1fr;
+}
+
+#files-manager #files-actions button {
+  width: 100%;
+  height: 100%;
+  border-radius: 1rem;
+}
+
+/* Too narrow for two columns: one column, the actions below the tree in a row. */
+@media (max-width: 24rem) {
+  .files-tree {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .files-tree-header > .actions,
+  .files-tree-header > #files-actions {
+    grid-column: 1;
+    grid-row: 3;
+    display: flex;
+    justify-self: start;
+    align-self: start;
+    width: auto;
+    max-width: none;
+  }
+
+  #files-manager #files-actions button {
+    width: auto;
+    height: auto;
+    border-radius: 0.4rem;
+  }
 }
 
 .files-tree-root {
@@ -2379,7 +2488,8 @@ button#github-host-publish.primary {
 
 .files-tree-list {
   display: flex;
-  flex-direction: column
+  flex-direction: column;
+  white-space: nowrap;
 }
 
 .files-tree-entry {
@@ -3121,11 +3231,12 @@ p {
 
   #create-form-area {
     padding: 0rem 1rem 0rem 1rem;
+    box-shadow: 0 0px 3px rgba(0, 0, 0, 0);
   }
 
   /* Narrow columns make ragged/overflowing text more likely -- let the
    * browser break words at hyphenation points (uses <html lang="en">). */
-  body {
+  #eyecatch {
     -webkit-hyphens: auto;
     hyphens: auto;
   }
@@ -3262,6 +3373,8 @@ p {
 
 /* Apps card heading: the app's name, a pencil, and an inline input while renaming. */
 .device-card-name {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -3283,18 +3396,3 @@ p {
   margin: -0.5rem 0 0;
 }
 
-.device-card > .link-like {
-  justify-self: start;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.8rem;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.device-card > .link-like:hover {
-  color: var(--ink);
-}

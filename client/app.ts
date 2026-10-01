@@ -483,7 +483,7 @@ async function restoreStoredIdentityRecord() {
   void updateConnectionStatus();
   maybeBeginCreateDraft();
   if (!storedIdentityRecord || loaded) return;
-  const keyringPath = containerPath(storedIdentityRecord.username, "keyring.json");
+  const keyringPath = containerPath(storedIdentityRecord.did, "keyring.json");
   // A provisional genesis record has no host to fetch from; its log was
   // cached locally when it was first loaded. For a hosted record, prefer the
   // live log, but a disconnected/unreachable host is a normal, supported
@@ -502,7 +502,7 @@ async function restoreStoredIdentityRecord() {
     publicApplicationState = entries.at(-1)?.state ?? null;
     renderServicesList();
     renderApplicationKeysList();
-    const didLogPath = containerPath(storedIdentityRecord.username, "did.jsonl");
+    const didLogPath = containerPath(storedIdentityRecord.did, "did.jsonl");
     renderIdentityFiles({
       manifest: { identities: [{ keyringPath }], contents: [didLogPath, keyringPath, ...metadataPaths] },
       files: { [didLogPath]: didJsonl, [keyringPath]: null, ...metadataFiles },
@@ -989,12 +989,15 @@ function renderIdentityFiles(container) {
     return;
   }
   const keyringPath = container.manifest?.identities?.[0]?.keyringPath;
+  // A rebuild (unlocking, a background refresh) must not drop the file the user has open.
+  const previouslyOpen = identityFilesView?.selected;
   identityFilesView = { files, names, keyringPath, selected: null };
-  const show = name => {
+  const show = (name, { open = false } = {}) => {
     // File links are accordion triggers: pressing the already-open item
     // closes the surface and clears its selection, including a keyring
-    // password/passkey prompt that may be waiting for input.
-    if (identityFilesView.selected === name) {
+    // password/passkey prompt that may be waiting for input. `open` skips that
+    // toggle: the unlock-then-show resume below runs with the selection already recorded.
+    if (!open && identityFilesView.selected === name) {
       identityFilesView.selected = null;
       updateFilesHeader();
       if (sensitiveFileTimer) clearTimeout(sensitiveFileTimer);
@@ -1016,7 +1019,7 @@ function renderIdentityFiles(container) {
     if (name === keyringPath && storedIdentityRecord && !loaded) {
       identityFilesView.selected = name;
       updateFilesHeader();
-      void withUnlock(() => show(name));
+      void withUnlock(() => show(name, { open: true }));
       return;
     }
     identityFilesView.selected = name;
@@ -1070,6 +1073,9 @@ function renderIdentityFiles(container) {
     open.addEventListener("click", () => show(name));
     list.append(open);
   });
+  // keyring.json only comes back once unlocked; while locked, reopening it would just raise the prompt again.
+  if (previouslyOpen && names.includes(previouslyOpen) && (previouslyOpen !== keyringPath || loaded)) show(previouslyOpen, { open: true });
+  else { updateFilesHeader(); display.classList.add("hidden"); field.textContent = ""; }
   // The Files tab (#files-manager)'s own visibility is derived from the
   // application-tab selection (see selectApplicationTab), not from this
   // function -- it only ever populates content, never shows/hides the pane
@@ -1274,13 +1280,54 @@ async function renderWalletGrants() {
       const [{ clientName }] = grants;
       const card = document.createElement("div");
       card.className = "record-card device-card";
-      card.append(appNameHeading(grants, bindingsByDevice, clientName));
-      // Where the app lives (as its relying party asserted) and who vouched for that.
+      // There is no revocation (a capability is short-lived and expires by itself): the trash
+      // icon only removes the record kept in this browser.
+      const headingRow = document.createElement("div");
+      headingRow.className = "record-card-heading";
+      const forget = document.createElement("span");
+      forget.className = "identity-name-copy";
+      forget.setAttribute("role", "button");
+      forget.tabIndex = 0;
+      forget.setAttribute("aria-label", "Forget this app");
+      forget.title = "Removes this record from this browser. It does not revoke access; the session expires on its own.";
+      forget.append(trashIcon());
+      const forgetApp = async () => {
+        try {
+          await deleteWalletOAuthGrants(grants.map(grant => grant.id));
+          await renderWalletGrants();
+        } catch (error) { output("#loaded-identity-message", `Could not forget: ${errorMessage(error)}`, true); }
+      };
+      // The trash icon asks "Remove? [yes]" in its place; anything else (Esc, a click elsewhere) puts the icon back.
+      const confirmRow = document.createElement("span");
+      confirmRow.className = "record-card-confirm hidden";
+      const ask = document.createElement("span");
+      ask.textContent = "Remove?";
+      const yes = document.createElement("button");
+      yes.type = "button";
+      yes.className = "link-like";
+      yes.textContent = "yes";
+      confirmRow.append(ask, yes);
+      const setConfirming = confirming => {
+        forget.classList.toggle("hidden", confirming);
+        confirmRow.classList.toggle("hidden", !confirming);
+        if (confirming) yes.focus();
+        else forget.focus();
+      };
+      forget.addEventListener("click", () => setConfirming(true));
+      forget.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setConfirming(true); } });
+      yes.addEventListener("click", () => void forgetApp());
+      confirmRow.addEventListener("keydown", event => { if (event.key === "Escape") { event.stopPropagation(); setConfirming(false); } });
+      confirmRow.addEventListener("focusout", event => {
+        if (!confirmRow.contains(event.relatedTarget)) { forget.classList.remove("hidden"); confirmRow.classList.add("hidden"); }
+      });
+      headingRow.append(appNameHeading(grants, bindingsByDevice, clientName), forget, confirmRow);
+      card.append(headingRow);
+      // Where the app lives, as its relying party asserted (the vouching RP is the Via row below).
       const appKey = grants.find(grant => grant.appKey)?.appKey;
       if (appKey) {
         const source = document.createElement("p");
         source.className = "hint app-card-source";
-        source.textContent = `${appKey} · via ${didHost(grants[0].clientId) ?? grants[0].clientId}`;
+        source.textContent = appKey;
         card.append(source);
       }
       for (const grant of grants) {
@@ -1294,36 +1341,22 @@ async function renderWalletGrants() {
         const usedKeys = [...new Set(applicationReferences.flatMap(application => application.keyIds))];
         // The app's name is the card's heading; a per-device heading only earns its place when
         // the same app has several devices/sessions to tell apart.
-        const device = fieldGroup(grants.length > 1 ? (binding?.label ?? (grant.deviceJkt ? "Device" : "Session")) : null, [
+        const device = fieldGroup(grants.length > 1 ? (binding?.label ?? (grant.deviceJkt ? "Device" : "Via")) : null, [
           ["Scope", scopeTags(grant.scope)],
           ...(binding?.didCommKeyId ? [["DIDComm key", binding.didCommKeyId]] : []),
-          [grant.deviceJkt ? "Device thumbprint" : "Session", grant.deviceJkt ?? grant.clientName],
+          [grant.deviceJkt ? "Device thumbprint" : "Via", grant.deviceJkt ?? grant.clientName],
           ["Capability ID", grant.id],
         ]);
         const meta = document.createElement("p");
         meta.className = "storage-state sealed";
         meta.textContent = grant.importedAt ? `Imported audit record · this browser has no DPoP key` : `Active until ${grantDate(grant.expiresAt)}`;
         device.insertBefore(meta, device.querySelector(".fields"));
-        if (applicationReferences.length) device.append(encryptedMetadataPanel([
+        if (usedServices.length || usedKeys.length) device.append(encryptedMetadataPanel([
           ["Uses services", usedServices.length ? usedServices.join("\n") : "None"],
           ["Uses keys", usedKeys.length ? usedKeys.join("\n") : "None"],
         ]));
         card.append(device);
       }
-      // There is no revocation (a capability is short-lived and expires by itself): this only
-      // removes the record kept in this browser.
-      const forget = document.createElement("button");
-      forget.type = "button";
-      forget.className = "link-like";
-      forget.textContent = "Forget this app";
-      forget.title = "Removes this record from this browser. It does not revoke access; the session expires on its own.";
-      forget.addEventListener("click", async () => {
-        try {
-          await deleteWalletOAuthGrants(grants.map(grant => grant.id));
-          await renderWalletGrants();
-        } catch (error) { output("#loaded-identity-message", `Could not forget: ${errorMessage(error)}`, true); }
-      });
-      card.append(forget);
       target.append(card);
     }
   } catch (error) {
@@ -1358,7 +1391,7 @@ async function saveAuthorizedDeviceBinding({ did, deviceJkt, clientName, didComm
   });
 }
 
-async function saveApplicationAuthorizationMetadata({ capability, edit }) {
+async function saveApplicationAuthorizationMetadata({ capability, edit, appKey }) {
   if (!loaded?.record) return;
   const applications = await readPortableApplications(loaded.record, loaded.masterSeed);
   const application = {
@@ -1367,6 +1400,7 @@ async function saveApplicationAuthorizationMetadata({ capability, edit }) {
     clientId: capability.audience,
     clientName: walletAuthorization.clientName,
     ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}),
+    ...(appKey ? { appKey } : {}),
     serviceIds: edit?.services?.map(service => service.id) ?? [],
     keyIds: edit?.verificationMethods?.map(method => method.id) ?? [],
     services: edit?.serviceKeyBindings?.map(binding => ({ id: binding.serviceId, keyIds: [...binding.keyIds] })) ?? [],
@@ -1377,7 +1411,7 @@ async function saveApplicationAuthorizationMetadata({ capability, edit }) {
   // previous metadata record instead of leaving it behind under its old
   // (now orphaned) capability.id -- filtering only by id never matched,
   // since every approval mints a fresh capability.id.
-  const survivors = applications.filter(item => !(item.clientId === application.clientId && item.deviceJkt === application.deviceJkt));
+  const survivors = applications.filter(item => !(item.clientId === application.clientId && item.deviceJkt === application.deviceJkt && item.appKey === application.appKey));
   loaded.record = await savePortableApplications(loaded.record, loaded.masterSeed, [...survivors, application]);
   portableApplications = [...survivors, application];
 }
@@ -1508,7 +1542,14 @@ function downloadWalletBackup(contents, did) {
   window.setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
-function containerPath(username, name) {
+// Container paths are keyed by the SCID, which is the identity: no username,
+// and unchanged when the DID moves between hosts.
+function containerPath(did, name) {
+  return `identities/${scidFromDid(did)}/${name}`;
+}
+
+/** Containers v1/v2 keyed their files by a did.md username; read-only, so old exports still recover. */
+function legacyContainerPath(username, name) {
   return `identities/${username}/${name}`;
 }
 
@@ -1554,8 +1595,8 @@ async function createIdentityContainer(masterSeed) {
   const applications = await readPortableApplications(activeRecord, masterSeed);
   const didJsonl = await fetchCompleteDidLog(activeRecord);
   const files = await metadataContainerFiles(activeRecord.did);
-  const didLogPath = containerPath(activeRecord.username, "did.jsonl");
-  const keyringPath = containerPath(activeRecord.username, "keyring.json");
+  const didLogPath = containerPath(activeRecord.did, "did.jsonl");
+  const keyringPath = containerPath(activeRecord.did, "keyring.json");
   files[didLogPath] = didJsonl;
   files[keyringPath] = {
     type: "bip39-slip10-ed25519",
@@ -1564,7 +1605,6 @@ async function createIdentityContainer(masterSeed) {
     applications,
   };
   const identities = [{
-    username: activeRecord.username,
     did: activeRecord.did,
     rootKey: root.multikey,
     generation: activeRecord.generation,
@@ -1574,10 +1614,10 @@ async function createIdentityContainer(masterSeed) {
   }];
   const container = {
     format: "did.md/identity-container",
-    version: 2,
+    version: 3,
     manifest: {
       format: "did.md/identity-container",
-      version: 2,
+      version: 3,
       createdAt: new Date().toISOString(),
       identities,
       contents: [...identities.flatMap(identity => [identity.didLogPath, identity.keyringPath]), "metadata/device-bindings.json", "metadata/grants.json"],
@@ -1611,7 +1651,7 @@ function checkedIdentityContainerV1(value) {
     const generation = containerString(identity.generation, "generation", 512);
     const didLogPath = containerString(identity.didLogPath, "DID log path", 256);
     const keyringPath = containerString(identity.keyringPath, "keyring path", 256);
-    if (didLogPath !== containerPath(username, "did.jsonl") || keyringPath !== containerPath(username, "keyring.json")) {
+    if (didLogPath !== legacyContainerPath(username, "did.jsonl") || keyringPath !== legacyContainerPath(username, "keyring.json")) {
       throw new Error("Identity container paths are invalid.");
     }
     const didJsonl = value.files[didLogPath];
@@ -1635,23 +1675,30 @@ function checkedIdentityContainerV1(value) {
  * and the documented SLIP-0010 profile, not any browser storage envelope. */
 function checkedIdentityContainer(value) {
   if (value?.version === 1) return checkedIdentityContainerV1(value);
-  if (!value || typeof value !== "object" || Array.isArray(value) || value.format !== "did.md/identity-container" || value.version !== 2
+  const version = value?.version;
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.format !== "did.md/identity-container" || (version !== 2 && version !== 3)
     || !value.manifest || typeof value.manifest !== "object" || Array.isArray(value.manifest)
-    || value.manifest.format !== "did.md/identity-container" || value.manifest.version !== 2
+    || value.manifest.format !== "did.md/identity-container" || value.manifest.version !== version
     || !Array.isArray(value.manifest.identities) || value.manifest.identities.length !== 1
     || !value.files || typeof value.files !== "object" || Array.isArray(value.files)) {
     throw new Error("This is not a supported did.md identity container.");
   }
   const identities = value.manifest.identities.map(identity => {
     if (!identity || typeof identity !== "object" || Array.isArray(identity)) throw new Error("Identity container manifest is invalid.");
-    const username = containerString(identity.username, "username", 64);
-    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(username)) throw new Error("Identity container username is invalid.");
+    // v2 keyed its files by a did.md username; v3 by the SCID and has no username at all.
+    let username;
+    if (version === 2) {
+      username = containerString(identity.username, "username", 64);
+      if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(username)) throw new Error("Identity container username is invalid.");
+    }
     const did = containerString(identity.did, "DID");
     const rootKey = containerString(identity.rootKey, "Root Key");
     const generation = containerString(identity.generation, "generation", 512);
     const didLogPath = containerString(identity.didLogPath, "DID log path", 256);
     const keyringPath = containerString(identity.keyringPath, "keyring path", 256);
-    if (identity.derivationProfile !== "did.md/master-ed25519-v1" || didLogPath !== containerPath(username, "did.jsonl") || keyringPath !== containerPath(username, "keyring.json")) {
+    const expectedLog = version === 2 ? legacyContainerPath(username, "did.jsonl") : containerPath(did, "did.jsonl");
+    const expectedKeyring = version === 2 ? legacyContainerPath(username, "keyring.json") : containerPath(did, "keyring.json");
+    if (identity.derivationProfile !== "did.md/master-ed25519-v1" || didLogPath !== expectedLog || keyringPath !== expectedKeyring) {
       throw new Error("Identity container paths or derivation profile are invalid.");
     }
     const didJsonl = value.files[didLogPath];
@@ -1676,7 +1723,7 @@ function checkedIdentityContainer(value) {
     || deviceBindings.length > 1024 || grants.oauth.length > 4096) {
     throw new Error("Identity container metadata is invalid.");
   }
-  return { version: 2, identities, deviceBindings, oauth: grants.oauth };
+  return { version, identities, deviceBindings, oauth: grants.oauth };
 }
 
 async function importIdentityContainer(contents, masterSeed, protection) {
@@ -1684,6 +1731,8 @@ async function importIdentityContainer(contents, masterSeed, protection) {
   const parsed = checkedIdentityContainer(container);
   const importedAt = new Date().toISOString();
   const identity = parsed.identities[0];
+  // Local storage is keyed by a hash of the SCID; v1/v2 carried a username that was that key (or, in old exports, a handle).
+  const storageKey = identity.username ?? await storageKeyForDid(identity.did);
   let record;
   if (parsed.version === 1) {
     // Validate the encrypted local record before replacing anything.
@@ -1709,16 +1758,16 @@ async function importIdentityContainer(contents, masterSeed, protection) {
     try {
       let savedRecord;
       if (protection?.protector) {
-        savedRecord = await saveMasterStoredIdentity({ username: identity.username, did: identity.did, rootKey: identity.rootKey, generation: identity.generation, masterSeed: identity.masterSeed, protector: protection.protector });
+        savedRecord = await saveMasterStoredIdentity({ username: storageKey, did: identity.did, rootKey: identity.rootKey, generation: identity.generation, masterSeed: identity.masterSeed, protector: protection.protector });
       } else {
-        savedRecord = await savePasswordStoredIdentity({ username: identity.username, did: identity.did, rootKey: identity.rootKey, generation: identity.generation, masterSeed: identity.masterSeed, password: protection?.password });
+        savedRecord = await savePasswordStoredIdentity({ username: storageKey, did: identity.did, rootKey: identity.rootKey, generation: identity.generation, masterSeed: identity.masterSeed, password: protection?.password });
       }
       if (identity.applications.length) await savePortableApplications(savedRecord, identity.masterSeed, identity.applications);
     } finally {
       wipe(identity.masterSeed);
     }
   }
-  await saveDidLogSnapshot({ username: identity.username, did: identity.did, generation: identity.generation, didJsonl: identity.didJsonl, savedAt: importedAt });
+  await saveDidLogSnapshot({ username: storageKey, did: identity.did, generation: identity.generation, didJsonl: identity.didJsonl, savedAt: importedAt });
   // Device keys themselves are deliberately absent. These are display-only
   // audit records and identify that they cannot restore a live session.
   await Promise.all([
@@ -2124,8 +2173,8 @@ async function activateLoadedIdentity() {
   query("#key-editor").classList.remove("hidden");
   // Built from the entries already held in memory, not fetched -- this stays
   // correct even for a host that is currently disconnected (network 404).
-  const didLogPath = containerPath(loaded.username, "did.jsonl");
-  const keyringPath = containerPath(loaded.username, "keyring.json");
+  const didLogPath = containerPath(loaded.entries.at(-1).state.id, "did.jsonl");
+  const keyringPath = containerPath(loaded.entries.at(-1).state.id, "keyring.json");
   const didJsonl = `${loaded.entries.map(entry => JSON.stringify(entry)).join("\n")}\n`;
   const metadataFiles = await metadataContainerFiles(loaded.entries.at(-1).state.id);
   renderIdentityFiles({
@@ -3997,7 +4046,7 @@ async function approveAuthorization() {
     : undefined;
   await saveWalletOAuthGrant({ id: capability.id, did, clientId: capability.audience, clientName: walletAuthorization.clientName, label: requestedDeviceLabel(authorizeDefaultName()), ...(walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ? { appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName } : {}), ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}), scope: capability.scope, issuedAt: capability.issuedAt, expiresAt: capability.expiresAt });
   if (capability.deviceJkt) await saveAuthorizedDeviceBinding({ did, deviceJkt: capability.deviceJkt, clientName: walletAuthorization.clientName, didCommKeyId: edit?.verificationMethods[0]?.id });
-  await saveApplicationAuthorizationMetadata({ capability, edit });
+  await saveApplicationAuthorizationMetadata({ capability, edit, appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ?? undefined });
   // PLAN7: "vp_token id_token" delivers straight to the RP -- no
   // api.did.md call, no `code` -- see oauthDeliver's own comment. "code"
   // (oidc-bridge and any other RP still on the DCR/JAR + code+token
@@ -4322,18 +4371,18 @@ async function provisionalContainerFromStoredRecord(record, masterSeed) {
   if (!snapshot?.didJsonl) throw new Error("This provisional identity's log is not cached in this browser; export it in the same tab session where it was created or loaded.");
   const entries = parseLog(snapshot.didJsonl);
   const entry = entries.at(-1);
-  const didLogPath = containerPath(record.username, "did.jsonl");
-  const keyringPath = containerPath(record.username, "keyring.json");
+  const didLogPath = containerPath(record.did, "did.jsonl");
+  const keyringPath = containerPath(record.did, "keyring.json");
   return {
     format: "did.md/identity-container",
-    version: 2,
+    version: 3,
     manifest: {
       format: "did.md/identity-container",
-      version: 2,
+      version: 3,
       createdAt: new Date().toISOString(),
       provisional: true,
       identities: [{
-        username: record.username, did: entry.state.id, rootKey: record.rootKey, generation: entry.versionId,
+        did: entry.state.id, rootKey: record.rootKey, generation: entry.versionId,
         didLogPath, keyringPath, derivationProfile: "did.md/master-ed25519-v1",
       }],
       contents: [didLogPath, keyringPath, "metadata/device-bindings.json", "metadata/grants.json"],
@@ -4365,11 +4414,11 @@ onClick("#wallet-backup-export", () => (loaded ? "#loaded-identity-message" : "#
 // WebCrypto and the already-bundled did:webvh implementation only; it does
 // not rely on IndexedDB, a passkey, or an app.did.md session.
 function parsePortableEicForMove(value) {
-  if (!value || typeof value !== "object" || value.format !== "did.md/identity-container" || value.version !== 2
-    || !value.manifest || value.manifest.version !== 2 || !Array.isArray(value.manifest.identities) || value.manifest.identities.length !== 1
-    || !value.files || typeof value.files !== "object") throw new Error("This operation accepts one did.md EIC v2 identity.");
+  if (!value || typeof value !== "object" || value.format !== "did.md/identity-container" || (value.version !== 2 && value.version !== 3)
+    || !value.manifest || value.manifest.version !== value.version || !Array.isArray(value.manifest.identities) || value.manifest.identities.length !== 1
+    || !value.files || typeof value.files !== "object") throw new Error("This operation accepts one did.md identity container (v2 or v3).");
   const identity = value.manifest.identities[0];
-  if (!identity || typeof identity.username !== "string" || typeof identity.did !== "string" || typeof identity.didLogPath !== "string" || typeof identity.keyringPath !== "string") {
+  if (!identity || typeof identity.did !== "string" || typeof identity.didLogPath !== "string" || typeof identity.keyringPath !== "string") {
     throw new Error("The EIC manifest is invalid.");
   }
   const source = value.files[identity.didLogPath];
@@ -5203,11 +5252,25 @@ async function provisionalGenesisEntry() {
 async function submitOAuthAuthorizationApproval() {
   const button = query("#wallet-authorize-approve");
   button.disabled = true;
+  // Loading state: the label becomes ・ → ・・ → ・・・, looping, until the approval ends.
+  const label = button.textContent;
+  const frames = ["・", "・・", "・・・"];
+  let frame = 0;
+  button.classList.add("is-loading");
+  button.setAttribute("aria-busy", "true");
+  button.setAttribute("aria-label", "Approving");
+  button.textContent = frames[0];
+  const timer = setInterval(() => { frame = (frame + 1) % frames.length; button.textContent = frames[frame]; }, 350);
   try {
     await approveAuthorization();
   } catch (error) {
     output("#loaded-identity-message", errorMessage(error), true);
     button.disabled = false;
+    clearInterval(timer);
+    button.classList.remove("is-loading");
+    button.removeAttribute("aria-busy");
+    button.removeAttribute("aria-label");
+    button.textContent = label;
   }
 }
 
@@ -5378,9 +5441,13 @@ function renderApplicationKeysList() {
       const dd = document.createElement("dd"); dd.textContent = value;
       details.append(dt, dd);
     }
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "Remove";
+    // Same heading-row trash icon as a service card.
+    const remove = document.createElement("span");
+    remove.className = "identity-name-copy";
+    remove.setAttribute("role", "button");
+    remove.tabIndex = 0;
+    remove.setAttribute("aria-label", `Remove key ${title.textContent}`);
+    remove.append(trashIcon());
     if (!isRoot) onClick(remove, "#services-result", async () => {
       const prepareRemoval = async () => {
         if (usedBy.length && !confirm(`This key is referenced by:\n\n${usedBy.join("\n")}\n\nRemove the key anyway? The services will remain in the DID Document.`)) return;
@@ -5414,9 +5481,12 @@ function renderApplicationKeysList() {
           ["Used by devices", usedByDevices.length ? usedByDevices.join("\n") : owner?.deviceJkt ?? "No device references"],
         ]
       : [["Application metadata", "Unlock this identity to view application and device references."]]);
-    row.append(title, details);
+    const heading = document.createElement("div");
+    heading.className = "record-card-heading";
+    heading.append(title);
+    if (!isRoot) heading.append(remove);
+    row.append(heading, details);
     row.append(metadata);
-    if (!isRoot) row.append(remove);
     list.append(row);
   }
 }
@@ -5693,3 +5763,44 @@ onClick("#enable-passkey", "#keys-result", async () => {
   updateKeyStatus();
   output("#keys-result", "The Passphrase is now encrypted in this browser with this passkey.");
 });
+
+// Masonry for the card grids (Apps, Services, Keys): grid-auto-rows is 1px in CSS, so every
+// grid item gets a row span equal to its own height plus the gap. Wrappers with
+// display:contents are looked through; any size change (a card unlocking, a window resize)
+// re-measures.
+function packMasonry(container) {
+  const gap = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const items = [];
+  const collect = parent => {
+    for (const child of parent.children) {
+      if (getComputedStyle(child).display === "contents") collect(child);
+      else if (getComputedStyle(child).display !== "none") items.push(child);
+    }
+  };
+  collect(container);
+  for (const item of items) {
+    const height = item.getBoundingClientRect().height;
+    item.style.gridRowEnd = height ? `span ${Math.ceil(height + gap)}` : "";
+  }
+  return items;
+}
+
+// The pages are rendered by the router after this module runs, so watch the whole body and
+// (re)pack whichever grids exist; each item's own size changes are picked up by a ResizeObserver.
+{
+  const observer = new ResizeObserver(() => scheduleMasonry());
+  let scheduled = false;
+  function scheduleMasonry() {
+    if (scheduled) return;
+    scheduled = true;
+    setTimeout(() => {
+      scheduled = false;
+      for (const container of document.querySelectorAll(".key-material-grid, .docs-columns")) {
+        for (const item of packMasonry(container)) observer.observe(item);
+      }
+    }, 0);
+  }
+  new MutationObserver(scheduleMasonry).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  window.addEventListener("resize", scheduleMasonry);
+  scheduleMasonry();
+}

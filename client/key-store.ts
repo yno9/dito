@@ -27,6 +27,8 @@ export type PortableApplication = {
   // Present only for a DPoP-bound capability -- a conventional (non-DPoP)
   // client's approval has no device key at all.
   deviceJkt?: string;
+  // The app's own domain when the relying party asserted one; apps behind one relying party share a clientId.
+  appKey?: string;
   serviceIds: string[];
   keyIds: string[];
   services?: { id: string; keyIds: string[] }[];
@@ -205,6 +207,7 @@ function checkedApplicationMetadata(value: any): PortableApplication[] {
   return value.map(item => {
     if (!item || item.v !== 1 || typeof item.id !== "string" || typeof item.clientId !== "string"
       || typeof item.clientName !== "string" || (item.deviceJkt !== undefined && typeof item.deviceJkt !== "string") || typeof item.createdAt !== "string"
+      || (item.appKey !== undefined && (typeof item.appKey !== "string" || item.appKey.length > 160))
       || !Array.isArray(item.serviceIds) || !item.serviceIds.every((id: unknown) => typeof id === "string")
       || !Array.isArray(item.keyIds) || !item.keyIds.every((id: unknown) => typeof id === "string")
       || (item.services !== undefined && (!Array.isArray(item.services) || item.services.some((service: any) => !service || typeof service.id !== "string" || !Array.isArray(service.keyIds) || !service.keyIds.every((id: unknown) => typeof id === "string"))))) {
@@ -212,6 +215,7 @@ function checkedApplicationMetadata(value: any): PortableApplication[] {
     }
     return { v: 1, id: item.id, clientId: item.clientId, clientName: item.clientName,
       ...(item.deviceJkt !== undefined ? { deviceJkt: item.deviceJkt } : {}),
+      ...(item.appKey !== undefined ? { appKey: item.appKey } : {}),
       serviceIds: [...new Set(item.serviceIds)], keyIds: [...new Set(item.keyIds)],
       ...(item.services ? { services: item.services.map((service: any) => ({ id: service.id, keyIds: [...new Set<string>(service.keyIds)] })) } : {}),
       createdAt: item.createdAt };

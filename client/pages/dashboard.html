@@ -276,7 +276,7 @@
     class="wallet-identities application-pane"
     role="tabpanel"
   >
-    <div id="wallet-grant-list"></div>
+    <div id="wallet-grant-list" class="docs-columns"></div>
   </section>
   <!-- Services tab (id "docs"): Services + Application keys are shown together (see the
        "docs" entry in selectApplicationTab's panes map, app.ts), side by
@@ -364,11 +364,11 @@
              that could be reflowed apart. -->
         <span id="files-tree-path" class="files-tree-root">loaded/</span>
         <div id="files-actions" class="actions">
-          <button id="wallet-backup-export" type="button">Export</button>
           <!-- Also still in the header's hamburger menu (#context-unload-menu)
                -- both trigger the same #files-unload-body view below, this
                is just a second, more discoverable entry point. -->
           <button id="files-unload" type="button">Unload</button>
+          <button id="wallet-backup-export" type="button">Export</button>
         </div>
         <div id="files-back-actions" class="actions hidden">
           <button id="files-back" type="button" aria-label="Back">←</button>

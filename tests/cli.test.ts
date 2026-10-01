@@ -95,3 +95,34 @@ test("export: regenerates did.jsonl + did.json after an update, without a secret
   expect(didJson.service.some((s: any) => s.id === "#files")).toBe(true);
   expect(await run(["verify", join(out, ".well-known", "did.jsonl")], harness().io)).toBe(0);
 });
+
+test("new creates missing parent directories for --log", async () => {
+  const log = join(dir(), "a", "b", "did.jsonl");
+  expect(await run(["new", "--log", log, "--json"], harness().io)).toBe(0);
+  expect(readFileSync(log, "utf8").length).toBeGreaterThan(0);
+});
+
+test("export --jwe / import: <scid>.jwe + mnemonic restores an apex (username-less) identity", async () => {
+  const d = dir(), log = join(d, "did.jsonl");
+  const made = harness();
+  await run(["new", "--log", log, "--json"], made.io);
+  const mnemonic = JSON.parse(made.out).mnemonic;
+  const env = { DITO_MNEMONIC: mnemonic };
+  await run(["domain", "digitalcommons.jp", "--log", log, "--out", d], harness(env).io);
+
+  const exported = harness(env);
+  expect(await run(["export", "--jwe", "--log", log, "--out", d, "--json"], exported.io)).toBe(0);
+  const { scid, wrote } = JSON.parse(exported.out);
+  expect(wrote.endsWith(`${scid}.jwe`)).toBe(true);
+  expect(readFileSync(wrote, "utf8").split(".")).toHaveLength(5);
+
+  const restored = join(d, "restored", "did.jsonl");
+  const imported = harness(env);
+  expect(await run(["import", wrote, "--log", restored, "--json"], imported.io)).toBe(0);
+  expect(JSON.parse(imported.out).did.endsWith(":digitalcommons.jp")).toBe(true);
+  expect(readFileSync(restored, "utf8")).toBe(readFileSync(log, "utf8"));
+
+  const other = harness();
+  await run(["new", "--log", join(d, "x.jsonl"), "--json"], other.io);
+  expect(await run(["import", wrote, "--log", join(d, "y.jsonl")], harness({ DITO_MNEMONIC: JSON.parse(other.out).mnemonic }).io)).not.toBe(0);
+});

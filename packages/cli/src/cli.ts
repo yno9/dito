@@ -9,7 +9,7 @@
  * Output:   human text by default; --json prints one JSON object (agents).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { buildDidJson } from "../../wallet/src/github-host.ts";
 import { Identity } from "../../wallet/src/identity.ts";
@@ -32,6 +32,8 @@ Usage: dito <command> [options]
   verify [file|url|did]     Validate a log (default: --log); a did:webvh DID is fetched with its witness file
   fetch <did>               Download a published log to --log (public; no secret needed)
   export                    Write .well-known/did.jsonl + did.json from the log (no secret needed)
+  export --jwe              Write <scid>.jwe: log + keyring wrapped by the mnemonic (needs the mnemonic)
+  import <scid>.jwe         Restore the log from a .jwe with the mnemonic
   domain <host>             Re-home on your own domain/apex, write .well-known/did.jsonl + did.json
   connect <username>        Host on <username>.did.md   (--domain to change)
   github                    Host on <login>.github.io   (token from $GITHUB_TOKEN)
@@ -66,6 +68,7 @@ export async function run(argv: string[], io: IO): Promise<number> {
         domain: { type: "string" },
         out: { type: "string" },
         local: { type: "boolean" },
+        jwe: { type: "boolean" },
         "token-env": { type: "string", default: "GITHUB_TOKEN" },
         help: { type: "boolean", short: "h", default: false },
       },
@@ -92,7 +95,7 @@ export async function run(argv: string[], io: IO): Promise<number> {
     };
     const open = async () => Identity.open({ mnemonic: await mnemonic(), log: readLog() });
     const token = () => io.env[values["token-env"]!];
-    const save = (identity: Identity) => writeFileSync(logFile, identity.logText(), { mode: 0o644 });
+    const save = (identity: Identity) => { mkdirSync(dirname(logFile), { recursive: true }); writeFileSync(logFile, identity.logText(), { mode: 0o644 }); };
     const summary = (identity: Identity) => ({ did: identity.did, provisional: identity.isProvisional, entries: identity.entries.length, host: identity.isProvisional ? null : identity.host.kind });
 
     switch (command) {
@@ -117,6 +120,7 @@ export async function run(argv: string[], io: IO): Promise<number> {
         if (existsSync(logFile)) throw new UsageError(`${logFile} already exists; refusing to overwrite.`);
         const resolved = await resolveDidWebvh(rest[0]);
         const text = await (await fetch(didToLogUrl(rest[0]), { cache: "no-store" })).text();
+        mkdirSync(dirname(logFile), { recursive: true });
         writeFileSync(logFile, text, { mode: 0o644 });
         emit({ did: resolved.did, log: logFile, versionId: resolved.meta.versionId }, `Saved ${resolved.did} to ${logFile}`);
         return 0;
@@ -157,6 +161,14 @@ export async function run(argv: string[], io: IO): Promise<number> {
         return 0;
       }
       case "export": {
+        if (values.jwe) {
+          const { scid, jwe } = await (await open()).exportContainer();
+          mkdirSync(values.out ?? ".", { recursive: true });
+          const file = join(values.out ?? ".", `${scid}.jwe`);
+          writeFileSync(file, jwe, { mode: 0o600 });
+          emit({ scid, wrote: file }, `Wrote ${file} (open it with the same mnemonic: dito import ${file})`);
+          return 0;
+        }
         const text = readLog();
         const log = parseLog(text);
         const resolved = await resolveLog(log);
@@ -165,6 +177,14 @@ export async function run(argv: string[], io: IO): Promise<number> {
         writeFileSync(join(out, "did.jsonl"), text.endsWith("\n") ? text : `${text}\n`);
         writeFileSync(join(out, "did.json"), buildDidJson(resolved.doc, resolved.did));
         emit({ did: resolved.did, versionId: resolved.meta.versionId, wrote: out }, `Wrote did.jsonl and did.json for ${resolved.did} (${resolved.meta.versionId}) to ${out}/`);
+        return 0;
+      }
+      case "import": {
+        if (!rest[0]) throw new UsageError("Usage: dito import <scid>.jwe   (needs the mnemonic)");
+        if (existsSync(logFile)) throw new UsageError(`${logFile} already exists; refusing to overwrite.`);
+        const identity = await Identity.fromContainer({ jwe: readFileSync(rest[0], "utf8").trim(), mnemonic: await mnemonic() });
+        save(identity);
+        emit({ ...summary(identity), log: logFile }, `Restored ${identity.did}\nLog written to ${logFile}`);
         return 0;
       }
       case "github": {

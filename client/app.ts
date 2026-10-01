@@ -1942,15 +1942,15 @@ async function renderLocalKeyMaterial() {
   }
 }
 
-// endpoint()/rootResource() throw "This identity is not hosted on did.md."
-// deep inside publish -- but whether that's true is knowable up front from
-// the DID itself, so Rotate key checks it before ever letting the user
-// click into that failure (see updateKeyStatus() below).
-function isHostedOnDidMd() {
-  return Boolean(didMdUsername(loaded.entries.at(-1).state.id));
+// Writes go to whichever host the DID's own suffix names (hostForDid), so
+// anything but a hostless provisional identity can publish -- did.md, GitHub
+// Pages, or a bring-your-own domain. Rotate key checks it up front rather than
+// letting the user click into a failure (see updateKeyStatus() below).
+function isPublishedIdentity() {
+  return !isProvisionalDid(loaded.entries.at(-1).state.id);
 }
 
-// Reflects justRotated (see its own declaration) and isHostedOnDidMd() --
+// Reflects justRotated (see its own declaration) and isPublishedIdentity() --
 // kept separate from updateKeyStatus() so a rotation's own two internal
 // calls to updateKeyStatus() (once inside publishPreparedEntry(), same as
 // any other publish) don't reset the button back to "Rotate key" the
@@ -1963,13 +1963,13 @@ function updateRotateKeyButton() {
     return;
   }
   button.textContent = "Rotate key";
-  button.disabled = !isHostedOnDidMd();
+  button.disabled = !isPublishedIdentity();
 }
 
 function updateKeyStatus() {
   const target = query("#key-status");
   const enablePasskey = query("#enable-passkey");
-  if (!isHostedOnDidMd() || rotateKeyFailed) {
+  if (!isPublishedIdentity() || rotateKeyFailed) {
     // Not a one-off action result (like #keys-result's own errors) -- this
     // identity's current state, same standing as the normal message below,
     // so it replaces that message rather than flashing past in a panel.
@@ -5727,9 +5727,9 @@ async function publishPreparedEntry() {
   loaded.sign = await spareFromMasterSeed(loaded.masterSeed, loaded.currentSpareIndex);
   loaded.currentSpareIndex = pending.nextSpareIndex;
   await persistMasterMetadata();
-  // routing.json is a did.md-hosted root resource. GitHub user sites have
-  // no equivalent mutable API in this MVP -- skip rather than fail the update.
-  if (pending.routingResource && !isGitHubHostedDid(loaded.entries.at(-1).state.id)) {
+  // routing.json is a did.md-hosted root resource. Other hosts (GitHub user
+  // sites, bring-your-own domains) have no equivalent -- skip rather than fail the update.
+  if (pending.routingResource && didMdUsername(loaded.entries.at(-1).state.id)) {
     await publishRoutingResource(loaded.entries.at(-1).state.id, pending.routingResource);
   }
   await refreshIdentityViews();

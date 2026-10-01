@@ -52,6 +52,7 @@ import {
 } from "../packages/wallet/src/host.ts";
 import { verifyMasterOwnsLog } from "../packages/wallet/src/identity.ts";
 import { parseLoginHost, didIsHostedAt } from "../packages/wallet/src/login-hint.ts";
+import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
 import { withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
 import { WebvhHostingClient, currentParameters, parseLog as parseWebvhLog, resolveLog } from "../packages/webvh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
@@ -3862,7 +3863,10 @@ function oauthRedirect(request, values) {
 //   - file:// popup: postMessage to window.opener (already exposes nothing
 //     outside this browser; same mechanism as the "code" shape, different
 //     payload keys)
-async function oauthDeliver(request, values) {
+/** Delivers (or prepares to deliver) the response to the relying party in two steps: the part that
+ * can fail -- a direct_post the RP may refuse -- runs now; the returned `go()` navigates away and
+ * must run last, after the caller has recorded the approval locally (see commitAuthorization). */
+async function oauthDeliveryPlan(request, values) {
   const payload = { ...values, iss: OAUTH_ISSUER };
   // PLAN8: a real backend RP
   // (oidc-bridge) receives the response via its own POST endpoint instead
@@ -3891,21 +3895,27 @@ async function oauthDeliver(request, values) {
     // same-origin navigation into a javascript:/data: URL executed with
     // this page's own privileges.
     if (completedRedirect.protocol !== "https:") throw new Error("The relying party returned an invalid direct_post response.");
-    location.replace(completedRedirect.toString());
-    return;
+    return { go: () => location.replace(completedRedirect.toString()) };
   }
   const target = new URL(request.redirectUri);
   if (target.protocol === "file:" && !target.host) {
-    if (!window.opener) {
-      output("#wallet-result", "Authorization completed. Return to the requesting application; it will finish signing in automatically.");
-      return;
-    }
-    window.opener.postMessage({ type: "did.md/oauth-file-callback", protocol: 1, ...payload }, "*");
-    window.close();
-    return;
+    return {
+      go: () => {
+        if (!window.opener) {
+          output("#wallet-result", "Authorization completed. Return to the requesting application; it will finish signing in automatically.");
+          return;
+        }
+        window.opener.postMessage({ type: "did.md/oauth-file-callback", protocol: 1, ...payload }, "*");
+        window.close();
+      },
+    };
   }
   target.hash = new URLSearchParams(payload).toString();
-  location.replace(target.toString());
+  return { go: () => location.replace(target.toString()) };
+}
+
+async function oauthDeliver(request, values) {
+  (await oauthDeliveryPlan(request, values)).go();
 }
 
 async function approveAuthorization() {
@@ -3998,36 +4008,52 @@ async function approveAuthorization() {
       ...(walletAuthorization.scope.includes("email") ? { email: `${username}@users.did.invalid`, email_verified: false } : {}),
     }, { privateKey: loaded.root.privateKey, did })
     : undefined;
-  await saveWalletOAuthGrant({ id: capability.id, did, clientId: capability.audience, clientName: walletAuthorization.clientName, label: requestedDeviceLabel(authorizeDefaultName()), ...(walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ? { appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName } : {}), ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}), scope: capability.scope, issuedAt: capability.issuedAt, expiresAt: capability.expiresAt });
-  if (capability.deviceJkt) await saveAuthorizedDeviceBinding({ did, deviceJkt: capability.deviceJkt, clientName: walletAuthorization.clientName, didCommKeyId: edit?.verificationMethods[0]?.id });
-  await saveApplicationAuthorizationMetadata({ capability, edit, appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ?? undefined });
+  // Atomicity (see commitAuthorization): the grant card, device binding and app metadata are
+  // written only once the other side accepted -- the bridge issued a code, or the relying party
+  // took the direct_post -- and just before this page navigates away. A request that failed
+  // before that leaves nothing local behind (the DID document edit above is idempotent).
+  const persistAuthorization = async () => {
+    await saveWalletOAuthGrant({ id: capability.id, did, clientId: capability.audience, clientName: walletAuthorization.clientName, label: requestedDeviceLabel(authorizeDefaultName()), ...(walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ? { appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName } : {}), ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}), scope: capability.scope, issuedAt: capability.issuedAt, expiresAt: capability.expiresAt });
+    if (capability.deviceJkt) await saveAuthorizedDeviceBinding({ did, deviceJkt: capability.deviceJkt, clientName: walletAuthorization.clientName, didCommKeyId: edit?.verificationMethods[0]?.id });
+    await saveApplicationAuthorizationMetadata({ capability, edit, appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ?? undefined });
+  };
   // PLAN7: "vp_token id_token" delivers straight to the RP -- no
   // api.did.md call, no `code` -- see oauthDeliver's own comment. "code"
   // (oidc-bridge and any other RP still on the DCR/JAR + code+token
   // round trip) keeps calling /v1/oauth/authorize/complete exactly as
   // before.
   if (walletAuthorization.responseType === "vp_token id_token") {
-    await oauthDeliver(walletAuthorization, { vp_token: JSON.stringify({ capability: [vc] }), ...(idToken ? { id_token: idToken } : {}), state: walletAuthorization.state });
+    await commitAuthorization({
+      accept: () => oauthDeliveryPlan(walletAuthorization, { vp_token: JSON.stringify({ capability: [vc] }), ...(idToken ? { id_token: idToken } : {}), state: walletAuthorization.state }),
+      persist: persistAuthorization,
+      navigate: plan => plan.go(),
+    });
     return;
   }
-  const response = await fetch(`${API}/v1/oauth/authorize/complete`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      client_id: walletAuthorization.clientId, redirect_uri: walletAuthorization.redirectUri, state: walletAuthorization.state,
-      code_challenge: walletAuthorization.codeChallenge, code_challenge_method: "S256",
-      vp_token: { capability: [vc] }, ...(idToken ? { id_token: idToken } : {}),
-      // Always offered, not just for a not-yet-published DID: the Root
-      // (#pass-1) key this signs with never rotates across an identity's
-      // life, so submitting its genesis entry is harmless even for an
-      // already-hosted identity, and lets the server authenticate this
-      // approval without depending on this host's own did.jsonl resolution.
-      did_log: `${JSON.stringify(loaded.entries[0])}\n`,
-    }),
+  await commitAuthorization({
+    accept: async () => {
+      const response = await fetch(`${API}/v1/oauth/authorize/complete`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_id: walletAuthorization.clientId, redirect_uri: walletAuthorization.redirectUri, state: walletAuthorization.state,
+          code_challenge: walletAuthorization.codeChallenge, code_challenge_method: "S256",
+          vp_token: { capability: [vc] }, ...(idToken ? { id_token: idToken } : {}),
+          // Always offered, not just for a not-yet-published DID: the Root
+          // (#pass-1) key this signs with never rotates across an identity's
+          // life, so submitting its genesis entry is harmless even for an
+          // already-hosted identity, and lets the server authenticate this
+          // approval without depending on this host's own did.jsonl resolution.
+          did_log: `${JSON.stringify(loaded.entries[0])}\n`,
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const completed = await response.json();
+      if (!completed || typeof completed.code !== "string" || completed.state !== walletAuthorization.state || completed.redirect_uri !== walletAuthorization.redirectUri || completed.iss !== OAUTH_ISSUER) throw new Error("The authorization server returned an invalid authorization response.");
+      return completed;
+    },
+    persist: persistAuthorization,
+    navigate: completed => oauthRedirect(walletAuthorization, { code: completed.code, state: completed.state }),
   });
-  if (!response.ok) throw new Error(await response.text());
-  const completed = await response.json();
-  if (!completed || typeof completed.code !== "string" || completed.state !== walletAuthorization.state || completed.redirect_uri !== walletAuthorization.redirectUri || completed.iss !== OAUTH_ISSUER) throw new Error("The authorization server returned an invalid authorization response.");
-  oauthRedirect(walletAuthorization, { code: completed.code, state: completed.state });
 }
 
 async function rejectOAuthAuthorization() {

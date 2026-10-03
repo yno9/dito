@@ -53,7 +53,8 @@ import {
 import { verifyMasterOwnsLog } from "../packages/wallet/src/identity.ts";
 import { parseLoginHost, didIsHostedAt } from "../packages/wallet/src/login-hint.ts";
 import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
-import { withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
+import { applyOutcome, grantDisplayState, shouldPoll } from "../packages/wallet/src/grant-outcome.ts";
+import { assertEndpointRemovals, assertServiceEndpointMode, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
 import { WebvhHostingClient, currentParameters, parseLog as parseWebvhLog, resolveLog } from "../packages/webvh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
 import dashboardHeaderTemplate from "./pages/dashboard-header.html";
@@ -585,7 +586,7 @@ function didDocumentEditDetail(details, did) {
   if (!matches.length) return undefined;
   if (matches.length !== 1) throw new Error("The DID document edit request is duplicated.");
   const detail = detailObject(matches[0], "The DID document edit request");
-  const detailShape = ["type", "services", "verificationMethods", "remove", ...(detail.serviceKeyBindings === undefined ? [] : ["serviceKeyBindings"])];
+  const detailShape = ["type", "services", "verificationMethods", "remove", ...(detail.serviceKeyBindings === undefined ? [] : ["serviceKeyBindings"]), ...(detail.removeEndpoints === undefined ? [] : ["removeEndpoints"])];
   detailKeys(detail, detailShape, "The DID document edit request");
   if (!Array.isArray(detail.services) || !Array.isArray(detail.verificationMethods) || !Array.isArray(detail.remove)
     || detail.services.length > 64 || detail.verificationMethods.length > 64 || detail.remove.length > 128) throw new Error("The DID document edit request is invalid.");
@@ -597,12 +598,14 @@ function didDocumentEditDetail(details, did) {
   // strings and/or maps -- accept all three shapes, not just the first two.
   const validEndpoint = endpoint => typeof endpoint === "string" || (!!endpoint && typeof endpoint === "object" && !Array.isArray(endpoint));
   for (const value of detail.services) {
-    const service = detailObject(value, "DID service"); detailKeys(service, ["id", "type", "serviceEndpoint"], "DID service");
+    const service = detailObject(value, "DID service"); detailKeys(service, ["id", "type", "serviceEndpoint", ...(service.endpointMode === undefined ? [] : ["endpointMode"])], "DID service");
     const endpointValid = Array.isArray(service.serviceEndpoint)
       ? service.serviceEndpoint.length > 0 && service.serviceEndpoint.length <= 8 && service.serviceEndpoint.every(validEndpoint)
       : validEndpoint(service.serviceEndpoint);
     if (!validId(service.id) || typeof service.type !== "string" || !service.type.trim() || !endpointValid) throw new Error("A DID service is invalid.");
+    assertServiceEndpointMode(service);
   }
+  if (detail.removeEndpoints !== undefined) assertEndpointRemovals(detail.removeEndpoints, validId);
   // controller is force-set to the Wallet's own loaded DID below, never
   // trusted from the relying party's request -- a verification method
   // published into THIS identity's own DID Document must be controlled by
@@ -694,27 +697,120 @@ let hoverToastActive = false;
 let actionToast = null; // { message, error } | null -- whatever's currently "live"
 let actionToastTimer = null;
 
-// The Authorize card and the system-message toast are both bottom sheets, and
-// two at once cover each other. So the card is treated as the system-message
-// surface while it is open: text messages are shown inside it (its own
-// #wallet-authorize-message line) and the toast sheet stays closed; when the
-// card closes, that line is cleared and messages use the toast again.
-function authorizeCardOpen() {
+// ---- System sheets: ONE bottom-sheet slot, one rule ----
+// The toast, the Authorize card and the Import card are all system messages
+// shown in the same bottom slot. The rule is the same for every one of them:
+// whatever is shown last overwrites what is showing, and when it goes away the
+// one it covered is revealed again. So there is a stack of sheet ids (last =
+// on top) and no sheet knows about any other: it only asks to be shown or
+// hidden. A sheet is { el, setOpen(open), raise(z) }; setOpen does that
+// sheet's own open/close animation.
+const SHEET_COVER_MS = 350; // a covered sheet is retired once the one above has slid over it
+const sheetStack = [];
+let sheetZ = 100;
+const sheets = {
+  toast: {
+    el: () => query("#context-toast"),
+    setOpen(open) {
+      const toast = query("#context-toast");
+      if (!toast) return;
+      clearTimeout(this.hideTimer);
+      if (open) {
+        toast.classList.add("is-shown");
+        void toast.offsetHeight; // commit the off-screen start state so the slide runs
+        toast.classList.add("is-open");
+        return;
+      }
+      toast.classList.remove("is-open");
+      this.hideTimer = setTimeout(() => toast.classList.remove("is-shown"), SHEET_COVER_MS);
+    },
+  },
+  authorize: {
+    el: () => query("#wallet-authorize-panel"),
+    setOpen: open => query("#wallet-authorize-panel")?.classList.toggle("hidden", !open),
+  },
+  import: {
+    el: () => query("#load-glass-card"),
+    setOpen(open) {
+      const card = query("#load-glass-card");
+      const scrim = query("#load-glass-scrim");
+      clearTimeout(this.closeTimer);
+      if (open) {
+        for (const part of [scrim, card]) {
+          part?.classList.remove("hidden");
+          requestAnimationFrame(() => part?.classList.add("is-open"));
+        }
+        return;
+      }
+      scrim?.classList.remove("is-open");
+      card?.classList.remove("is-open");
+      this.closeTimer = window.setTimeout(() => {
+        if (card && !card.classList.contains("is-open")) card.classList.add("hidden");
+        if (scrim && !scrim.classList.contains("is-open")) scrim.classList.add("hidden");
+      }, SHEET_COVER_MS);
+    },
+    raise(z) {
+      const scrim = query("#load-glass-scrim");
+      if (scrim) scrim.style.zIndex = String(z - 1);
+    },
+  },
+};
+for (const sheet of Object.values(sheets)) { sheet.open = false; sheet.retireTimer = null; }
+
+function sheetInStack(id) {
+  return sheetStack.includes(id);
+}
+
+// Show a sheet: it goes on top of whatever is showing.
+function showSheet(id) {
+  const at = sheetStack.indexOf(id);
+  if (at >= 0) sheetStack.splice(at, 1);
+  sheetStack.push(id);
+  sheetZ += 2;
+  const sheet = sheets[id];
+  const el = sheet.el();
+  if (el) el.style.zIndex = String(sheetZ);
+  sheet.raise?.(sheetZ);
+  applySheets();
+}
+
+// Hide a sheet: whatever it covered is revealed.
+function hideSheet(id) {
+  const at = sheetStack.indexOf(id);
+  if (at < 0) return;
+  sheetStack.splice(at, 1);
+  applySheets();
+}
+
+function applySheets() {
+  const top = sheetStack.at(-1);
+  for (const [id, sheet] of Object.entries(sheets)) {
+    clearTimeout(sheet.retireTimer);
+    sheet.retireTimer = null;
+    if (id === top) {
+      if (!sheet.open) { sheet.open = true; sheet.setOpen(true); }
+    } else if (sheet.open && sheetStack.includes(id)) {
+      // Covered, not closed: let the sheet above finish sliding over it first.
+      sheet.retireTimer = setTimeout(() => { sheet.open = false; sheet.setOpen(false); }, SHEET_COVER_MS);
+    } else if (sheet.open) {
+      sheet.open = false;
+      sheet.setOpen(false);
+    }
+  }
+  syncAuthorizeReserve();
+}
+
+// The Authorize card is a fixed sheet that would sit on top of the page's last
+// rows with no way to scroll them clear, so the footer reserves its height
+// (--wallet-authorize-card-height) while the card is in the stack, even when
+// another sheet is temporarily covering it.
+let authorizeCardHeight = 0;
+function syncAuthorizeReserve() {
   const panel = query("#wallet-authorize-panel");
-  return Boolean(panel && !panel.classList.contains("hidden"));
+  if (panel && panel.offsetHeight) authorizeCardHeight = panel.offsetHeight;
+  document.documentElement.style.setProperty(
+    "--wallet-authorize-card-height", `${sheetInStack("authorize") ? authorizeCardHeight : 0}px`);
 }
-
-function setAuthorizeMessage(message, error) {
-  const line = query("#wallet-authorize-message");
-  if (!line) return;
-  line.textContent = message ?? "";
-  line.classList.toggle("hidden", !message);
-  line.classList.toggle("error", Boolean(message) && Boolean(error));
-}
-
-// What the toast is currently telling the user (null when nothing), so a
-// message that is up when the Authorize card opens can move into the card.
-let shownToast = null;
 
 function paintContextToast(message, error) {
   // Lives directly under <body>, not in a header template: a header ancestor
@@ -736,17 +832,13 @@ function paintContextToast(message, error) {
     </button><span class="context-toast-text"></span>`;
     toast.querySelector(".context-toast-close").addEventListener("click", dismissActionToast);
   }
-  shownToast = message ? { message, error: Boolean(error) } : null;
-  if (authorizeCardOpen()) {
-    setAuthorizeMessage(message, error);
-    toast.classList.remove("is-open");
-    return;
-  }
   if (message) {
     toast.querySelector(".context-toast-text").textContent = message;
     toast.classList.toggle("error", Boolean(error));
+    showSheet("toast");
+  } else {
+    hideSheet("toast");
   }
-  toast.classList.toggle("is-open", Boolean(message));
 }
 
 function showActionToast(message, error = false) {
@@ -766,10 +858,6 @@ function showActionToast(message, error = false) {
 // Outside click or Escape dismisses the toast right away; clicks on the
 // toast itself do nothing.
 function dismissActionToast() {
-  // While the Authorize card is the open sheet, its message belongs to the card:
-  // clicking the card (or anywhere else on the page) must not wipe it. It goes
-  // when the card closes, when a new message replaces it, or after 60 s.
-  if (authorizeCardOpen()) return;
   if (!actionToast && !hoverToastActive) return;
   if (actionToastTimer) clearTimeout(actionToastTimer);
   actionToastTimer = null;
@@ -1254,7 +1342,59 @@ function appNameHeading(grants, bindingsByDevice, clientName) {
   return heading;
 }
 
-async function renderWalletGrants() {
+let grantOutcomeTimer = null;
+let grantOutcomeBusy = false;
+
+// One outcome check for every grant still waiting on its relying party's report. A 404 means
+// "nothing reported yet"; network errors are ignored (the next tick retries). Returns whether a
+// stored grant changed state.
+async function pollGrantOutcomes() {
+  if (grantOutcomeBusy) return false;
+  grantOutcomeBusy = true;
+  try {
+    const now = new Date();
+    const waiting = (await listWalletOAuthGrants()).filter(grant => !grant.importedAt && shouldPoll(grant, now));
+    const updates = [];
+    await Promise.all(waiting.map(async grant => {
+      try {
+        const response = await fetch(`${API}/v1/oauth/outcome/${encodeURIComponent(grant.id)}`, { cache: "no-store", signal: AbortSignal.timeout(5000) });
+        if (!response.ok) return; // 404: nothing reported yet
+        const body = await response.json();
+        if (!body || (body.status !== "active" && body.status !== "failed")) return;
+        const next = applyOutcome(grant, { status: body.status, reason: typeof body.reason === "string" ? body.reason : undefined }, new Date());
+        if (next.outcome !== grant.outcome || next.outcomeReason !== grant.outcomeReason) updates.push(next);
+      } catch { /* offline or slow: try again on the next tick */ }
+    }));
+    if (!updates.length) return false;
+    // The person may have forgotten an app while the requests were in flight: do not resurrect it.
+    const present = new Set((await listWalletOAuthGrants()).map(grant => grant.id));
+    const live = updates.filter(grant => present.has(grant.id));
+    for (const grant of live) await saveWalletOAuthGrant(grant);
+    return live.length > 0;
+  } catch { return false; } finally { grantOutcomeBusy = false; }
+}
+
+// Poll once now, then every ~10 s while the page is visible, for as long as any grant is waiting.
+function syncGrantOutcomePolling(grants, { immediate }) {
+  const waiting = grants.some(grant => !grant.importedAt && shouldPoll(grant, new Date()));
+  if (!waiting) {
+    if (grantOutcomeTimer !== null) { clearInterval(grantOutcomeTimer); grantOutcomeTimer = null; }
+    return;
+  }
+  // pending turns into unconfirmed with time alone, so also repaint when a shown state has aged.
+  const shown = grants.map(grant => [grant, grantDisplayState(grant, new Date())]);
+  const tick = async () => {
+    if (document.hidden) return;
+    const changed = await pollGrantOutcomes();
+    const now = new Date();
+    if (changed || shown.some(([grant, state]) => grantDisplayState(grant, now) !== state)) await renderWalletGrants({ fromPoll: true });
+  };
+  if (grantOutcomeTimer !== null) { clearInterval(grantOutcomeTimer); grantOutcomeTimer = null; }
+  grantOutcomeTimer = setInterval(() => void tick(), 10000);
+  if (immediate) void tick();
+}
+
+async function renderWalletGrants({ fromPoll = false } = {}) {
   const target = query("#wallet-grant-list");
   if (!target) return;
   target.replaceChildren();
@@ -1265,6 +1405,7 @@ async function renderWalletGrants() {
     // database created by a previous app version cannot leak its labels.
     const oauthGrants = activeDid ? allOauthGrants.filter(grant => grant.did === activeDid) : [];
     const deviceBindings = activeDid ? allDeviceBindings.filter(binding => binding.did === activeDid) : [];
+    syncGrantOutcomePolling(oauthGrants, { immediate: !fromPoll });
     if (!oauthGrants.length) return;
     const bindingsByDevice = new Map(deviceBindings.map(binding => [`${binding.did}\n${binding.deviceJkt}`, binding]));
     // One card per app (clientId). saveWalletOAuthGrant already keeps at
@@ -1352,7 +1493,12 @@ async function renderWalletGrants() {
         ]);
         const meta = document.createElement("p");
         meta.className = "storage-state sealed";
-        meta.textContent = grant.importedAt ? `Imported audit record · this browser has no DPoP key` : `Active until ${grantDate(grant.expiresAt)}`;
+        // Outcome reporting: only a relying party that reports has `outcome`; the rest stay "Active".
+        const state = grant.importedAt ? "active" : grantDisplayState(grant, new Date());
+        if (state === "pending") { meta.classList.replace("sealed", "offline"); meta.textContent = "Waiting for the application..."; }
+        else if (state === "unconfirmed") { meta.classList.replace("sealed", "offline"); meta.textContent = "The application has not confirmed this sign-in"; }
+        else if (state === "failed") { meta.classList.replace("sealed", "warning"); meta.textContent = `Failed: ${grant.outcomeReason || "the application reported an error"}`; }
+        else meta.textContent = grant.importedAt ? `Imported audit record · this browser has no DPoP key` : `Active until ${grantDate(grant.expiresAt)}`;
         device.insertBefore(meta, device.querySelector(".fields"));
         if (usedServices.length || usedKeys.length) device.append(encryptedMetadataPanel([
           ["Uses services", usedServices.length ? usedServices.join("\n") : "None"],
@@ -3419,14 +3565,16 @@ async function migratePortableApplicationMetadata() {
   portableApplications = applications;
 }
 
-async function unlockIdentity(username, enteredMaster, password = "") {
+// `source` ({ did, logUrl }) is for an identity not stored in this browser yet:
+// its log is read from logUrl instead of being looked up from a stored record.
+async function unlockIdentity(username, enteredMaster, password = "", source = undefined) {
   if (loaded) {
     discardPending();
     discardLoadedIdentity();
   }
   const record = await readStoredIdentity(username);
   if (enteredMaster) {
-    await loadMasterIdentity(username, record?.did, record?.v === 4 || record?.v === 5 ? record : undefined, seedFromMnemonic(enteredMaster, "Passphrase"));
+    await loadMasterIdentity(username, record?.did ?? source?.did, record?.v === 4 || record?.v === 5 ? record : undefined, seedFromMnemonic(enteredMaster, "Passphrase"), source?.logUrl);
     if (password) {
       // The public log and supplied Master have now been verified. Clearing
       // here (rather than before verification) prevents a failed attempt
@@ -3496,20 +3644,14 @@ function setAuthorizeNameEditing(editing) {
 function renderWalletAuthorization() {
   const panel = query("#wallet-authorize-panel");
   if (!panel) return;
-  const wasOpen = !panel.classList.contains("hidden");
-  panel.classList.toggle("hidden", !walletAuthorization);
-  if (wasOpen !== Boolean(walletAuthorization)) {
-    // One bottom sheet at a time: opening moves a live message into the card,
-    // closing drops the in-card line.
-    if (walletAuthorization) {
-      if (shownToast) paintContextToast(shownToast.message, shownToast.error);
-      else setAuthorizeMessage("", false);
-    } else {
-      setAuthorizeMessage("", false);
-      shownToast = null;
-    }
+  if (walletAuthorization) {
+    // Re-renders happen on every unrelated renderSync: only a request that is
+    // not on a sheet yet claims the slot, so it never re-covers a newer sheet.
+    if (!sheetInStack("authorize")) showSheet("authorize");
+  } else {
+    hideSheet("authorize");
+    return;
   }
-  if (!walletAuthorization) return;
   // clientName is a did:webvh identifier for a SIOPv2 relying party (its own
   // client_name never having been registered anywhere) -- show just its
   // host segment (e.g. "oidc-bridge.did.md") instead of the full DID, same
@@ -3525,7 +3667,8 @@ function renderWalletAuthorization() {
   const didComm = query("#wallet-authorize-didcomm");
   const edit = didDocumentEditDetail(walletAuthorization.authorizationDetails, walletAuthorization.did ?? loaded?.entries.at(-1).state.id ?? "");
   const changes = edit ? [
-    ...edit.services.map(service => `Add or replace service: ${service.type} (${service.id}) → ${typeof service.serviceEndpoint === "string" ? service.serviceEndpoint : JSON.stringify(service.serviceEndpoint)}`),
+    ...(edit.removeEndpoints ?? []).map(removal => `Remove from service ${removal.serviceId} the endpoints matching ${JSON.stringify(removal.match)}`),
+    ...edit.services.map(service => `${service.endpointMode === "merge" ? "Add to service" : "Add or replace service"}: ${service.type} (${service.id}) → ${typeof service.serviceEndpoint === "string" ? service.serviceEndpoint : JSON.stringify(service.serviceEndpoint)}`),
     ...edit.verificationMethods.map(method => `Add or replace verification method: ${method.type} (${method.id})`),
     ...edit.remove.map(id => `Remove: ${id}`),
   ] : [];
@@ -3561,6 +3704,7 @@ function renderWalletAuthorization() {
   query("#wallet-authorize-expires").textContent = new Date(Date.now() + DEVICE_CAPABILITY_GRANT_MS).toLocaleString();
   const approve = query("#wallet-authorize-approve");
   const status = query("#wallet-authorize-status");
+  panel.classList.toggle("no-identity", !loaded && !storedIdentityRecord);
   if (!loaded && !storedIdentityRecord) {
     approve.disabled = true;
     status.textContent = "Create or load an identity before approving this application.";
@@ -3795,6 +3939,8 @@ async function beginOAuthAuthorization() {
     // derived from the request itself rather than fetched from
     // /v1/oauth/clients/.
     let clientName;
+    // Only a registered client can opt in to outcome reporting; JAR / did:webvh RPs have no metadata.
+    let outcomeReporting = false;
     if (request.clientId.startsWith("did:webvh:")) {
       clientName = request.clientId;
     } else {
@@ -3810,25 +3956,13 @@ async function beginOAuthAuthorization() {
       const registeredScopes = client.scope.split(" ");
       if (request.scope.some(scope => !registeredScopes.includes(scope))) throw new Error("The application requested a scope it did not register.");
       clientName = client.client_name;
+      outcomeReporting = client.outcome_reporting === true;
     }
-    walletAuthorization = { ...request, clientName };
+    walletAuthorization = { ...request, clientName, outcomeReporting };
     renderSync();
     selectTab("home");
-    // Only when there is no identity at all. A stored but locked identity already
-    // has one (Approve will ask for its passphrase), so telling the person to
-    // "create or load an identity" would be wrong.
-    await identityRestored;
-    if (!loaded && !storedIdentityRecord) {
-      // No identity at all yet lands on the creation screen (see
-      // renderRoute's hasIdentity check) -- show this in ITS OWN output
-      // field, not #wallet-result, which sits below the (now collapsed,
-      // mostly empty-looking) authorize card further down the page and
-      // read as if some unrelated banner had appeared there (found live,
-      // 2026-09-14). A stored-but-locked identity still lands on the
-      // dashboard, where #wallet-result is the right (only) place for it.
-      const message = `Create or load an identity to authorize ${clientName}; no private key will be sent to the application.`;
-      output("#create-result", message);
-    }
+    // No identity yet: the Authorize card itself says so (Approve is greyed out
+    // with "Create or load an identity before approving"), so no extra message.
   } catch (error) {
     output("#wallet-result", errorMessage(error), true);
   }
@@ -3931,7 +4065,7 @@ async function approveAuthorization() {
   const edit = didDocumentEditDetail(walletAuthorization.authorizationDetails, did);
   const keyAuthorization = keyAuthorizationDetail(walletAuthorization.authorizationDetails);
   derivedSecretDetails(walletAuthorization.authorizationDetails); // validates before any network/signing work below
-  if (edit && (edit.services.length || edit.verificationMethods.length || edit.remove.length)) {
+  if (edit && (edit.services.length || edit.verificationMethods.length || edit.remove.length || edit.removeEndpoints?.length)) {
     // The signed DID document is the source of truth for the edit; there is no
     // separate routing.json resource, on did.md or any other host.
     const nextState = withDidDocumentEdit(loaded.entries.at(-1).state, edit);
@@ -4013,7 +4147,7 @@ async function approveAuthorization() {
   // took the direct_post -- and just before this page navigates away. A request that failed
   // before that leaves nothing local behind (the DID document edit above is idempotent).
   const persistAuthorization = async () => {
-    await saveWalletOAuthGrant({ id: capability.id, did, clientId: capability.audience, clientName: walletAuthorization.clientName, label: requestedDeviceLabel(authorizeDefaultName()), ...(walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ? { appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName } : {}), ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}), scope: capability.scope, issuedAt: capability.issuedAt, expiresAt: capability.expiresAt });
+    await saveWalletOAuthGrant({ id: capability.id, did, clientId: capability.audience, clientName: walletAuthorization.clientName, label: requestedDeviceLabel(authorizeDefaultName()), ...(walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ? { appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName } : {}), ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}), scope: capability.scope, issuedAt: capability.issuedAt, expiresAt: capability.expiresAt, ...(walletAuthorization.outcomeReporting === true && walletAuthorization.responseType !== "vp_token id_token" ? { outcome: "pending" } : {}) });
     if (capability.deviceJkt) await saveAuthorizedDeviceBinding({ did, deviceJkt: capability.deviceJkt, clientName: walletAuthorization.clientName, didCommKeyId: edit?.verificationMethods[0]?.id });
     await saveApplicationAuthorizationMetadata({ capability, edit, appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ?? undefined });
   };
@@ -4781,16 +4915,13 @@ function setCreationConfirmStep(active) {
   document.body.classList.toggle("creation-confirm-dim", active);
 }
 
-let loadGlassCloseTimer = null;
-
 function setCreationLoadMode(enabled) {
-  const card = query("#load-glass-card");
-  const scrim = query("#load-glass-scrim");
   const field = query("#master-mnemonic");
   const homeSlot = query("#master-mnemonic-wrap");
   const cardSlot = query("#passphrase-slot-load");
 
   query("#create-load-form").classList.toggle("creation-load-mode", enabled);
+  if (enabled) showSheet("import"); else hideSheet("import");
   query("#header-load-toggle").classList.toggle("active", enabled);
   query("#header-load-toggle").setAttribute("aria-pressed", String(enabled));
 
@@ -4798,14 +4929,6 @@ function setCreationLoadMode(enabled) {
     // Keep last known phrase so returning from Load can restore it
     const current = query("#master-mnemonic")?.value;
     if (current) lastCreatePhrase = current;
-    if (scrim) {
-      scrim.classList.remove("hidden");
-      requestAnimationFrame(() => scrim.classList.add("is-open"));
-    }
-    if (card) {
-      card.classList.remove("hidden");
-      requestAnimationFrame(() => card.classList.add("is-open"));
-    }
     if (field && cardSlot && field.parentElement !== cardSlot) {
       cardSlot.append(field);
       field.style.height = "";
@@ -4819,16 +4942,6 @@ function setCreationLoadMode(enabled) {
     updateCreationLoadSubmit();
     window.setTimeout(() => query("#creation-load-source")?.focus(), 50);
     return;
-  }
-
-  if (loadGlassCloseTimer) clearTimeout(loadGlassCloseTimer);
-  if (scrim) scrim.classList.remove("is-open");
-  if (card) {
-    card.classList.remove("is-open");
-    loadGlassCloseTimer = window.setTimeout(() => {
-      if (!card.classList.contains("is-open")) card.classList.add("hidden");
-      if (scrim && !scrim.classList.contains("is-open")) scrim.classList.add("hidden");
-    }, 350);
   }
 
   restoreHomePassphrase();
@@ -4957,6 +5070,14 @@ function resetCreationLoadUrlStatus() {
 }
 
 function creationLoadLogUrl(value) {
+  if (/^did:webvh:/i.test(value)) {
+    // did:webvh:<SCID>:<host>[:<path>...] -> the host's log (spec: no path =
+    // /.well-known/did.jsonl, otherwise <path>/did.jsonl). A port is %3A-encoded.
+    const [, , , host, ...path] = value.split(":");
+    if (!host) throw new Error("Not a did:webvh identifier");
+    const base = `https://${decodeURIComponent(host)}`;
+    return new URL(path.length ? `${base}/${path.map(decodeURIComponent).join("/")}/did.jsonl` : `${base}/.well-known/did.jsonl`);
+  }
   const withScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
   const url = new URL(withScheme);
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Not a web URL");
@@ -5001,7 +5122,14 @@ function checkCreationLoadUrl() {
 }
 
 query("#creation-load-source").addEventListener("input", checkCreationLoadUrl);
-query("#master-mnemonic").addEventListener("input", updateCreationLoadSubmit);
+query("#master-mnemonic").addEventListener("input", () => {
+  updateCreationLoadSubmit();
+  // Same trigger as the unlock prompt (looksLikeCompleteMnemonic): a complete
+  // 24-word Passphrase, typed, pasted or autofilled, imports right away.
+  const submit = query("#creation-load-submit");
+  if (query("#create-load-form").classList.contains("creation-load-mode")
+    && looksLikeCompleteMnemonic(query("#master-mnemonic").value) && !submit.disabled) submit.click();
+});
 
 // #master-mnemonic is dual-purpose: in "load" mode the user types/pastes
 // their own existing Passphrase here, but in "create" mode it holds a
@@ -5066,8 +5194,21 @@ query("#master-mnemonic").addEventListener("mousedown", (event) => {
 // below the file row -- it is also the local password, as in loadFromOnlineDid).
 onClick("#creation-load-submit", "#wallet-result", async () => {
   const file = query("#creation-load-file").files?.[0];
-  if (!file) throw new Error("Choose a .jwe file to import.");
+  const sourceText = query("#creation-load-source").value.trim();
   const mnemonic = query("#master-mnemonic").value.trim();
+  if (!file && sourceText && !sourceText.startsWith("file://")) {
+    // A DID URL / full did.jsonl path: read the public log from there and
+    // check the Passphrase against it (loadMasterIdentity verifies the whole
+    // log). The password-protected record is saved only after that succeeds.
+    const logUrl = creationLoadLogUrl(sourceText);
+    const response = await fetch(logUrl, { cache: "no-store" });
+    if (!response.ok) throw new Error(`DID document returned ${response.status}`);
+    const did = parseLog(await response.text()).at(-1)?.state?.id;
+    if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+    await unlockIdentity(await storageKeyForDid(did), mnemonic, mnemonic, { did, logUrl: logUrl.toString() });
+    return;
+  }
+  if (!file) throw new Error("Choose a .jwe file or enter a DID URL to import.");
   const masterSeed = seedFromMnemonic(mnemonic, "Passphrase");
   try {
     const imported = await importIdentityContainer((await file.text()).trim(), masterSeed, { password: mnemonic });
@@ -5299,23 +5440,29 @@ query("#wallet-authorize-edit-device").addEventListener("mousedown", event => ev
 }
 
 
-// The card is a fixed bottom sheet, not part of normal document flow, so it
-// can cover page content (the Create button, the Alias toggle, ...) with no
-// way to scroll that content into view above it -- the page's own scroll
-// height never accounted for the card sitting on top. Keep a CSS variable
-// in sync with the card's actual current height (0 while hidden, and
-// whatever it is right now while expanded/collapsed/editing a device
-// label, all of which resize it) so body's padding-bottom can reserve
-// exactly that much extra scroll room, no more.
+// Safari's bottom toolbar takes the footer's colour while the footer is at the
+// bottom of the screen: see #bottom-edge in styles.css.
 {
-  const authorizePanel = query("#wallet-authorize-panel");
-  const syncAuthorizeCardHeight = () => {
-    const height = authorizePanel.classList.contains("hidden") ? 0 : authorizePanel.offsetHeight;
-    document.documentElement.style.setProperty("--wallet-authorize-card-height", `${height}px`);
+  const strip = document.createElement("div");
+  strip.id = "bottom-edge";
+  strip.setAttribute("aria-hidden", "true");
+  document.body.append(strip);
+  let pending = false;
+  const update = () => {
+    pending = false;
+    const box = document.querySelector("#site-footer")?.getBoundingClientRect();
+    strip.classList.toggle("on-footer", Boolean(box) && box.top < window.innerHeight && box.bottom >= window.innerHeight - 1);
   };
-  new ResizeObserver(syncAuthorizeCardHeight).observe(authorizePanel);
-  syncAuthorizeCardHeight();
+  const schedule = () => { if (!pending) { pending = true; requestAnimationFrame(update); } };
+  addEventListener("scroll", schedule, { passive: true });
+  addEventListener("resize", schedule);
+  new ResizeObserver(schedule).observe(document.body);
+  schedule();
 }
+
+// Keep the footer's reserve in step with the Authorize card as it resizes
+// (expanded / collapsed / editing a device label); see syncAuthorizeReserve.
+new ResizeObserver(syncAuthorizeReserve).observe(query("#wallet-authorize-panel"));
 
 function serviceDirectoryFor(serviceId) {
   for (const application of portableApplications) {

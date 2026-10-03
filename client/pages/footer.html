@@ -40,6 +40,7 @@
   class="wallet-session wallet-authorize-card hidden"
   aria-live="polite"
 >
+  <div class="system-sheet-scroll">
   <h3 class="wallet-authorize-heading">
     <span class="wallet-authorize-heading-prefix">Authorize</span>
     <span id="wallet-authorize-title" class="wallet-authorize-heading-title">application</span>
@@ -66,8 +67,6 @@
     </button>
   </h3>
   <p id="wallet-authorize-status" class="hint"></p>
-  <!-- System messages (what the bottom toast shows) appear here while this card is open: one bottom sheet at a time. -->
-  <p id="wallet-authorize-message" class="hint hidden" role="status"></p>
   <!-- What is being approved, always visible: read it, then press Approve. -->
   <div id="wallet-authorize-details">
     <dl>
@@ -112,5 +111,6 @@
     <button id="wallet-authorize-approve" class="primary wallet-authorize-approve" type="button">
       Approve
     </button>
+  </div>
   </div>
 </section>

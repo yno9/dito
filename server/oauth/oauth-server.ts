@@ -121,6 +121,8 @@ const OAUTH_MAX_REGISTRATIONS_PER_WINDOW = 20;
 type OAuthClient = {
   clientId: string; clientName: string; redirectUris: string[]; scopes: string[];
   createdAt: string; updatedAt: string; registrationTokenHash: string;
+  // Opt-in: the RP reports success/failure back via POST /v1/oauth/outcome. Absent in older persisted clients (= false).
+  outcomeReporting?: boolean;
 };
 // PLAN3: the capability is now a
 // VC-DM 2.0 Verifiable Credential with an embedded `proof`, not a
@@ -158,6 +160,41 @@ const oauthTokens = new Map<string, OAuthToken>();
 const oauthFileCallbacks = new Map<string, { clientId: string; code: string; expiresAt: string }>();
 
 function oauthPath() { return join(DATA_DIR, "oauth", "state.json"); }
+
+// ── Outcome reporting ──────────────────────────────────────────────────────
+// After finishing, an RP may report whether the approval actually worked
+// (e.g. a PDS that rejects the DID document after the redirect) using its
+// access token; the wallet reads it back by capability id. Persisted (unlike
+// tokens) so a report outlives a restart; bounded by age and entry count.
+type OAuthOutcome = { status: "active" | "failed"; reason?: string; updatedAt: string };
+const OUTCOME_MAX_AGE_MS = 30 * 24 * 3600_000;
+const OUTCOME_MAX_ENTRIES = 10_000;
+const OUTCOME_MAX_REASON = 200;
+let oauthOutcomes: Map<string, OAuthOutcome> | undefined;
+function outcomesPath() { return join(DATA_DIR, "oauth", "outcomes.json"); }
+function loadOutcomes(): Map<string, OAuthOutcome> {
+  if (oauthOutcomes) return oauthOutcomes;
+  const map = new Map<string, OAuthOutcome>();
+  try {
+    const source = read(outcomesPath());
+    const value = source === null ? undefined : JSON.parse(source);
+    if (isObj(value)) for (const [id, item] of Object.entries(value)) {
+      if (!isObj(item) || (item.status !== "active" && item.status !== "failed") || typeof item.updatedAt !== "string") continue;
+      map.set(id, { status: item.status, ...(typeof item.reason === "string" ? { reason: item.reason } : {}), updatedAt: item.updatedAt });
+    }
+  } catch { /* an unreadable outcomes file is treated as empty; outcomes are advisory */ }
+  return oauthOutcomes = map;
+}
+function saveOutcomes(now = Date.now()) {
+  const map = loadOutcomes();
+  for (const [id, item] of map) if (!(now - Date.parse(item.updatedAt) < OUTCOME_MAX_AGE_MS)) map.delete(id);
+  if (map.size > OUTCOME_MAX_ENTRIES) {
+    const oldest = [...map].sort((a, b) => Date.parse(a[1].updatedAt) - Date.parse(b[1].updatedAt)).slice(0, map.size - OUTCOME_MAX_ENTRIES);
+    for (const [id] of oldest) map.delete(id);
+  }
+  atomicWrite(outcomesPath(), JSON.stringify(Object.fromEntries(map)));
+}
+
 function oauthRegistrationAddress(request: Request) {
   // api.did.md is bound only to loopback and is reached through Caddy behind
   // Cloudflare. CF-Connecting-IP is therefore the only forwarded address we
@@ -236,6 +273,7 @@ function oauthClientBody(client: OAuthClient) {
     client_id: client.clientId, client_name: client.clientName, application_type: "web",
     redirect_uris: client.redirectUris, grant_types: ["authorization_code"], response_types: ["code"],
     token_endpoint_auth_method: "none", scope: client.scopes.join(" "),
+    outcome_reporting: client.outcomeReporting === true,
     registration_client_uri: endpoint,
   };
 }
@@ -373,9 +411,13 @@ function oauthMetadata(request: Request) {
     claims_supported: ["sub", "did", "preferred_username", "nickname", "name", "email", "email_verified"],
   });
 }
+function oauthOutcomeFlag(value: Json | undefined) {
+  if (value !== undefined && typeof value !== "boolean") throw new Invalid("outcome_reporting must be a boolean");
+  return value === true;
+}
 async function oauthRegister(request: Request) {
   const body = asObj(JSON.parse(await requestBody(request, 1 << 16)), "client registration request");
-  onlyKeys(body, ["application_type", "client_name", "grant_types", "redirect_uris", "response_types", "scope", "token_endpoint_auth_method"], "client registration request");
+  onlyKeys(body, ["application_type", "client_name", "grant_types", "redirect_uris", "outcome_reporting", "response_types", "scope", "token_endpoint_auth_method"], "client registration request");
   if (body.application_type !== "web" || body.token_endpoint_auth_method !== "none") throw new Invalid("only public web clients are supported");
   if (typeof body.client_name !== "string" || !body.client_name.trim() || body.client_name.length > 120) throw new Invalid("client_name is invalid");
   if (!Array.isArray(body.redirect_uris) || body.redirect_uris.length < 1 || body.redirect_uris.length > OAUTH_MAX_REDIRECTS || body.redirect_uris.some(value => typeof value !== "string")) throw new Invalid("redirect_uris is invalid");
@@ -383,12 +425,13 @@ async function oauthRegister(request: Request) {
   if (!Array.isArray(body.grant_types) || body.grant_types.length !== 1 || body.grant_types[0] !== "authorization_code") throw new Invalid("grant_types is invalid");
   if (!Array.isArray(body.response_types) || body.response_types.length !== 1 || body.response_types[0] !== "code") throw new Invalid("response_types is invalid");
   const scopes = oauthScope(body.scope, "scope");
+  const outcomeReporting = oauthOutcomeFlag(body.outcome_reporting);
   return exclusive("oauth", async () => {
     const state = oauthState();
     consumeOauthRegistration(request);
     if (Object.keys(state.clients).length >= OAUTH_MAX_CLIENTS) throw new Invalid("client registration capacity is reached");
     const clientId = `client_${randomB64url(32)}`; const registrationAccessToken = randomB64url(32); const now = isoAt(Date.now());
-    const client: OAuthClient = { clientId, clientName: body.client_name.trim(), redirectUris, scopes, createdAt: now, updatedAt: now, registrationTokenHash: await sha256B64url(registrationAccessToken) };
+    const client: OAuthClient = { clientId, clientName: body.client_name.trim(), redirectUris, scopes, createdAt: now, updatedAt: now, registrationTokenHash: await sha256B64url(registrationAccessToken), ...(outcomeReporting ? { outcomeReporting } : {}) };
     state.clients[clientId] = client; saveOauthState(state);
     console.info(JSON.stringify({ event: "oauth.client_registered", clientId, origin: oauthClientOrigin(client) ?? null, time: now }));
     return oauthJson(request, { ...oauthClientBody(client), registration_access_token: registrationAccessToken }, 201);
@@ -402,19 +445,19 @@ async function oauthClientConfiguration(request: Request, clientId: string) {
     if (request.method === "DELETE") { delete state.clients[clientId]; saveOauthState(state); console.info(JSON.stringify({ event: "oauth.client_deleted", clientId, time: isoAt(Date.now()) })); return new Response(null, { status: 204, headers: oauthCors(request) }); }
     if (request.method !== "PUT") return new Response(null, { status: 405, headers: oauthCors(request) });
     const body = asObj(JSON.parse(await requestBody(request, 1 << 16)), "client configuration request");
-    onlyKeys(body, ["application_type", "client_id", "client_name", "grant_types", "redirect_uris", "response_types", "scope", "token_endpoint_auth_method"], "client configuration request");
+    onlyKeys(body, ["application_type", "client_id", "client_name", "grant_types", "outcome_reporting", "redirect_uris", "response_types", "scope", "token_endpoint_auth_method"], "client configuration request");
     if (body.client_id !== clientId || body.application_type !== "web" || body.token_endpoint_auth_method !== "none" || typeof body.client_name !== "string" || !body.client_name.trim() || body.client_name.length > 120) throw new Invalid("client configuration is invalid");
     if (!Array.isArray(body.redirect_uris) || body.redirect_uris.length < 1 || body.redirect_uris.length > OAUTH_MAX_REDIRECTS || body.redirect_uris.some(value => typeof value !== "string")) throw new Invalid("redirect_uris is invalid");
     if (!Array.isArray(body.grant_types) || body.grant_types.length !== 1 || body.grant_types[0] !== "authorization_code" || !Array.isArray(body.response_types) || body.response_types.length !== 1 || body.response_types[0] !== "code") throw new Invalid("client configuration is invalid");
     const redirectUris = (body.redirect_uris as string[]).map(uri => oauthRedirect(uri)); if (new Set(redirectUris).size !== redirectUris.length) throw new Invalid("redirect_uris contains a duplicate");
-    const scopes = oauthScope(body.scope, "scope"); const updated = { ...client, clientName: body.client_name.trim(), redirectUris, scopes, updatedAt: isoAt(Date.now()) };
+    const scopes = oauthScope(body.scope, "scope"); const updated: OAuthClient = { ...client, clientName: body.client_name.trim(), redirectUris, scopes, outcomeReporting: oauthOutcomeFlag(body.outcome_reporting), updatedAt: isoAt(Date.now()) };
     state.clients[clientId] = updated; saveOauthState(state); return oauthJson(request, oauthClientBody(updated));
   });
 }
 async function oauthPublicClient(request: Request, clientId: string) {
   return exclusive("oauth", async () => {
     const state = oauthState(); const client = state.clients[clientId]; if (!client) throw new Invalid("client registration was not found");
-    return oauthJson(request, { client_id: client.clientId, client_name: client.clientName, redirect_uris: client.redirectUris, scope: client.scopes.join(" "), ...(oauthClientOrigin(client) ? { client_origin: oauthClientOrigin(client)! } : {}) });
+    return oauthJson(request, { client_id: client.clientId, client_name: client.clientName, redirect_uris: client.redirectUris, scope: client.scopes.join(" "), outcome_reporting: client.outcomeReporting === true, ...(oauthClientOrigin(client) ? { client_origin: oauthClientOrigin(client)! } : {}) });
   });
 }
 // A DID that has never been published anywhere can still authorize: the
@@ -601,6 +644,39 @@ async function oauthUserinfo(request: Request) {
   });
 }
 
+// The RP reports whether the approval worked, authenticated by the Bearer
+// access token it received (the token's capabilityId names the approval).
+// DPoP-bound tokens are rejected (401): DPoP clients are the wallet's own
+// devices, and per-request proof/nonce handling is not worth it for a
+// server-to-server report. "active" is final; "failed" may be superseded.
+async function oauthOutcomeReport(request: Request) {
+  const unauthorized = () => oauthJson(request, { error: "invalid_token" }, 401, { "www-authenticate": "Bearer" });
+  const match = /^Bearer ([A-Za-z0-9_-]{20,512})$/.exec(request.headers.get("authorization") ?? ""); if (!match) return unauthorized();
+  const tokenHash = await sha256B64url(match[1]!);
+  return exclusive("oauth", async () => {
+    cleanupOauthTokens(); const token = oauthTokens.get(tokenHash);
+    if (!token || token.deviceJkt) return unauthorized();
+    let body: Obj;
+    try { body = asObj(JSON.parse(await requestBody(request, 1 << 12)), "outcome report"); } catch (error) { if (error instanceof Invalid) throw error; throw new Invalid("outcome report is invalid"); }
+    onlyKeys(body, ["status", "reason"], "outcome report");
+    if (body.status !== "active" && body.status !== "failed") throw new Invalid("status must be \"active\" or \"failed\"");
+    if (body.reason !== undefined && typeof body.reason !== "string") throw new Invalid("reason must be a string");
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+    if (reason.length > OUTCOME_MAX_REASON) throw new Invalid(`reason must be at most ${OUTCOME_MAX_REASON} characters`);
+    const outcomes = loadOutcomes(); const current = outcomes.get(token.capabilityId);
+    if (current?.status === "active") return new Response(null, { status: 204, headers: oauthCors(request) });
+    outcomes.set(token.capabilityId, { status: body.status, ...(body.status === "failed" && reason ? { reason } : {}), updatedAt: isoAt(Date.now()) });
+    saveOutcomes();
+    return new Response(null, { status: 204, headers: oauthCors(request) });
+  });
+}
+// Public: the capability id is an unguessable urn:uuid, read by the browser wallet.
+function oauthOutcomeRead(request: Request, capabilityId: string) {
+  const outcome = loadOutcomes().get(capabilityId);
+  if (!outcome) return oauthJson(request, { status: "pending" }, 404);
+  return oauthJson(request, outcome);
+}
+
 /** Every route this optional layer serves: discovery, DCR, and the
  * authorize/token/refresh/resource/userinfo endpoints. Returns undefined
  * for any path it does not own, so the caller (server.ts) can fall through
@@ -619,5 +695,11 @@ export async function oauthFetch(request: Request, url: URL): Promise<Response |
   if (url.pathname === "/v1/oauth/device-refresh" && request.method === "POST") return await oauthRefresh(request);
   if (url.pathname === "/v1/oauth/resource" && request.method === "GET") return await oauthResource(request);
   if (url.pathname === "/v1/oauth/userinfo" && request.method === "GET") return await oauthUserinfo(request);
+  if (url.pathname === "/v1/oauth/outcome" && request.method === "POST") return await oauthOutcomeReport(request);
+  const outcome = /^\/v1\/oauth\/outcome\/([^/]{1,300})$/.exec(url.pathname);
+  if (outcome && request.method === "GET") {
+    let id: string; try { id = decodeURIComponent(outcome[1]!); } catch { throw new Invalid("capability id is invalid"); }
+    return oauthOutcomeRead(request, id);
+  }
   return undefined;
 }

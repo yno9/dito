@@ -105,6 +105,11 @@ export type WalletOAuthGrant = {
   appKey?: string;
   /** Present only when this is restored audit metadata, never a credential. */
   importedAt?: string;
+  /** Outcome reporting (see packages/wallet/src/grant-outcome.ts). Absent = legacy or a relying
+   * party that does not report: treated as active. */
+  outcome?: "pending" | "active" | "failed";
+  outcomeReason?: string;
+  outcomeCheckedAt?: string;
 };
 
 /** A user-visible, browser-local description of an authorized device.
@@ -358,7 +363,10 @@ function oauthGrantIsValid(value: any): value is WalletOAuthGrant {
     && typeof value.issuedAt === "string" && typeof value.expiresAt === "string"
     && (value.label === undefined || (typeof value.label === "string" && value.label.length <= 160))
     && (value.appKey === undefined || (typeof value.appKey === "string" && value.appKey.length <= 160))
-    && (value.importedAt === undefined || typeof value.importedAt === "string");
+    && (value.importedAt === undefined || typeof value.importedAt === "string")
+    && (value.outcome === undefined || value.outcome === "pending" || value.outcome === "active" || value.outcome === "failed")
+    && (value.outcomeReason === undefined || (typeof value.outcomeReason === "string" && value.outcomeReason.length <= 200))
+    && (value.outcomeCheckedAt === undefined || typeof value.outcomeCheckedAt === "string");
 }
 
 export async function saveWalletOAuthGrant(grant: WalletOAuthGrant): Promise<void> {

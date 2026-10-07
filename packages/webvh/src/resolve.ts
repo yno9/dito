@@ -55,3 +55,23 @@ export function authenticationPublicKey(document: Record<string, any>, did: stri
   if (!key) throw new Error("only Ed25519 multikeys are supported");
   return key;
 }
+
+/** The Root key did.md's wallet creates every identity with (buildGenesis). */
+export const ROOT_KEY_FRAGMENT = "#pass-1";
+
+/**
+ * Whether the `authentication` method `verificationMethod` (absolute) may sign
+ * the user in -- a wallet's capability or self-issued id_token. When the
+ * document's authentication methods include its Root key (`#pass-1`, a did.md
+ * identity), only the Root may: other authentication keys there were added for
+ * relying parties (a messaging app's signing key, say) and must not be able to
+ * act as the user everywhere. A document without one is some other wallet's,
+ * whose key names are not assumed (PLAN1): any authentication method may.
+ */
+export function maySignIn(document: Record<string, any>, did: string, verificationMethod: string): boolean {
+  const absolute = (id: unknown) => typeof id === "string" && id.startsWith("#") ? `${did}${id}` : id;
+  const authentication = (Array.isArray(document.authentication) ? document.authentication : []).map(absolute);
+  if (!authentication.includes(verificationMethod)) return false;
+  const root = `${did}${ROOT_KEY_FRAGMENT}`;
+  return !authentication.includes(root) || verificationMethod === root;
+}

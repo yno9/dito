@@ -35,9 +35,26 @@ export type DidDocumentService = {
 /** Removes, from the service `serviceId`, every endpoint whose properties equal all of `match`. */
 export type DidDocumentEndpointRemoval = { serviceId: string; match: Record<string, unknown> };
 
+/** DID Core's verification relationships: what a verification method is authorized for. */
+export const VERIFICATION_RELATIONSHIPS = ["authentication", "assertionMethod", "keyAgreement", "capabilityInvocation", "capabilityDelegation"] as const;
+export type VerificationRelationship = typeof VERIFICATION_RELATIONSHIPS[number];
+
+/**
+ * A verification method to add, with how to add it. Neither field is published: they
+ * say what to do with the method, which is published without them.
+ *
+ *   - `relationships`: the verification relationships to reference it from. Absent:
+ *     `keyAgreement` alone (what every edit meant before the field existed).
+ *   - `mode`: absent or `"replace"` adds it, or replaces the method with the same id
+ *     (and its references). `"ifAbsent"` adds it only when the document has no method
+ *     with that id yet, and otherwise leaves the document as it is -- so several
+ *     parties can each ask for "the" method of some id and the first one approved wins.
+ */
+export type DidDocumentEditMethod = { id: string; relationships?: VerificationRelationship[]; mode?: "replace" | "ifAbsent"; [property: string]: unknown };
+
 export type DidDocumentEdit = {
   remove: string[];
-  verificationMethods: { id: string }[];
+  verificationMethods: DidDocumentEditMethod[];
   services: DidDocumentService[];
   removeEndpoints?: DidDocumentEndpointRemoval[];
 };
@@ -83,11 +100,22 @@ export function withDidDocumentEdit(state: any, edit: DidDocumentEdit): any {
   const next = JSON.parse(JSON.stringify(state));
   const isRemoved = (id: unknown) => edit.remove.some(removed => sameDidDocumentReference(state.id, id, removed));
   const methods = (Array.isArray(next.verificationMethod) ? next.verificationMethod : []).filter((value: any) => !isRemoved(value.id));
-  for (const method of edit.verificationMethods) { const index = methods.findIndex((value: any) => sameDidDocumentReference(state.id, value.id, method.id)); if (index < 0) methods.push(method); else methods[index] = method; }
+  // Every relationship loses its references to a removed method.
+  const relationships = new Map<VerificationRelationship, unknown[]>(VERIFICATION_RELATIONSHIPS.map(name => [name, (Array.isArray(next[name]) ? next[name] : []).filter((reference: unknown) => !isRemoved(typeof reference === "object" && reference ? (reference as { id?: unknown }).id : reference))]));
+  for (const { relationships: requested, mode, ...method } of edit.verificationMethods) {
+    const index = methods.findIndex((value: any) => sameDidDocumentReference(state.id, value.id, method.id));
+    if (mode === "ifAbsent" && index >= 0) continue;
+    if (index < 0) methods.push(method); else methods[index] = method;
+    // The method is referenced from exactly the relationships asked for.
+    for (const [name, references] of relationships) {
+      const kept = references.filter(reference => !sameDidDocumentReference(state.id, reference, method.id));
+      if ((requested ?? ["keyAgreement"]).includes(name)) kept.push(method.id);
+      relationships.set(name, kept);
+    }
+  }
   next.verificationMethod = methods;
-  const keyAgreement = (Array.isArray(next.keyAgreement) ? next.keyAgreement : []).filter((id: unknown) => !isRemoved(id));
-  for (const method of edit.verificationMethods) if (!keyAgreement.some((id: unknown) => sameDidDocumentReference(state.id, id, method.id))) keyAgreement.push(method.id);
-  if (keyAgreement.length) next.keyAgreement = keyAgreement;
+  // A relationship the document had stays (possibly empty); one it lacked appears only when something references it.
+  for (const [name, references] of relationships) if (references.length || Array.isArray(state[name])) next[name] = references;
   let services = (Array.isArray(next.service) ? next.service : []).filter((value: any) => !isRemoved(value.id));
   for (const removal of edit.removeEndpoints ?? []) {
     services = services.flatMap((service: any) => {
@@ -105,6 +133,21 @@ export function withDidDocumentEdit(state: any, edit: DidDocumentEdit): any {
   }
   next.service = services;
   return next;
+}
+
+/** Checks how one verification method of an edit request is to be added; throws when it is not usable. */
+export function assertVerificationMethodEdit(method: { relationships?: unknown; mode?: unknown }): void {
+  if (method.mode !== undefined && method.mode !== "replace" && method.mode !== "ifAbsent") throw new Error("A DID verification method mode is invalid.");
+  if (method.relationships === undefined) return;
+  const values = method.relationships;
+  if (!Array.isArray(values) || !values.length || new Set(values).size !== values.length || !values.every(value => (VERIFICATION_RELATIONSHIPS as readonly unknown[]).includes(value))) throw new Error("A DID verification method's relationships are invalid.");
+}
+
+/** Throws when the edit would replace or remove any of `protectedIds` (methods the
+ * document's controller keeps for itself, such as its own Root key). */
+export function assertEditSparesMethods(edit: Pick<DidDocumentEdit, "remove" | "verificationMethods">, did: string, protectedIds: readonly string[]): void {
+  const touches = (id: unknown) => protectedIds.some(protectedId => sameDidDocumentReference(did, id, protectedId));
+  if (edit.verificationMethods.some(method => touches(method.id)) || edit.remove.some(touches)) throw new Error("The DID document edit may not replace or remove a key its controller keeps.");
 }
 
 /** Checks the endpoint-addressing fields of one service of an edit request; throws when they are not usable. */

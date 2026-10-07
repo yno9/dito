@@ -54,8 +54,8 @@ import { verifyMasterOwnsLog } from "../packages/wallet/src/identity.ts";
 import { parseLoginHost, didIsHostedAt } from "../packages/wallet/src/login-hint.ts";
 import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
 import { applyOutcome, grantDisplayState, shouldPoll } from "../packages/wallet/src/grant-outcome.ts";
-import { assertEndpointRemovals, assertServiceEndpointMode, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
-import { WebvhHostingClient, currentParameters, parseLog as parseWebvhLog, resolveLog } from "../packages/webvh/src/index.ts";
+import { assertEditSparesMethods, assertEndpointRemovals, assertServiceEndpointMode, assertVerificationMethodEdit, VERIFICATION_RELATIONSHIPS, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
+import { ROOT_KEY_FRAGMENT, WebvhHostingClient, currentParameters, parseLog as parseWebvhLog, resolveLog } from "../packages/webvh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
 import dashboardHeaderTemplate from "./pages/dashboard-header.html";
 import footerTemplate from "./pages/footer.html";
@@ -612,10 +612,15 @@ function didDocumentEditDetail(details, did) {
   // THIS identity, regardless of what a relying party (which doesn't
   // necessarily know the DID yet when it builds this request) claims.
   detail.verificationMethods = detail.verificationMethods.map(value => {
-    const method = detailObject(value, "DID verification method"); detailKeys(method, ["id", "type", "controller", "publicKeyMultibase"], "DID verification method");
+    const method = detailObject(value, "DID verification method");
+    detailKeys(method, ["id", "type", "controller", "publicKeyMultibase", ...(method.relationships === undefined ? [] : ["relationships"]), ...(method.mode === undefined ? [] : ["mode"])], "DID verification method");
     if (!validId(method.id) || typeof method.type !== "string" || !method.type.trim() || typeof method.controller !== "string" || typeof method.publicKeyMultibase !== "string") throw new Error("A DID verification method is invalid.");
+    assertVerificationMethodEdit(method);
     return { ...method, controller: did };
   });
+  // The identity's own Root key is this Wallet's, never a relying party's to
+  // replace or remove: without it the identity can no longer be opened.
+  assertEditSparesMethods(detail, did, [ROOT_KEY_FRAGMENT]);
   if (detail.serviceKeyBindings !== undefined) {
     if (!Array.isArray(detail.serviceKeyBindings) || detail.serviceKeyBindings.length > detail.services.length) throw new Error("The DID service/key bindings are invalid.");
     const serviceIds = new Set(detail.services.map(service => service.id));
@@ -3669,7 +3674,7 @@ function renderWalletAuthorization() {
   const changes = edit ? [
     ...(edit.removeEndpoints ?? []).map(removal => `Remove from service ${removal.serviceId} the endpoints matching ${JSON.stringify(removal.match)}`),
     ...edit.services.map(service => `${service.endpointMode === "merge" ? "Add to service" : "Add or replace service"}: ${service.type} (${service.id}) → ${typeof service.serviceEndpoint === "string" ? service.serviceEndpoint : JSON.stringify(service.serviceEndpoint)}`),
-    ...edit.verificationMethods.map(method => `Add or replace verification method: ${method.type} (${method.id})`),
+    ...edit.verificationMethods.map(method => `${method.mode === "ifAbsent" ? "Add, unless one with this id exists," : "Add or replace"} verification method: ${method.type} (${method.id}) for ${(method.relationships ?? ["keyAgreement"]).join(", ")}${(method.relationships ?? []).includes("authentication") ? " — it can prove to others that it acts for you" : ""}`),
     ...edit.remove.map(id => `Remove: ${id}`),
   ] : [];
   didCommLabel.textContent = "DID document changes";
@@ -5550,8 +5555,6 @@ function renderServicesList() {
     list.append(row);
   }
 }
-
-const VERIFICATION_RELATIONSHIPS = ["authentication", "assertionMethod", "keyAgreement", "capabilityInvocation", "capabilityDelegation"];
 
 function renderApplicationKeysList() {
   const manager = query("#application-keys-manager");

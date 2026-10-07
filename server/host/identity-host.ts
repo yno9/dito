@@ -23,7 +23,7 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { validateLogAt, MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, serialise, parseWitnessFile, mirrorDocument, type Json, type Obj, type Entry, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
-import { didToLogUrl as webvhDidToLogUrl, parseDid as webvhParseDid, verifyDataIntegrityProof as verifyProof, verifyProofSignature } from "../../packages/webvh/src/index.ts";
+import { didToLogUrl as webvhDidToLogUrl, maySignIn, parseDid as webvhParseDid, verifyDataIntegrityProof as verifyProof, verifyProofSignature } from "../../packages/webvh/src/index.ts";
 import { multibaseDecode } from "didwebvh-ts";
 export { MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, parseWitnessFile, type Json, type Obj, type Entry, type Proof, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
 
@@ -381,7 +381,8 @@ export async function hostedAuthenticationKey(did: string, expectedVerificationM
 // verificationMethod, or an id_token's own kid), exactly that entry is
 // resolved -- no fragment name (e.g. "#pass-1") is assumed. When omitted,
 // there must be exactly one authentication method (an ambiguous document is
-// rejected rather than guessing).
+// rejected rather than guessing). Only a method that may sign the user in
+// counts (maySignIn: on a did.md identity, its Root key alone).
 export function authenticationKeyFromState(did: string, state: Obj, expectedVerificationMethod?: string): AuthenticationAuthority {
   const methods = Array.isArray(state.verificationMethod) ? state.verificationMethod : [];
   const authentication = Array.isArray(state.authentication) ? state.authentication : [];
@@ -392,7 +393,7 @@ export function authenticationKeyFromState(did: string, state: Obj, expectedVeri
     const absolute = value.id.startsWith("#") ? `${did}${value.id}` : value.id;
     const relative = value.id.startsWith("#") ? value.id : undefined;
     if (!authentication.includes(absolute) && !(relative !== undefined && authentication.includes(relative))) return false;
-    return wantedAbsolute === undefined || absolute === wantedAbsolute;
+    return (wantedAbsolute === undefined || absolute === wantedAbsolute) && maySignIn(state, did, absolute);
   });
   if (candidates.length !== 1) throw new Invalid(wantedAbsolute === undefined ? "authenticated issuer has no unambiguous authentication method" : "authenticated issuer has no matching authentication method");
   const method = candidates[0]!;

@@ -130,3 +130,71 @@ test("endpoint removals: a service id and a non-empty match are required, and no
     [{ serviceId: "#chat", match: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`k${i}`, i])) }],
   ]) expect(() => assertEndpointRemovals(bad, validId)).toThrow("removal");
 });
+
+// Which verification relationships a method is added to, and adding it only when absent.
+import { assertVerificationMethodEdit } from "../packages/wallet/src/did-document-edit.ts";
+
+const withRoot = {
+  id: did,
+  verificationMethod: [{ id: "#pass-1", type: "Multikey" }, { id: `${did}#k_old`, type: "Multikey" }],
+  authentication: ["#pass-1"],
+  keyAgreement: [`${did}#k_old`],
+};
+
+test("a method is referenced from the relationships asked for; none asked means keyAgreement alone", () => {
+  const next = withDidDocumentEdit(withRoot, { remove: [], services: [], verificationMethods: [
+    { id: "#k_new", type: "Multikey" },
+    { id: "#rotation", type: "Multikey", relationships: ["authentication"] },
+  ] });
+  expect(next.verificationMethod.map((method: any) => method.id)).toEqual(["#pass-1", `${did}#k_old`, "#k_new", "#rotation"]);
+  expect(next.keyAgreement).toEqual([`${did}#k_old`, "#k_new"]);
+  expect(next.authentication).toEqual(["#pass-1", "#rotation"]);
+  // How to add it is not published with it.
+  expect(next.verificationMethod.find((method: any) => method.id === "#rotation")).toEqual({ id: "#rotation", type: "Multikey" });
+  expect(next.assertionMethod).toBeUndefined();
+});
+
+test("ifAbsent adds a method only when the document has none of that id, and otherwise changes nothing", () => {
+  const first = withDidDocumentEdit(withRoot, { remove: [], services: [], verificationMethods: [{ id: "#rotation", type: "Multikey", publicKeyMultibase: "zA", relationships: ["authentication"], mode: "ifAbsent" }] });
+  expect(first.authentication).toEqual(["#pass-1", "#rotation"]);
+  const second = withDidDocumentEdit(first, { remove: [], services: [], verificationMethods: [{ id: `${did}#rotation`, type: "Multikey", publicKeyMultibase: "zB", relationships: ["authentication"], mode: "ifAbsent" }] });
+  expect(second).toEqual(first);
+});
+
+test("replacing a method of the same id takes the new key and moves its references", () => {
+  const first = withDidDocumentEdit(withRoot, { remove: [], services: [], verificationMethods: [{ id: "#rotation", type: "Multikey", publicKeyMultibase: "zA", relationships: ["authentication"] }] });
+  const next = withDidDocumentEdit(first, { remove: [], services: [], verificationMethods: [{ id: `${did}#rotation`, type: "Multikey", publicKeyMultibase: "zB", relationships: ["authentication"] }] });
+  expect(next.verificationMethod.filter((method: any) => sameDidDocumentReference(did, method.id, "#rotation"))).toEqual([{ id: `${did}#rotation`, type: "Multikey", publicKeyMultibase: "zB" }]);
+  expect(next.authentication).toEqual(["#pass-1", `${did}#rotation`]);
+});
+
+test("removing a method drops it from every relationship, even the last one of a relationship", () => {
+  const added = withDidDocumentEdit(withRoot, { remove: [], services: [], verificationMethods: [{ id: "#rotation", type: "Multikey", relationships: ["authentication", "assertionMethod"] }] });
+  const next = withDidDocumentEdit(added, { remove: ["#rotation", `${did}#k_old`], services: [], verificationMethods: [] });
+  expect(next.authentication).toEqual(["#pass-1"]);
+  expect(next.assertionMethod).toEqual([]);
+  // The last key agreement key removed leaves no stale reference behind.
+  expect(next.keyAgreement).toEqual([]);
+  expect(next.verificationMethod.map((method: any) => method.id)).toEqual(["#pass-1"]);
+});
+
+test("assertVerificationMethodEdit accepts known relationships and modes only", () => {
+  expect(() => assertVerificationMethodEdit({})).not.toThrow();
+  expect(() => assertVerificationMethodEdit({ relationships: ["authentication", "keyAgreement"], mode: "ifAbsent" })).not.toThrow();
+  for (const bad of [{ relationships: [] }, { relationships: ["login"] }, { relationships: ["authentication", "authentication"] }, { relationships: "authentication" }, { mode: "merge" }]) {
+    expect(() => assertVerificationMethodEdit(bad)).toThrow();
+  }
+});
+
+import { assertEditSparesMethods } from "../packages/wallet/src/did-document-edit.ts";
+
+test("an edit may not replace or remove a key the controller keeps, however it names it", () => {
+  const keep = ["#pass-1"];
+  expect(() => assertEditSparesMethods({ remove: [], verificationMethods: [{ id: "#rotation" }] }, did, keep)).not.toThrow();
+  for (const edit of [
+    { remove: ["#pass-1"], verificationMethods: [] },
+    { remove: [`${did}#pass-1`], verificationMethods: [] },
+    { remove: [], verificationMethods: [{ id: "#pass-1" }] },
+    { remove: [], verificationMethods: [{ id: `${did}#pass-1`, relationships: ["authentication" as const] }] },
+  ]) expect(() => assertEditSparesMethods(edit, did, keep)).toThrow("keeps");
+});

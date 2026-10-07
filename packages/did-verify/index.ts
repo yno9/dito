@@ -1,4 +1,4 @@
-import { authenticationPublicKey, parseDid, resolveDidWebvh } from "../webvh/src/index.ts";
+import { authenticationPublicKey, maySignIn, parseDid, resolveDidWebvh } from "../webvh/src/index.ts";
 
 export interface VerifiedSigner {
   sub: string;
@@ -106,8 +106,11 @@ export async function resolveDidWebvhDocument(did: string, allowedDomainSuffix?:
   return document;
 }
 
-async function resolveDidWebvhAuthenticationKey(did: string, verificationMethod: string): Promise<Uint8Array> {
-  return authenticationPublicKey(await resolveDidWebvhDocument(did), did, verificationMethod);
+/** The key of a method that may sign the user in (an id_token's `kid`). */
+async function resolveDidWebvhSignInKey(did: string, verificationMethod: string): Promise<Uint8Array> {
+  const document = await resolveDidWebvhDocument(did);
+  if (!maySignIn(document, did, verificationMethod)) throw new Error("did:webvh authentication method may not sign in");
+  return authenticationPublicKey(document, did, verificationMethod);
 }
 
 export async function verifyViaDidWebvh(jwt: string, kid: string, allowedDomainSuffix?: string): Promise<VerifiedSigner> {
@@ -123,7 +126,7 @@ export async function verifyViaDidWebvh(jwt: string, kid: string, allowedDomainS
   if (parts.length !== 3) throw new Error("JWT is malformed");
   const header = parseHeader(jwt);
   if (header.alg !== "EdDSA") throw new Error("JWT algorithm must be EdDSA");
-  const rawKey = await resolveDidWebvhAuthenticationKey(did, kid);
+  const rawKey = await resolveDidWebvhSignInKey(did, kid);
   const jwk: JsonWebKey = { kty: "OKP", crv: "Ed25519", x: Buffer.from(rawKey).toString("base64url") };
   let key: CryptoKey;
   try { key = await crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, false, ["verify"]); }

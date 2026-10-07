@@ -96,7 +96,11 @@ The essential core is the host plus identity resolution. `server/oauth/` is opti
 a backend of their own; the core never imports it.
 
 - **Identity layer**: `identity-host.ts` resolves a verification method from the DID's published `authentication` array
-  (any fragment, not just `#pass-1`) and verifies by the proof's `cryptosuite` or the token's `alg`. Only Ed25519 /
+  and verifies by the proof's `cryptosuite` or the token's `alg`. Which method may sign the user in is `maySignIn`
+  (`packages/webvh`), shared with `did-verify`: on a did.md identity (its `authentication` includes the Root key `#pass-1`)
+  only the Root may -- other authentication keys there were added for relying parties (a messaging app's DID Rotation
+  signing key, say) and must not act as the user everywhere. A document without `#pass-1` is another wallet's, whose key
+  names are not assumed (PLAN1): any of its authentication methods may. Only Ed25519 /
   `eddsa-jcs-2022` is implemented; other values are rejected explicitly.
 - **Authorization layer**: capability types belong to the RP (a namespaced type name and a JSON Schema the RP
   owns). The host only checks that the type is a namespaced string and that a valid Data Integrity proof by the DID's

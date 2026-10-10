@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, test } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { jwkThumbprint, verifyIdTokenSignature } from "./index.ts";
 import { Ed25519Signer, createLog, keyFromPrivateKey, serializeLog } from "../webvh/src/index.ts";

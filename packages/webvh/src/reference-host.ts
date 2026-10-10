@@ -1,7 +1,7 @@
 /**
  * A minimal, storage-agnostic server for the did:webvh Hosting Protocol
  * (SPEC-webvh-hosting.md) built on nothing but didwebvh-ts: a `(Request) =>
- * Response` handler any runtime can mount (Bun, Deno, Workers, Node's fetch
+ * Response` handler any runtime can mount (Node, Deno, Workers, Node's fetch
  * adapters). It exists to prove the protocol does not depend on did.md's
  * server and to give a third party a starting point; it is deliberately not
  * did.md's host (no naming policy, quotas, mirrors or extra resources).

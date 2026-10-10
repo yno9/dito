@@ -25,6 +25,7 @@ import { dirname, join } from "node:path";
 import { validateLogAt, MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, serialise, parseWitnessFile, mirrorDocument, type Json, type Obj, type Entry, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
 import { didToLogUrl as webvhDidToLogUrl, maySignIn, parseDid as webvhParseDid, verifyDataIntegrityProof as verifyProof, verifyProofSignature } from "../../packages/webvh/src/index.ts";
 import { multibaseDecode } from "didwebvh-ts";
+import { fetchWithHost } from "../host-fetch.ts";
 export { MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, parseWitnessFile, type Json, type Obj, type Entry, type Proof, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
 
 // Small helpers this host (and oauth-server.ts) use around the did:webvh log.
@@ -47,21 +48,20 @@ export function proofObject(value: unknown, label: string) {
   return proof as unknown as import("../../packages/wallet/src/webvh-core.ts").Proof;
 }
 
-// PLAN9: `Bun` does not exist
-// on a Cloudflare Worker -- a bare `Bun.env` reference at module scope would
-// throw before this module could even finish loading there, regardless of
-// whether anything in this file actually calls FsIdentityStore (the only
-// consumer of DATA_DIR) at runtime. Every value read through this is either
-// FsIdentityStore-only (DATA_DIR, unused once a cloud-worker IdentityStore
-// is installed) or has a default that is already the correct value for this
-// same identity domain running anywhere else (IDENTITY_DOMAIN).
-// globalThis, not a bare `Bun` reference: this file is also type-checked
-// under server/host/edge/tsconfig.json (Cloudflare Workers types only, no Bun
-// ambient types at all) -- a bare `Bun` identifier, even behind `typeof`,
-// does not type-check there.
-const bunEnv: Record<string, string | undefined> = (globalThis as { Bun?: { env: Record<string, string | undefined> } }).Bun?.env ?? {};
-export const DATA_DIR = bunEnv.DATA_DIR ?? "./data";
-export const IDENTITY_DOMAIN = (bunEnv.IDENTITY_DOMAIN ?? "did.md").toLowerCase();
+// PLAN9: `process` does not exist on a Cloudflare Worker -- a bare
+// `process.env` reference at module scope would throw before this module could
+// even finish loading there, regardless of whether anything in this file
+// actually calls FsIdentityStore (the only consumer of DATA_DIR) at runtime.
+// Every value read through this is either FsIdentityStore-only (DATA_DIR,
+// unused once a cloud-worker IdentityStore is installed) or has a default that
+// is already the correct value for this same identity domain running anywhere
+// else (IDENTITY_DOMAIN).
+// Read via globalThis: this file is also type-checked under
+// server/host/edge/tsconfig.json (Cloudflare Workers types only, no Node
+// ambient types at all), where a bare `process` identifier does not type-check.
+const env: Record<string, string | undefined> = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
+export const DATA_DIR = env.DATA_DIR ?? "./data";
+export const IDENTITY_DOMAIN = (env.IDENTITY_DOMAIN ?? "did.md").toLowerCase();
 export const MAX_LOG_BYTES = 16 << 20;
 /** Public reads may be served from a CDN for this long (SPEC-webvh-hosting.md §2).
  * Reads are ~all the traffic and never need this host; only writes do. Browsers
@@ -80,7 +80,7 @@ export const CORS_BASE = {
 };
 const locks = new Map<string, Promise<void>>();
 
-function numberEnv(name: string, fallback: number) { const value = Number(bunEnv[name] ?? fallback); return Number.isSafeInteger(value) && value > 0 ? value : fallback; }
+function numberEnv(name: string, fallback: number) { const value = Number(env[name] ?? fallback); return Number.isSafeInteger(value) && value > 0 ? value : fallback; }
 export const PORT = numberEnv("PORT", 8787);
 
 /** Browser clients are deliberately limited to the Wallet.  The API never
@@ -146,7 +146,7 @@ export interface IdentityStore {
   remove(username: string, slot: IdentitySlot): Promise<void>;
   exclusive<T>(username: string, task: () => Promise<T>): Promise<T>;
 }
-// The VPS/Bun default: identical behavior to what this module always did
+// The VPS/Node default: identical behavior to what this module always did
 // (same file layout, same in-process lock map), just reached through the
 // interface instead of inline `join(basePath(username), "did.jsonl")` calls.
 class FsIdentityStore implements IdentityStore {
@@ -157,7 +157,7 @@ class FsIdentityStore implements IdentityStore {
 }
 let identityStore: IdentityStore = new FsIdentityStore();
 /** Swaps the storage backend (e.g. a Durable-Object-backed store on a cloud
- * worker deployment). Not called anywhere yet -- the VPS/Bun deployment
+ * worker deployment). Not called anywhere yet -- the VPS/Node deployment
  * keeps the default FsIdentityStore; this is the seam a future backend
  * plugs into. */
 export function setIdentityStore(store: IdentityStore): void { identityStore = store; }
@@ -352,7 +352,7 @@ export function jwtAlgForKeyType(keyType: AuthenticationKeyType): string {
 // route). Unset in production -- hostedAuthenticationKey then always
 // resolves the real public domain, as it must now that identity data lives
 // on the Cloudflare Worker (PLAN9), not this process.
-const IDENTITY_FETCH_BASE_URL = bunEnv.IDENTITY_FETCH_BASE_URL;
+const IDENTITY_FETCH_BASE_URL = env.IDENTITY_FETCH_BASE_URL;
 export async function hostedAuthenticationKey(did: string, expectedVerificationMethod?: string) {
   const parsed = parseDid(did);
   const suffix = `.${IDENTITY_DOMAIN}`;
@@ -360,7 +360,7 @@ export async function hostedAuthenticationKey(did: string, expectedVerificationM
   const username = safeName(parsed.domain.slice(0, -suffix.length), "authenticated issuer");
   const origin = IDENTITY_FETCH_BASE_URL ?? `https://${parsed.domain}`;
   const fetchInit = IDENTITY_FETCH_BASE_URL ? { headers: { host: parsed.domain } } : undefined;
-  const logResponse = await fetch(`${origin}/.well-known/did.jsonl`, fetchInit);
+  const logResponse = await fetchWithHost(`${origin}/.well-known/did.jsonl`, fetchInit);
   if (!logResponse.ok) throw new Invalid("authenticated issuer was not found");
   const source = await logResponse.text();
   const entries = parseJsonl(source);
@@ -369,7 +369,7 @@ export async function hostedAuthenticationKey(did: string, expectedVerificationM
   const usesWitnesses = entries.some(entry => Array.isArray((entry.parameters.witness as { witnesses?: unknown } | undefined)?.witnesses) && ((entry.parameters.witness as { witnesses: unknown[] }).witnesses.length > 0));
   let witnesses: string | null = null;
   if (usesWitnesses) {
-    const witnessResponse = await fetch(`${origin}/.well-known/did-witness.json`, fetchInit);
+    const witnessResponse = await fetchWithHost(`${origin}/.well-known/did-witness.json`, fetchInit);
     witnesses = witnessResponse.ok ? await witnessResponse.text() : null;
   }
   const checked = await validateLog(entries, witnesses === null ? [] : parseWitnessFile(witnesses), username);

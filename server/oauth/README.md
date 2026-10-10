@@ -60,9 +60,9 @@ before scaling out.
 ## Run
 
 ```sh
-bun run start:bridge          # local
-bun test server/oauth/tests   # flow tests
-bun build --compile --target=bun-linux-x64 --outfile did-md-oidc-bridge server/oauth/src/server.ts
+pnpm start:bridge          # local
+pnpm vitest run server/oauth/tests   # flow tests
+pnpm build:bridge        # -> dist/did-md-oidc-bridge.mjs (run with node)
 ```
 
 Put it behind a TLS-terminating reverse proxy on its issuer host (default port 8790).

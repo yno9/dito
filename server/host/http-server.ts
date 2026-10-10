@@ -9,10 +9,11 @@
  *
  * Public reads carry `s-maxage` (see PUBLIC_READ_CACHE_SECONDS), so the CDN
  * answers nearly all of them; this process sees cache misses and writes. Data
- * lives on local disk (FsIdentityStore, DATA_DIR). Build: `bun build --compile
- * server/host/http-server.ts` (deploy.sh identity).
+ * lives on local disk (FsIdentityStore, DATA_DIR). Build: `pnpm build:identity`
+ * (esbuild bundle; deploy.sh identity).
  */
 import { identityFetch, publicDocumentCors, cors, IDENTITY_DOMAIN, Invalid, PORT, text } from "./identity-host.ts";
+import { serve } from "../serve.ts";
 
 function fail(request: Request, error: unknown) {
   const status = error instanceof Invalid ? 400 : 500;
@@ -23,9 +24,9 @@ function fail(request: Request, error: unknown) {
   return new Response(`${message}\n`, { status, headers: { ...headers, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
 }
 
-const app = Bun.serve({
+const app = serve({
   port: PORT,
-  hostname: Bun.env.HOST ?? "127.0.0.1",
+  hostname: process.env.HOST ?? "127.0.0.1",
   async fetch(request) {
     try {
       const url = new URL(request.url);

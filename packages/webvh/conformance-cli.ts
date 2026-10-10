@@ -1,22 +1,23 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Run the did:webvh Hosting Protocol conformance suite against a server.
  *
- *   bun run conformance --domain did.md
+ *   pnpm conformance --domain did.md
  *       hosts throwaway identities at conf-*.did.md (real DNS, real TLS)
- *   bun run conformance --domain did.md --base http://127.0.0.1:8787
+ *   pnpm conformance --domain did.md --base http://127.0.0.1:8787
  *       same names, but requests go to --base with the right Host header
  *       (a local server standing in for the domain)
  *
  * It creates and deletes throwaway identities; point it only at a server you
  * are allowed to write to. Exit code 0 = every required check passed.
  */
+import { fetchWithHost } from "../../server/host-fetch.ts";
 import { parseArgs } from "node:util";
 import { formatReport, runConformance } from "./src/conformance.ts";
 
 const { values } = parseArgs({ options: { domain: { type: "string" }, base: { type: "string" } }, strict: true });
 if (!values.domain) {
-  console.error("Usage: bun run conformance --domain <domain> [--base <url>]");
+  console.error("Usage: pnpm conformance --domain <domain> [--base <url>]");
   process.exit(2);
 }
 const domain = values.domain;
@@ -29,7 +30,7 @@ const results = await runConformance({
     const url = new URL(String(input));
     const headers = new Headers(init?.headers);
     headers.set("host", url.host);
-    return fetch(`${base}${url.pathname}${url.search}`, { ...init, headers });
+    return fetchWithHost(`${base}${url.pathname}${url.search}`, { ...init, headers });
   }) as typeof fetch,
 });
 const report = formatReport(results);

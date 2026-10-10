@@ -16,7 +16,8 @@ export type BridgeSession = {
 
 export class SessionStore<T> {
   private values = new Map<string, { value: T; expiresAt: number }>();
-  constructor(private ttlMs = 5 * 60_000) {}
+  private ttlMs: number;
+  constructor(ttlMs = 5 * 60_000) { this.ttlMs = ttlMs; }
   create(value: T): string { const id = crypto.randomUUID(); this.values.set(id, { value, expiresAt: Date.now() + this.ttlMs }); return id; }
   get(id: string): T | undefined { const item = this.values.get(id); if (!item) return; if (item.expiresAt <= Date.now()) { this.values.delete(id); return; } return item.value; }
   take(id: string): T | undefined { const value = this.get(id); this.values.delete(id); return value; }

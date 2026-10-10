@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import {
   Ed25519Signer, createLog, keyFromPrivateKey, nextKeyHash, parseLog, resolveLog, serializeLog, updateLog,
 } from "../packages/webvh/src/index.ts";

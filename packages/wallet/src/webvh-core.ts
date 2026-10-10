@@ -1,5 +1,5 @@
 /**
- * did:webvh log validation for did.md, with no Node, Bun or Cloudflare
+ * did:webvh log validation for did.md, with no Node or Cloudflare
  * dependency, so the same code runs in the did.md host
  * (server/host/identity-host.ts), the Cloudflare Worker, and the browser
  * wallet (which validates a log before publishing it anywhere that has no

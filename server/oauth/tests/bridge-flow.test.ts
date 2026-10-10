@@ -1,9 +1,12 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, test } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { createPublicKey, verify } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { spawn } from "../../../tests/spawn.ts";
+import { serve } from "../../serve.ts";
 
 const root = new URL("../../..", import.meta.url).pathname; const temporary = mkdtempSync(join(tmpdir(), "did-md-bridge-"));
 const upstreamPort = 20_000 + Math.floor(Math.random() * 5000), bridgePort = upstreamPort + 5000;
@@ -15,15 +18,15 @@ const walletKey = ed25519.utils.randomSecretKey();
 function walletToken(aud: string, extra: Record<string, unknown> = {}) { const jwk = { kty: "OKP", crv: "Ed25519", x: Buffer.from(ed25519.getPublicKey(walletKey)).toString("base64url") }; const header = Buffer.from(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid: "did:webvh:test#pass-1", jwk })).toString("base64url"); const now = Math.floor(Date.now() / 1000); const payload = Buffer.from(JSON.stringify({ iss: "did:webvh:test", sub: "ignored", aud, iat: now, exp: now + 300, preferred_username: "alice", ...extra })).toString("base64url"); return `${header}.${payload}.${Buffer.from(ed25519.sign(new TextEncoder().encode(`${header}.${payload}`), walletKey)).toString("base64url")}`; }
 function base64urlJson(part: string) { return JSON.parse(Buffer.from(part, "base64url").toString()); }
 let requestedAudience = upstreamClientId;
-const upstream = Bun.serve({ port: upstreamPort, fetch: async request => { const url = new URL(request.url); if (url.pathname === "/v1/oauth/register") return Response.json({ client_id: upstreamClientId }, { status: 201 }); if (url.pathname === "/v1/oauth/token") return Response.json({ id_token: walletToken(requestedAudience) }); return new Response("not found", { status: 404 }); } });
+const upstream = serve({ port: upstreamPort, fetch: async request => { const url = new URL(request.url); if (url.pathname === "/v1/oauth/register") return Response.json({ client_id: upstreamClientId }, { status: 201 }); if (url.pathname === "/v1/oauth/token") return Response.json({ id_token: walletToken(requestedAudience) }); return new Response("not found", { status: 404 }); } });
 // An array of clients -- this is what proves the bridge is multi-client, not
 // just tolerant of a stray extra field on a single-client config.
 writeFileSync(join(temporary, "forgejo.json"), JSON.stringify([
   { client_id: "forgejo", client_secret: forgejoSecret, redirect_uris: [forgejoRedirect] },
   { client_id: "widget", client_secret: widgetSecret, redirect_uris: [widgetRedirect] },
 ]));
-const bridge = Bun.spawn({ cmd: [process.execPath, "server/oauth/src/server.ts"], cwd: root, env: { ...process.env, PORT: String(bridgePort), DATA_DIR: join(temporary, "data"), BRIDGE_ISSUER: bridgeBase, DITO_ISSUER: upstreamBase, DITO_AUTHORIZATION_ENDPOINT: `${upstreamBase}/authorize`, FORGEJO_CLIENT_CONFIG: join(temporary, "forgejo.json") }, stdout: "ignore", stderr: "ignore" });
-async function ready() { for (let i = 0; i < 100; i++) { try { if ((await fetch(`${bridgeBase}/healthz`)).ok) return; } catch {} await Bun.sleep(20); } throw new Error("bridge did not start"); }
+const bridge = spawn({ cmd: [process.execPath, "server/oauth/src/server.ts"], cwd: root, env: { ...process.env, PORT: String(bridgePort), DATA_DIR: join(temporary, "data"), BRIDGE_ISSUER: bridgeBase, DITO_ISSUER: upstreamBase, DITO_AUTHORIZATION_ENDPOINT: `${upstreamBase}/authorize`, FORGEJO_CLIENT_CONFIG: join(temporary, "forgejo.json") }, stdout: "ignore", stderr: "ignore" });
+async function ready() { for (let i = 0; i < 100; i++) { try { if ((await fetch(`${bridgeBase}/healthz`)).ok) return; } catch {} await sleep(20); } throw new Error("bridge did not start"); }
 afterAll(async () => { bridge.kill(); await bridge.exited; upstream.stop(true); rmSync(temporary, { recursive: true, force: true }); });
 
 test("full Forgejo -> bridge -> dito -> bridge token flow", async () => {
@@ -99,13 +102,13 @@ test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", asy
   const logFile = join(temporary, "rp-did.jsonl");
   writeFileSync(logFile, '{"versionId":"1-fake","state":{"id":"did:webvh:fake:oidc-bridge.did.md"}}\n');
   const dedicatedPort = bridgePort + 1000;
-  const dedicated = Bun.spawn({
+  const dedicated = spawn({
     cmd: [process.execPath, "server/oauth/src/server.ts"], cwd: root,
     env: { ...process.env, PORT: String(dedicatedPort), DATA_DIR: join(temporary, "data-log"), BRIDGE_ISSUER: `http://127.0.0.1:${dedicatedPort}`, DITO_ISSUER: upstreamBase, DITO_AUTHORIZATION_ENDPOINT: `${upstreamBase}/authorize`, FORGEJO_CLIENT_CONFIG: join(temporary, "forgejo.json"), RP_DID_LOG_FILE: logFile },
     stdout: "ignore", stderr: "ignore",
   });
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${dedicatedPort}/healthz`)).ok) break; } catch {} await Bun.sleep(20); }
+    for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${dedicatedPort}/healthz`)).ok) break; } catch {} await sleep(20); }
     const response = await fetch(`http://127.0.0.1:${dedicatedPort}/.well-known/did.jsonl`);
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('{"versionId":"1-fake","state":{"id":"did:webvh:fake:oidc-bridge.did.md"}}\n');
@@ -128,12 +131,12 @@ test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", asy
   writeFileSync(rpKeyFile, JSON.stringify({ did: rpDid, verificationMethod: `${rpDid}#pass-1`, privateKey: Buffer.from(rpPrivateKey).toString("base64url") }));
   const directPort = bridgePort + 2000;
   const directBase = `http://127.0.0.1:${directPort}`;
-  const directBridge = Bun.spawn({
+  const directBridge = spawn({
     cmd: [process.execPath, "server/oauth/src/server.ts"], cwd: root,
     env: { ...process.env, PORT: String(directPort), DATA_DIR: join(temporary, "data-direct"), BRIDGE_ISSUER: directBase, DITO_ISSUER: upstreamBase, DITO_AUTHORIZATION_ENDPOINT: `${upstreamBase}/authorize`, FORGEJO_CLIENT_CONFIG: join(temporary, "forgejo.json"), RP_DID_KEY_FILE: rpKeyFile, RP_RESPONSE_URI: `${directBase}/authorize/direct-callback` },
     stdout: "ignore", stderr: "ignore",
   });
-  async function directReady() { for (let i = 0; i < 100; i++) { try { if ((await fetch(`${directBase}/healthz`)).ok) return; } catch {} await Bun.sleep(20); } throw new Error("direct_post bridge did not start"); }
+  async function directReady() { for (let i = 0; i < 100; i++) { try { if ((await fetch(`${directBase}/healthz`)).ok) return; } catch {} await sleep(20); } throw new Error("direct_post bridge did not start"); }
   afterAll(async () => { directBridge.kill(); await directBridge.exited; });
 
   test("PLAN8: an RP-DID-configured bridge sends a direct_post JAR request, not code+PKCE", async () => {
@@ -222,14 +225,14 @@ test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", asy
   writeFileSync(rpKeyFile, JSON.stringify({ did: rpDid, verificationMethod: `${rpDid}#pass-1`, privateKey: Buffer.from(rpPrivateKey).toString("base64url") }));
   const transitionPort = bridgePort + 3000;
   const transitionBase = `http://127.0.0.1:${transitionPort}`;
-  const transitionBridge = Bun.spawn({
+  const transitionBridge = spawn({
     cmd: [process.execPath, "server/oauth/src/server.ts"], cwd: root,
     // Deliberately no RP_RESPONSE_URI -- this is the actual shape of
     // today's production env file.
     env: { ...process.env, PORT: String(transitionPort), DATA_DIR: join(temporary, "data-transition"), BRIDGE_ISSUER: transitionBase, DITO_ISSUER: upstreamBase, DITO_AUTHORIZATION_ENDPOINT: `${upstreamBase}/authorize`, FORGEJO_CLIENT_CONFIG: join(temporary, "forgejo.json"), RP_DID_KEY_FILE: rpKeyFile },
     stdout: "ignore", stderr: "ignore",
   });
-  async function transitionReady() { for (let i = 0; i < 100; i++) { try { if ((await fetch(`${transitionBase}/healthz`)).ok) return; } catch {} await Bun.sleep(20); } throw new Error("transition bridge did not start"); }
+  async function transitionReady() { for (let i = 0; i < 100; i++) { try { if ((await fetch(`${transitionBase}/healthz`)).ok) return; } catch {} await sleep(20); } throw new Error("transition bridge did not start"); }
   afterAll(async () => { transitionBridge.kill(); await transitionBridge.exited; });
 
   test("PLAN8 regression: RP_DID_KEY_FILE alone (no RP_RESPONSE_URI) keeps using JAR + code, not direct_post", async () => {
@@ -296,7 +299,7 @@ test("PLAN10: /.well-known/oauth-authorization-server and /v1/oauth/register are
 // Regression (found live 2026-09-22, fixed same session): merging oauthFetch
 // into this file's handle() without also carrying over did-md-server's own
 // try/catch (server/server.ts's `fail()`) let a thrown Invalid from an
-// oauth-server.ts route function escape as an uncaught exception -- Bun's
+// oauth-server.ts route function escape as an uncaught exception -- Node's
 // generic error page instead of a proper 400 JSON body. A browser caller
 // (biset's device-refresh) would see an uncatchable "Failed to fetch"
 // instead of a readable error, exactly the bug server/server.ts's own `fail`

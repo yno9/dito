@@ -5,28 +5,27 @@
  * "dito" logotype) is itself base64-inlined as a subsetted @font-face inside
  * styles.css -- there is no remaining external request of any kind.
  */
+import { build } from "esbuild";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const PUBLIC = "public";
 const DIST = "dist";
 
-const result = await Bun.build({
-  entrypoints: ["client/app.ts"],
-  target: "browser",
+const result = await build({
+  entryPoints: ["client/app.ts"],
+  bundle: true,
+  platform: "browser",
   format: "esm",
   minify: false,
   loader: { ".html": "text" },
+  write: false,
+  logLevel: "error",
 });
-
-if (!result.success) {
-  for (const message of result.logs) console.error(message);
-  throw new Error("bundling client/app.ts failed");
-}
 
 // The application bundle is embedded in an inline script below. Dependencies may
 // legitimately contain the literal `</script>` inside a JavaScript string; escape
 // it so it cannot terminate the HTML script element while the browser parses it.
-const bundle = (await result.outputs[0]!.text()).replace(/<\/script/gi, "<\\/script");
+const bundle = result.outputFiles[0]!.text.replace(/<\/script/gi, "<\\/script");
 const css = readFileSync(`${PUBLIC}/styles.css`, "utf8");
 let html = readFileSync(`${PUBLIC}/index.html`, "utf8");
 

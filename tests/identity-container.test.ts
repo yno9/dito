@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { decryptIdentityContainer, encryptIdentityContainer } from "../packages/wallet/src/wallet-backup.ts";
 
 test("identity container is a Master-seed-wrapped JWE and preserves its manifest", async () => {

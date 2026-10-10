@@ -82,7 +82,7 @@ What dito is today and how the parts fit. (Protocol details: [SPEC-webvh-hosting
 `webvh-hosting/1` (see the spec): `GET/PUT/POST/DELETE did.jsonl`, `PUT did-witness.json`, a disconnect request
 signed by a current update key, an error table, permissive CORS, an optional `/.well-known/did-hosting.json`.
 
-- **Conformance.** `packages/webvh/src/conformance.ts` is the executable spec (`bun run conformance`). did.md's
+- **Conformance.** `packages/webvh/src/conformance.ts` is the executable spec (`pnpm conformance`). did.md's
   host and the independent reference host both pass it, and the unmodified wallet works against the reference host.
 - **Caching.** Reads carry `Cache-Control: public, max-age=0, s-maxage=30`; `404`s and writes are never cached; a
   writer bypasses the cache with `?_=<time>`. Behind a CDN the origin sees only misses and writes.

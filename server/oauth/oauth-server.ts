@@ -42,7 +42,7 @@ function randomB64url(bytes = 32) { return b64url(crypto.getRandomValues(new Uin
 // Empty (the default) disables the DID-scheme path entirely -- every
 // deployment that has not provisioned an RP DID (see
 // scripts/create-rp-did.ts) keeps the DCR-only behavior it always had.
-const OAUTH_DID_RP_DOMAINS = (Bun.env.OAUTH_DID_RP_DOMAINS ?? "").toLowerCase().split(",").map(value => value.trim()).filter(Boolean);
+const OAUTH_DID_RP_DOMAINS = (process.env.OAUTH_DID_RP_DOMAINS ?? "").toLowerCase().split(",").map(value => value.trim()).filter(Boolean);
 function oauthDidClientDomainAllowed(did: string): boolean {
   let domain: string;
   try { domain = parseWebvhDid(did).domain; } catch { return false; }
@@ -108,7 +108,7 @@ async function verifyP256Dpop(value: string, request: Request, expectedUrl: stri
 // This is the production-shaped OAuth public-client flow. The server stores
 // registration metadata and opaque hashes only; the Wallet browser supplies
 // Root-authenticated public capability proofs at authorization time.
-const PUBLIC_API_ORIGIN = (Bun.env.PUBLIC_API_ORIGIN ?? "https://api.did.md").replace(/\/$/, "");
+const PUBLIC_API_ORIGIN = (process.env.PUBLIC_API_ORIGIN ?? "https://api.did.md").replace(/\/$/, "");
 const OAUTH_ISSUER = PUBLIC_API_ORIGIN;
 const OAUTH_CODE_MS = 5 * 60_000;
 const OAUTH_TOKEN_MS = 15 * 60_000;

@@ -1,7 +1,7 @@
 /**
  * did.md process entry point.
  *
- * This file only composes two independent modules into one Bun.serve():
+ * This file only composes two independent modules into one serve():
  *
  *   - identity-host.ts: the essential, non-optional did:webvh host. This is
  *     what did.md fundamentally IS.
@@ -16,6 +16,7 @@
  */
 import { identityFetch, cors, IDENTITY_DOMAIN, Invalid, json, PORT, text } from "./host/identity-host.ts";
 import { oauthCors, oauthFetch } from "./oauth/oauth-server.ts";
+import { serve } from "./serve.ts";
 
 // The single shared catch-all (see the top-level try/catch around route
 // dispatch below) has to pick the right CORS policy itself, since it fires
@@ -36,9 +37,9 @@ function fail(request: Request, error: unknown) {
   return new Response(`${message}\n`, { status, headers: { ...corsHeaders, "content-type": "text/plain; charset=utf-8" } });
 }
 
-const app = Bun.serve({
+const app = serve({
   port: PORT,
-  hostname: Bun.env.HOST ?? "127.0.0.1",
+  hostname: process.env.HOST ?? "127.0.0.1",
   async fetch(request) {
     try {
       const url = new URL(request.url);

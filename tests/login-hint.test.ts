@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { didHost, didIsHostedAt, parseLoginHost } from "../packages/wallet/src/login-hint.ts";
 
 test("accepts did.md subdomains and bring-your-own domains", () => {

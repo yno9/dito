@@ -7,13 +7,15 @@
  * has no such fallback: it 404s on any path that isn't a real file on
  * disk, which every client-side route other than "/" is.
  */
-import { resolve, sep } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { extname, resolve, sep } from "node:path";
+import { serve } from "../server/serve.ts";
 
-const port = Number(Bun.env.PORT ?? 8788);
+const port = Number(process.env.PORT ?? 8788);
 const root = resolve(new URL("../dist", import.meta.url).pathname);
-const indexHtml = Bun.file(`${root}/index.html`);
+const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2" };
 
-Bun.serve({
+serve({
   port,
   // Loopback only -- this serves dist/ with no auth of its own, and has no
   // reason to be reachable from anything but this machine.
@@ -28,11 +30,11 @@ Bun.serve({
       // to the same index.html fallback as any other unmatched route.
       const candidate = resolve(root + path);
       if (candidate === root || candidate.startsWith(root + sep)) {
-        const file = Bun.file(candidate);
-        if (await file.exists()) return new Response(file);
+        const info = await stat(candidate).catch(() => undefined);
+        if (info?.isFile()) return new Response(await readFile(candidate), { headers: { "content-type": TYPES[extname(candidate)] ?? "application/octet-stream" } });
       }
     }
-    return new Response(indexHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
+    return new Response(await readFile(`${root}/index.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
   },
 });
 

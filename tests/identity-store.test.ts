@@ -9,7 +9,7 @@
 // -- with no disk access at all (DATA_DIR points at a path that is never
 // created, so any inline fs fallback would fail loudly instead of silently
 // passing).
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, test } from "vitest";
 import { buildGenesis, createIdentityMaterial } from "../packages/wallet/src/did-webvh.ts";
 import { identityFetch, setIdentityStore, type IdentitySlot, type IdentityStore } from "../server/host/identity-host.ts";
 

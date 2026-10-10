@@ -8,12 +8,13 @@
  *
  *   handle @write { reverse_proxy 127.0.0.1:8796 }      # @write method PUT POST DELETE OPTIONS
  *
- *   DOMAIN=digitalcommons.jp ROOT=/opt/dc/dist PORT=8796 bun server/host/byo-host.ts
+ *   DOMAIN=digitalcommons.jp ROOT=/opt/dc/dist PORT=8796 node server/host/byo-host.ts
  */
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createReferenceHost, parseLog } from "../../packages/webvh/src/index.ts";
 import { mirrorDocument } from "../../packages/wallet/src/webvh-core.ts";
+import { serve } from "../serve.ts";
 
 export function createByoHost({ root, domain }: { root: string; domain: string }) {
   // The only two locations this host has: the DID base of an apex domain.
@@ -52,7 +53,7 @@ export function createByoHost({ root, domain }: { root: string; domain: string }
 }
 
 if (import.meta.main) {
-  const domain = Bun.env.DOMAIN, root = Bun.env.ROOT;
+  const domain = process.env.DOMAIN, root = process.env.ROOT;
   if (!domain || !root) throw new Error("Set DOMAIN (e.g. digitalcommons.jp) and ROOT (the directory the web server serves).");
-  Bun.serve({ port: Number(Bun.env.PORT ?? 8796), hostname: "127.0.0.1", fetch: createByoHost({ root, domain }) });
+  serve({ port: Number(process.env.PORT ?? 8796), hostname: "127.0.0.1", fetch: createByoHost({ root, domain }) });
 }

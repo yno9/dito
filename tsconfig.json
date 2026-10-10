@@ -14,14 +14,18 @@
     "strict": true,
     "skipLibCheck": true,
     "types": [
-      "bun-types"
-    ]
+      "node"
+    ],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
   },
   "include": [
     "server/**/*",
     "client/**/*",
     "packages/**/*",
     "scripts/**/*",
-    "tests/**/*"
+    "tests/**/*",
+    "web/**/*"
   ]
 }

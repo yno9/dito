@@ -24,7 +24,22 @@ export class DitoClient {
   // dito-registration.json today), so -- unlike biset's serverless
   // `https://t.biset.md` frontend, which needs a dedicated signing service
   // (biset-rp-signer) -- it can just sign inline, synchronously, here.
-  constructor(readonly issuer: string, readonly redirectUri: string, readonly registrationFile: string, readonly authorizationEndpoint = `${issuer}/v1/oauth/authorize`, readonly walletIdentityDomain = "did.md", private readonly rpDidKeyFile?: string, readonly responseUri?: string) {}
+  readonly issuer: string;
+  readonly redirectUri: string;
+  readonly registrationFile: string;
+  readonly authorizationEndpoint: string;
+  readonly walletIdentityDomain: string;
+  private readonly rpDidKeyFile?: string;
+  readonly responseUri?: string;
+  constructor(issuer: string, redirectUri: string, registrationFile: string, authorizationEndpoint = `${issuer}/v1/oauth/authorize`, walletIdentityDomain = "did.md", rpDidKeyFile?: string, responseUri?: string) {
+    this.issuer = issuer;
+    this.redirectUri = redirectUri;
+    this.registrationFile = registrationFile;
+    this.authorizationEndpoint = authorizationEndpoint;
+    this.walletIdentityDomain = walletIdentityDomain;
+    this.rpDidKeyFile = rpDidKeyFile;
+    this.responseUri = responseUri;
+  }
   get isRpDid(): boolean { return !!this.rpDidKey; }
   async initialize() {
     if (this.rpDidKeyFile) {

@@ -83,13 +83,19 @@ export async function verifyMasterOwnsLog(entries: Entry[], masterSeed: Uint8Arr
 }
 
 export class Identity {
-  private constructor(
-    private masterSeed: Uint8Array,
-    private _root: ControllerKey,
-    private _sign: ControllerKey,
-    private _spareIndex: number,
-    private _entries: Entry[],
-  ) {}
+  private masterSeed: Uint8Array;
+  private _root: ControllerKey;
+  private _sign: ControllerKey;
+  private _spareIndex: number;
+  private _entries: Entry[];
+
+  private constructor(masterSeed: Uint8Array, root: ControllerKey, sign: ControllerKey, spareIndex: number, entries: Entry[]) {
+    this.masterSeed = masterSeed;
+    this._root = root;
+    this._sign = sign;
+    this._spareIndex = spareIndex;
+    this._entries = entries;
+  }
 
   /** A fresh identity: provisional DID (`…:ex.alias`), no host yet. */
   static async create(options: { api?: string; displayName?: string } = {}): Promise<{ identity: Identity; mnemonic: string }> {

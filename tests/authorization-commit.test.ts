@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
 
 function recorder() {

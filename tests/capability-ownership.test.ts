@@ -5,17 +5,19 @@
 // demonstrate that the server accepts an RP-chosen type name -- these tests
 // specifically exercise a non-"did.md/DeviceCapability" type end to end,
 // and confirm a malformed type is still rejected explicitly.
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildGenesis, createIdentityMaterial, createSelfIssuedIdToken } from "../packages/wallet/src/did-webvh.ts";
 import { buildCapabilityCredential, vpToken } from "./helpers/capability-vc.ts";
+import { setTimeout as sleep } from "node:timers/promises";
+import { spawn } from "./spawn.ts";
 
 const port = 18_000 + Math.floor(Math.random() * 10_000);
 const base = `http://127.0.0.1:${port}`;
 const dataDir = mkdtempSync(join(tmpdir(), "did-md-capability-ownership-"));
-const server = Bun.spawn({
+const server = spawn({
   cmd: [process.execPath, "server/server.ts"],
   cwd: new URL("..", import.meta.url).pathname,
   env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, IDENTITY_FETCH_BASE_URL: base },
@@ -28,7 +30,7 @@ async function ready(): Promise<void> {
     try {
       if ((await fetch(`${base}/healthz`)).ok) return;
     } catch { /* server is still starting */ }
-    await Bun.sleep(20);
+    await sleep(20);
   }
   throw new Error("did.md test server did not start");
 }

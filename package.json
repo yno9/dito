@@ -3,34 +3,48 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:ui": "bun build client/app.ts --target browser --outfile build/app.js --loader .html:text",
-    "build:home": "bun build.ts",
-    "build:bridge": "bun build --compile --target=bun-linux-x64 --outfile dist/did-md-oidc-bridge server/oauth/src/server.ts",
-    "dev": "bun --watch server/server.ts",
-    "start": "bun server/server.ts",
-    "start:bridge": "bun server/oauth/src/server.ts",
-    "test": "bun test",
-    "dito": "bun packages/cli/dito.ts",
-    "conformance": "bun packages/webvh/conformance-cli.ts",
-    "start:identity": "bun server/host/http-server.ts",
-    "build:identity": "bun build --compile --target=bun-linux-x64 --outfile dist/did-md-server server/host/http-server.ts"
+    "build:ui": "esbuild client/app.ts --bundle --platform=browser --format=esm --loader:.html=text --outfile=build/app.js",
+    "build:home": "node build.ts",
+    "build:bridge": "esbuild server/oauth/src/server.ts --bundle --platform=node --format=esm --packages=bundle --banner:js=\"import{createRequire as __cr}from\\\"node:module\\\";const require=__cr(import.meta.url);\" --outfile=dist/did-md-oidc-bridge.mjs",
+    "dev": "node --watch server/server.ts",
+    "start": "node server/server.ts",
+    "start:bridge": "node server/oauth/src/server.ts",
+    "test": "vitest run",
+    "dito": "node packages/cli/dito.ts",
+    "conformance": "node packages/webvh/conformance-cli.ts",
+    "start:identity": "node server/host/http-server.ts",
+    "build:identity": "esbuild server/host/http-server.ts --bundle --platform=node --format=esm --banner:js=\"import{createRequire as __cr}from\\\"node:module\\\";const require=__cr(import.meta.url);\" --outfile=dist/did-md-server.mjs",
+    "astro:dev": "astro dev",
+    "astro:build": "astro build",
+    "astro:preview": "astro preview"
   },
   "dependencies": {
+    "@astrojs/react": "^7.0.1",
     "@metamask/browser-passworder": "^6.0.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "@octokit/core": "^7.0.8",
     "@scure/bip39": "^2.4.0",
-    "didwebvh-ts": "^2.8.0"
+    "astro": "^7.3.8",
+    "didwebvh-ts": "^2.8.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.2",
-    "@types/node": "^26.6.2"
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "vitest": "^5.0.3"
   },
   "license": "AGPL-3.0-only",
   "description": "A generic did:webvh wallet, a did:webvh hosting protocol, and a reference host.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yno9/dito.git"
+  },
+  "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": ">=26"
   }
 }

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, test } from "vitest";
 import { buildGenesis, createIdentityMaterial, preparePortableImport } from "../packages/wallet/src/did-webvh.ts";
 import {
   CredentialRequiredError,

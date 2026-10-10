@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "vitest";
 import { Identity } from "../packages/wallet/src/identity.ts";
 import { validateLogAt } from "../packages/wallet/src/webvh-core.ts";
 

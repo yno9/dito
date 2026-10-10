@@ -178,7 +178,7 @@ the protocol; a server MAY offer one as an extension.
 
 ## 9. Conformance
 
-`packages/webvh/src/conformance.ts` exports `runConformance(target)`; `bun run conformance` runs it
+`packages/webvh/src/conformance.ts` exports `runConformance(target)`; `pnpm conformance` runs it
 against a URL. It creates throwaway identities and checks sections 2-6. did.md's own server is in
 CI against it (`tests/hosting-conformance.test.ts`).
 

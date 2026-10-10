@@ -8,8 +8,10 @@ import { createDataIntegrityProof } from "./proof.ts";
 import type { Ed25519Key } from "./signer.ts";
 
 export class HostingError extends Error {
-  constructor(readonly status: number, message: string) {
+  readonly status: number;
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
     this.name = "HostingError";
   }
 }

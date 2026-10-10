@@ -12,26 +12,27 @@ import { SessionStore, type BridgeSession } from "./session-store.ts";
 // state or route naming collides with this file's own Maps/paths.
 import { oauthCors, oauthFetch } from "../oauth-server.ts";
 import { Invalid } from "../../host/identity-host.ts";
+import { serve } from "../../serve.ts";
 
 type Client = { client_id: string; client_secret: string; redirect_uris: string[] };
 type Code = { session: BridgeSession; expiresAt: number };
 type AccessToken = { claims: Record<string, unknown>; expiresAt: number };
 
-const issuer = (Bun.env.BRIDGE_ISSUER ?? "https://oidc-bridge.did.md").replace(/\/$/, "");
-const port = Number(Bun.env.PORT ?? 8790);
-const dataDir = Bun.env.DATA_DIR ?? "./data/oidc-bridge";
+const issuer = (process.env.BRIDGE_ISSUER ?? "https://oidc-bridge.did.md").replace(/\/$/, "");
+const port = Number(process.env.PORT ?? 8790);
+const dataDir = process.env.DATA_DIR ?? "./data/oidc-bridge";
 // DITO_* is canonical; DISPO_* kept as aliases so older unit files and docs keep working.
-const ditoIssuer = (Bun.env.DITO_ISSUER ?? Bun.env.DISPO_ISSUER ?? "https://api.did.md").replace(/\/$/, "");
+const ditoIssuer = (process.env.DITO_ISSUER ?? process.env.DISPO_ISSUER ?? "https://api.did.md").replace(/\/$/, "");
 const ditoAuthEndpoint =
-  Bun.env.DITO_AUTHORIZATION_ENDPOINT ??
-  Bun.env.DISPO_AUTHORIZATION_ENDPOINT ??
+  process.env.DITO_AUTHORIZATION_ENDPOINT ??
+  process.env.DISPO_AUTHORIZATION_ENDPOINT ??
   "https://app.did.md/authorize";
-const walletIdentityDomain = (Bun.env.WALLET_IDENTITY_DOMAIN ?? "did.md").toLowerCase();
+const walletIdentityDomain = (process.env.WALLET_IDENTITY_DOMAIN ?? "did.md").toLowerCase();
 // PLAN6: when set, oidc-bridge authenticates to dito as a did:webvh RP
 // (JAR) instead of a DCR-registered client. Unset by default -- existing
 // deployments keep working on the DCR path until this is explicitly
 // provisioned (see scripts/create-rp-did.ts in the did.md repo).
-const rpDidKeyFile = Bun.env.RP_DID_KEY_FILE;
+const rpDidKeyFile = process.env.RP_DID_KEY_FILE;
 // PLAN8: dito posts
 // vp_token/id_token straight here (response_mode=direct_post) instead of
 // oidc-bridge exchanging a `code` at api.did.md -- only meaningful
@@ -44,25 +45,25 @@ const rpDidKeyFile = Bun.env.RP_DID_KEY_FILE;
 // here would flip every live login to direct_post, and fail outright,
 // the moment this binary deploys, before that publish step (a separate,
 // manual provisioning action) has happened. Set this only after publishing.
-const rpResponseUri = Bun.env.RP_RESPONSE_URI;
+const rpResponseUri = process.env.RP_RESPONSE_URI;
 const dito = new DitoClient(ditoIssuer, `${issuer}/callback`, `${dataDir}/dito-registration.json`, ditoAuthEndpoint, walletIdentityDomain, rpDidKeyFile, rpResponseUri);
 // PLAN8: the browser (app.did.md) POSTs directly to /authorize/direct-callback
 // below -- unlike every other route here, that request's Origin is not this
 // bridge's own client, so it needs an explicit CORS allow.
 const APP_ORIGIN = "https://app.did.md";
 function directCallbackCors(): HeadersInit { return { "access-control-allow-origin": APP_ORIGIN, "access-control-allow-methods": "POST", "access-control-allow-headers": "content-type", vary: "origin" }; }
-// PLAN6: oidc-bridge.did.md is a single reverse-proxied Bun process (unlike
+// PLAN6: oidc-bridge.did.md is a single reverse-proxied Node process (unlike
 // t.biset.md's static file_server), so its own did:webvh log -- the public
 // counterpart of rpDidKeyFile above, letting did.md's server resolve this
 // RP's identity -- has to be served by a route here rather than dropped in
 // as a static file. Unset (like rpDidKeyFile) until this RP DID is actually
 // provisioned; /.well-known/did.jsonl 404s until then, same as before this
 // route existed.
-const rpDidLogFile = Bun.env.RP_DID_LOG_FILE;
+const rpDidLogFile = process.env.RP_DID_LOG_FILE;
 
 const clientsPath =
-  Bun.env.CLIENTS_CONFIG ??
-  Bun.env.FORGEJO_CLIENT_CONFIG ??
+  process.env.CLIENTS_CONFIG ??
+  process.env.FORGEJO_CLIENT_CONFIG ??
   "server/oauth/config/forgejo-client.json";
 
 // Any number of relying parties (Forgejo, Outline, Hi.Events, ...) share this
@@ -357,7 +358,7 @@ async function handleRoute(request: Request): Promise<Response> {
 // PLAN10: the same rationale as did-md-server's own `fail()`
 // (server/server.ts) -- a thrown Invalid from an oauth-server.ts route
 // function must become a proper, CORS'd 400 JSON response, not an
-// uncaught exception reaching Bun's generic error page. Without this, a
+// uncaught exception reaching Node's generic error page. Without this, a
 // browser caller (biset's device-refresh -- see server/server.ts's own
 // comment on the exact "Failed to fetch" bug this once caused live) gets
 // an uncatchable network error instead of a readable body. Confirmed live
@@ -382,7 +383,7 @@ export async function handle(request: Request): Promise<Response> {
 if (import.meta.main) {
   await dito.initialize();
   const active = getClients();
-  Bun.serve({ hostname: Bun.env.HOST ?? "127.0.0.1", port, fetch: handle });
+  serve({ hostname: process.env.HOST ?? "127.0.0.1", port, fetch: handle });
   console.log(`OIDC bridge listening on ${port}`);
   console.log(`clients: ${[...active.keys()].join(", ")}`);
   console.log(`clients_config: ${clientsPath}`);

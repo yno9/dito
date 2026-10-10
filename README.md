@@ -17,25 +17,25 @@ third party's.
 
 ## Quick start
 
-Requires [Bun](https://bun.sh).
+Requires Node.js >= 26 and [pnpm](https://pnpm.io).
 
 ```sh
-bun install
-bun test                       # ~115 tests
-bun build.ts                   # -> dist/index.html (the whole wallet, one file)
-bun scripts/dev-static-server.ts   # serve dist/ on http://127.0.0.1:8788
+pnpm install
+pnpm test                      # ~115 tests
+pnpm build:home               # -> dist/index.html (the whole wallet, one file)
+node scripts/dev-static-server.ts   # serve dist/ on http://127.0.0.1:8788
 ```
 
 ### The CLI
 
 ```sh
-bun run dito new                                   # creates ./did.jsonl, prints the mnemonic once
-bun run dito show                                  # DID, host, document (no secret needed)
-bun run dito verify <did:webvh:…>                  # fetch and validate a published log
-DITO_MNEMONIC="…" bun run dito connect alice       # host it at https://alice.did.md (or --domain)
-GITHUB_TOKEN=… DITO_MNEMONIC="…" bun run dito github   # host it on <login>.github.io
-DITO_MNEMONIC="…" bun run dito rotate
-DITO_MNEMONIC="…" bun run dito service add '#files' relativeRef https://alice.example/
+pnpm dito new                                   # creates ./did.jsonl, prints the mnemonic once
+pnpm dito show                                  # DID, host, document (no secret needed)
+pnpm dito verify <did:webvh:…>                  # fetch and validate a published log
+DITO_MNEMONIC="…" pnpm dito connect alice       # host it at https://alice.did.md (or --domain)
+GITHUB_TOKEN=… DITO_MNEMONIC="…" pnpm dito github   # host it on <login>.github.io
+DITO_MNEMONIC="…" pnpm dito rotate
+DITO_MNEMONIC="…" pnpm dito service add '#files' relativeRef https://alice.example/
 ```
 
 `--json` prints one JSON object per command. The mnemonic is never written to disk by the tool
@@ -75,9 +75,9 @@ passkey can optionally seal the phrase locally (a convenience copy, not a replac
 Any conforming host works; the wallet derives every URL from the DID.
 
 ```sh
-bun run start:identity                                     # a did.md-style host on 127.0.0.1:8787
-bun run conformance --domain example.com                   # check any host (throwaway identities)
-bun run conformance --domain did.md --base http://127.0.0.1:8787   # a local host standing in for the domain
+pnpm start:identity                                     # a did.md-style host on 127.0.0.1:8787
+pnpm conformance --domain example.com                   # check any host (throwaway identities)
+pnpm conformance --domain did.md --base http://127.0.0.1:8787   # a local host standing in for the domain
 ```
 
 - **Your own GitHub Pages** (`<login>.github.io`) is a supported host that needs no server.

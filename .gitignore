@@ -12,13 +12,16 @@
 !/ARC.md
 !/SPEC-webvh-hosting.md
 !/package.json
-!/bun.lock
-!/bunfig.toml
+!/pnpm-workspace.yaml
+!/pnpm-lock.yaml
+!/astro.config.mjs
+!/vitest.config.ts
 !/tsconfig.json
 !/build.ts
 
 # source
 !/client/
+!/web/
 !/public/
 !/packages/
 !/server/

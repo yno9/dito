@@ -3,7 +3,7 @@
 // DID Rotation signing key) and must not act as the user everywhere. A
 // document without #pass-1 is another wallet's, whose key names are not
 // assumed (PLAN1): any authentication key signs in.
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { maySignIn, multikeyFromPublicKey } from "../packages/webvh/src/index.ts";
 import { authenticationKeyFromState } from "../server/host/identity-host.ts";

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { endpointIdentity, mergeServiceEndpoints, sameDidDocumentReference, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
 
 const did = "did:webvh:Qm123:alice.did.md";

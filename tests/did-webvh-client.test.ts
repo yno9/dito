@@ -1,6 +1,6 @@
 import { multihash, base58Decode } from "./helpers/webvh-fixtures.ts";
 import { Ed25519Signer, createLog, keyFromPrivateKey, serializeLog } from "../packages/webvh/src/index.ts";
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, test } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
   buildGenesis,
@@ -220,7 +220,7 @@ test("Wallet issues an audience-bound generic key credential signed by both Root
 // Request with a JAR (RFC 9101) signed by its own did:webvh key, rather than
 // a DCR-issued client_id/secret. verifyRequestObjectJws is the wallet-UI-side
 // verifier (client/did-webvh.ts, browser-safe -- see packages/did-verify for
-// the equivalent used by oidc-bridge's Node/Bun backend).
+// the equivalent used by oidc-bridge's Node backend).
 function base64url(bytes: Uint8Array): string {
   let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

@@ -115,3 +115,24 @@ test("Identity.fromDid opens an identity on a fresh device from its published lo
   expect(err).toBe("");
   await expect(Identity.fromDid({ did: identity.did, mnemonic: (await Identity.create()).mnemonic })).rejects.toThrow(/Root Key/);
 });
+
+test("an update after the move drops the provisional ex.alias DID from alsoKnownAs", async () => {
+  const { identity } = await Identity.create();
+  const provisional = identity.did;
+  const moved = await identity.prepareMove({ username: "alice", domain: "did.md" });
+  expect(moved.entry.state.alsoKnownAs).toContain(provisional);
+  await identity.commit(moved);
+  const next = await identity.prepareUpdate(JSON.parse(JSON.stringify(identity.state)));
+  expect(next.entry.state.alsoKnownAs ?? []).not.toContain(provisional);
+});
+
+test("an identity created with a username is born at that address, with no provisional DID", async () => {
+  const { identity, mnemonic } = await Identity.create({ username: "alice", domain: "did.md" });
+  expect(identity.did.endsWith(":alice.did.md")).toBe(true);
+  expect(identity.isProvisional).toBe(false);
+  expect(identity.entries.length).toBe(1);
+  expect(JSON.stringify(identity.state)).not.toContain("ex.alias");
+  const reopened = await Identity.open({ mnemonic, log: identity.logText() });
+  const next = await reopened.prepareUpdate(JSON.parse(JSON.stringify(reopened.state)));
+  expect(next.entry.versionId.startsWith("2-")).toBe(true);
+});

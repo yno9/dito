@@ -5350,23 +5350,35 @@ query("#publish-create").addEventListener("click", async () => {
   if (EMBED) { try { embedNotify({ event: "creating", handle: selectedCreationAliasHost() }); } catch { /* an invalid alias fails below */ } }
   try {
     const currentDraft = draft;
-    const entry = await provisionalGenesisEntry();
-    let entries = [entry];
+    let entries;
     if (query("#creation-alias-toggle").getAttribute("aria-checked") === "true") {
       if (query("#creation-alias-status").dataset.state !== "available") {
         throw new Error("Choose an available Alias before creating this identity.");
       }
       const targetHost = selectedCreationAliasHost();
       const target = splitHostedTarget(targetHost);
-      const move = await preparePortableImport({
-        entries,
-        username: target.username,
-        domain: target.domain,
-        masterSeed: currentDraft.material.masterSeed,
-      });
-      entries = [...entries, move.entry];
+      if (EMBED) {
+        // biset's frame: the Alias is mandatory, so the identity is born at
+        // that address (no provisional `ex.alias` DID, no move entry).
+        entries = [await buildGenesis({
+          username: target.username, domain: target.domain, root: currentDraft.material.root, sign: currentDraft.material.sign,
+          nextSpare: currentDraft.material.nextSpare, api: API,
+        })];
+      } else {
+        // dito itself: the Alias is optional, so the identity starts from the
+        // provisional DID (its SCID is already on screen) and is moved.
+        const move = await preparePortableImport({
+          entries: [await provisionalGenesisEntry()],
+          username: target.username,
+          domain: target.domain,
+          masterSeed: currentDraft.material.masterSeed,
+        });
+        entries = [await provisionalGenesisEntry(), move.entry];
+      }
       const body = `${entries.map(item => JSON.stringify(item)).join("\n")}\n`;
       await publish(`https://${targetHost}/.well-known/did.jsonl`, "PUT", body);
+    } else {
+      entries = [await provisionalGenesisEntry()];
     }
     const finalEntry = entries.at(-1);
     const persisted = await replaceBrowserIdentityWithProvisional(entries, currentDraft.material.masterSeed, { password: currentDraft.password });

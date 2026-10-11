@@ -97,11 +97,12 @@ export class Identity {
     this._entries = entries;
   }
 
-  /** A fresh identity: provisional DID (`…:ex.alias`), no host yet. */
-  static async create(options: { api?: string; displayName?: string } = {}): Promise<{ identity: Identity; mnemonic: string }> {
+  /** A fresh identity: provisional DID (`…:ex.alias`), no host yet, unless `username` gives it its address up front. */
+  static async create(options: { api?: string; displayName?: string; username?: string; domain?: string } = {}): Promise<{ identity: Identity; mnemonic: string }> {
     const material = await createIdentityMaterial();
     const genesis = await buildGenesis({
-      username: "ex", domain: "alias", root: material.root, sign: material.sign, nextSpare: material.nextSpare,
+      // With a username the identity is born at that address (no provisional DID, no move entry).
+      username: options.username ?? "ex", domain: options.username ? (options.domain ?? "did.md") : "alias", root: material.root, sign: material.sign, nextSpare: material.nextSpare,
       api: options.api, displayName: options.displayName,
     });
     const identity = new Identity(material.masterSeed, material.root, material.sign, material.nextSpareIndex, [genesis]);
@@ -171,6 +172,13 @@ export class Identity {
 
   /** Next entry with a complete new DID Document (optionally moving location). */
   async prepareUpdate(state: DidDocument, options: { domain?: string } = {}): Promise<PreparedStep> {
+    // The provisional `…:ex.alias` DID was never published: the library records
+    // it in alsoKnownAs when the DID moves to its real location, so drop it
+    // from the next entry on (the move entry itself cannot be changed).
+    const aliases = (state as any).alsoKnownAs;
+    if (Array.isArray(aliases) && aliases.some(isProvisionalHostlessDid)) {
+      state = { ...state, alsoKnownAs: aliases.filter(value => !isProvisionalHostlessDid(value)) } as DidDocument;
+    }
     const prepared = await preparePreRotatedUpdate({
       entries: this._entries, state, masterSeed: this.masterSeed, currentSpareIndex: this._spareIndex, domain: options.domain,
     });

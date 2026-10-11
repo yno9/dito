@@ -240,6 +240,11 @@ anywhere. No new tab or window: nothing for a popup blocker to stop, and no `win
   `app.ts` prefers the live document, so a duplicate `#master-mnemonic` would be picked up by the main app.
 - It only works when the frame and the wallet are the same site. Cross-site, the frame's storage is partitioned
   and empty (PLAN-embedded-wallet.md), so the embed is not offered there.
+- Two entrances, two ways to make the DID (Create handler in `app.ts`). The embed (biset) has a mandatory Alias, so
+  the genesis is built at `name.did.md` directly: no `…:ex.alias` DID, no move entry. dito itself has an optional
+  Alias, so it keeps the provisional DID (its SCID is on screen before Create) and appends a move entry. The library
+  (`didwebvh-ts`) writes the old DID into `alsoKnownAs` on every move, so `Identity.prepareUpdate` drops
+  `…:ex.alias` from the next entry on; the move entry itself stays in the log.
 
 ### 9.5 The embedded create also signs in (the last page is `/authorize`)
 

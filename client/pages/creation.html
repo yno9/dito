@@ -53,24 +53,20 @@
     </div>
 
     <form id="create-load-form" method="get">
-      <!-- Restored to the exact shape of the last build where password
-           managers actually fired (2026-09-13, commit d9ec4cd): offscreen
-           username label, and the password field living inside a
-           recovery-field-wrap alongside its own eye-toggle/copy buttons as
-           siblings, not off in the heading row. Several partial rewrites
-           since then (visible username, textarea+hidden-input, POST,
-           label-only) were each tried and none alone fixed it -- reverting
-           the whole shape at once is the only version with a track record. -->
-      <label class="offscreen-field">
-        Identity
-        <input
-          id="create-username"
-          name="username"
-          type="text"
-          autocomplete="username"
-          class="recovery-field"
-        />
-      </label>
+      <!-- DO NOT EDIT THIS FORM WITHOUT READING ARC.md, "Password-manager autosave"
+           (section 9). Proton Pass offers to save the Passphrase only for a form of
+           exactly this shape: a visible type=password field, a hidden "username"
+           input (setHiddenUsername in app.ts), the Alias input, a real submit
+           button, and nothing readonly / disabled / offscreen / tiny inside. It
+           has broken repeatedly from small changes (an offscreen username and a
+           readonly overlay textarea did it in 2026-10). Check any change with
+           `node scripts/pm-probe.ts` first, then by creating an identity here. -->
+      <!-- No username field: with the offscreen #create-username (and the
+           readonly overlay textarea) in this form, Proton Pass stopped offering
+           to save the Passphrase (found 2026-10-11 by removing them one by one;
+           the form is recognised again only once both are gone). The overlay
+           is now created only while the Passphrase is revealed (see
+           ensurePassphraseOverlay in app.ts). -->
 
       <!-- ## h2 / [field] — Passphrase
            A real, VISIBLE input[type=password] -- not a <textarea>, and
@@ -115,23 +111,6 @@
               placeholder="Passphrase"
               class="recovery-field passphrase-field"
             />
-            <!-- #master-mnemonic itself always stays a real, on-screen
-                 input[type=password] -- that's the one thing every attempt
-                 at hiding/duplicating it broke password managers. This is
-                 a separate, purely cosmetic wrapped view: shown ONLY once
-                 the eye toggle has already flipped #master-mnemonic to
-                 type="text" (so at the moment password managers detect the
-                 field, on page load, it's a plain visible input same as
-                 always -- this only exists on top of it afterward, on
-                 explicit user action). Kept in sync + shown/hidden by the
-                 .recovery-eye-toggle click handler in app.ts. -->
-            <textarea
-              id="master-mnemonic-display"
-              readonly
-              tabindex="-1"
-              aria-hidden="true"
-              class="passphrase-display-overlay hidden"
-            ></textarea>
             <button
               type="button"
               class="recovery-eye-toggle"

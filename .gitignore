@@ -51,3 +51,4 @@ test/logs/
 # operational scripts (only the local dev server is public)
 /scripts/*
 !/scripts/dev-static-server.ts
+!/scripts/pm-probe.ts

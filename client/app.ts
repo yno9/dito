@@ -221,6 +221,7 @@ function renderRoute() {
   // it can be unlocked and approved.
   if (walletAuthorization) route = hasIdentity ? "/dashboard" : "/";
   if (hasIdentity && route === "/") route = "/dashboard";
+  if (EMBED) route = "/";
   if (!hasIdentity && route === "/dashboard") route = "/";
   if (route !== requestedRoute && location.pathname !== "/authorize") {
     const target = location.protocol === "file:" ? `#${route}` : route;
@@ -301,6 +302,46 @@ const DERIVED_SECRET_DETAIL = "urn:did.md:derived-secret:v1";
 const requestedAliasFromUrl = (() => {
   try { return new URLSearchParams(location.search).has("alias"); } catch { return false; }
 })();
+// Embedded in biset's landing page (see "Embedded create" at the end of this
+// file): the page shows only the Alias and Passphrase fields, and the parent
+// drives Create over a MessageChannel. Captured once here for the same reason
+// as requestedAliasFromUrl above (boot later scrubs location.search).
+const EMBED = (() => {
+  try { return window.top !== window && new URLSearchParams(location.search).get("embed") === "create"; } catch { return false; }
+})();
+// The top-level pages the embedded create form sends the tab to, to save the
+// Passphrase (see "Embedded create" at the end of this file): ?embed=save shows
+// the form, ?embed=save-done is the page its POST lands on. Both read their query
+// here, once: boot rewrites the URL shortly after load.
+const EMBED_LOGIN_STORE = "dito.embed-login";
+const EMBED_LOGIN = (() => {
+  // The embedded create may sign in as it goes: the save page then POSTs to /authorize?... (the
+  // relying party's signed request), and that page is the last page too. Only a tab whose save
+  // page marked it gets this; any other /authorize page is the ordinary approval screen.
+  try { return window.top === window && location.pathname === "/authorize" && sessionStorage.getItem(EMBED_LOGIN_STORE) === "1"; }
+  catch { return false; }
+})();
+const EMBED_SAVE = (() => {
+  try {
+    if (EMBED_LOGIN) return "save-done";
+    const mode = new URLSearchParams(location.search).get("embed");
+    return window.top === window && (mode === "save" || mode === "save-done") ? mode : null;
+  } catch { return null; }
+})();
+const EMBED_LOGIN_PARAM = (() => {
+  try { return new URLSearchParams(location.search).get("login"); } catch { return null; }
+})();
+const EMBED_RETURN_PARAM = (() => {
+  try { return new URLSearchParams(location.search).get("return"); } catch { return null; }
+})();
+// Set by the embedded sign-in (EMBED_LOGIN): receives the prepared delivery instead of
+// navigating, so the last page can hold it until Yes.
+let embedLoginDeliver = null;
+let authorizationError = null;
+let embedPort = null;
+// Set once an embedded create has persisted the identity: what the save page asks for.
+let embedSave = null;
+const embedNotify = message => embedPort?.postMessage(message);
 let draft = null;
 let draftBeingCreated = false;
 let creationLoadUrlTimer = null;
@@ -2108,6 +2149,50 @@ function updateKeyStatus() {
 
 let lastCreatePhrase = "";
 
+// The account name a password manager saves next to the Passphrase. Proton
+// Pass reads it from an <input type="hidden"> whose name/id mentions "user"
+// (its detector, @protontech/autofill, ignores one with an empty value, and
+// treats a text input that is offscreen, tiny or transparent as invisible --
+// the old offscreen #create-username kept the form from being recognised).
+// The input is replaced rather than edited, so the detector sees it appear
+// with its value already set.
+function setHiddenUsername(did) {
+  const form = query("#create-load-form");
+  if (!form) return;
+  query("#create-username")?.remove();
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.id = "create-username";
+  input.name = "username";
+  input.value = did;
+  form.prepend(input);
+}
+
+// The unmasked, wrapped view shown in place of #master-mnemonic once the eye
+// toggle reveals it. It is a readonly textarea, which Proton Pass counts as a
+// busy field of the form, so it exists only while revealed -- never while the
+// Passphrase is masked, and never when the confirm step submits the form.
+function ensurePassphraseOverlay() {
+  let display = query("#master-mnemonic-display");
+  if (display) return display;
+  const wrap = query("#master-mnemonic-wrap");
+  const field = query("#master-mnemonic");
+  if (!wrap || !field) return null;
+  display = document.createElement("textarea");
+  display.id = "master-mnemonic-display";
+  display.readOnly = true;
+  display.tabIndex = -1;
+  display.setAttribute("aria-hidden", "true");
+  display.className = "passphrase-display-overlay hidden";
+  field.after(display);
+  return display;
+}
+
+function dropPassphraseOverlay() {
+  query("#master-mnemonic-display")?.remove();
+  query("#master-mnemonic")?.classList.remove("passphrase-field-covered");
+}
+
 function showDraftPhrase() {
   const field = query("#master-mnemonic");
   const phrase = draft?.material?.masterMnemonic || lastCreatePhrase;
@@ -2122,8 +2207,7 @@ function showDraftPhrase() {
     field.placeholder = "Passphrase";
     field.dispatchEvent(new Event("input", { bubbles: true }));
   }
-  query("#master-mnemonic-display")?.classList.add("hidden");
-  field?.classList.remove("passphrase-field-covered");
+  dropPassphraseOverlay();
   query("#master-mnemonic-copy-hint")?.classList.remove("hidden");
   query("#master-mnemonic-copy-feedback")?.classList.add("hidden");
   query("#master-mnemonic-eye-slash")?.classList.remove("hidden");
@@ -3969,6 +4053,7 @@ async function beginOAuthAuthorization() {
     // No identity yet: the Authorize card itself says so (Approve is greyed out
     // with "Create or load an identity before approving"), so no extra message.
   } catch (error) {
+    authorizationError = error;
     output("#wallet-result", errorMessage(error), true);
   }
 }
@@ -4165,7 +4250,7 @@ async function approveAuthorization() {
     await commitAuthorization({
       accept: () => oauthDeliveryPlan(walletAuthorization, { vp_token: JSON.stringify({ capability: [vc] }), ...(idToken ? { id_token: idToken } : {}), state: walletAuthorization.state }),
       persist: persistAuthorization,
-      navigate: plan => plan.go(),
+      navigate: plan => (embedLoginDeliver ? embedLoginDeliver(plan) : plan.go()),
     });
     return;
   }
@@ -4681,13 +4766,12 @@ document.addEventListener("click", event => {
   // this wrap's eye-toggle/overlay stay behind in the Create-mode slot,
   // not the moved <input>.
   if (toggle.dataset.for === "master-mnemonic") {
-    const display = query("#master-mnemonic-display");
     const homeSlot = query("#master-mnemonic-wrap");
-    if (display && field.parentElement === homeSlot) {
+    if (field.parentElement === homeSlot) {
       if (revealed) {
-        display.classList.add("hidden");
-        field.classList.remove("passphrase-field-covered");
+        dropPassphraseOverlay();
       } else {
+        const display = ensurePassphraseOverlay();
         display.value = field.value;
         display.classList.remove("hidden");
         field.classList.add("passphrase-field-covered");
@@ -4825,7 +4909,7 @@ if (location.protocol === "file:") window.addEventListener("hashchange", renderR
 // decides the person has none, so it waits for this read (see identityRestored).
 identityRestored = restoreStoredIdentityRecord();
 void renderLoadedIdentity();
-void beginOAuthAuthorization();
+const authorizationReady = beginOAuthAuthorization();
 
 async function beginCreateDraft() {
   if (draftBeingCreated) return;
@@ -4848,8 +4932,7 @@ async function beginCreateDraft() {
     // FormTracker never saw this field as "interacted with" and silently
     // skipped it on submit, independent of anything about the field being
     // programmatically filled or offscreen.
-    query("#create-username").value = entry.state.id;
-    query("#create-username").dispatchEvent(new Event("input", { bubbles: true }));
+    setHiddenUsername(entry.state.id);
     resetCreationAlias();
     if (requestedAliasFromUrl) setCreationAliasEnabled(true);
   } catch (error) {
@@ -4910,8 +4993,21 @@ const EXPERIMENTAL_SKIP_CREATION_CONFIRM = false;
 // further down for why that matters for password managers).
 let creationConfirmActive = false;
 
+function maskPassphraseField() {
+  dropPassphraseOverlay();
+  const field = query("#master-mnemonic");
+  if (field) field.type = "password";
+  query("#master-mnemonic-eye-slash")?.classList.remove("hidden");
+  query('.recovery-eye-toggle[data-for="master-mnemonic"]')?.setAttribute("aria-label", "Show passphrase");
+}
+
 function setCreationConfirmStep(active) {
   creationConfirmActive = active;
+  if (active) {
+    // The form is about to be submitted: the overlay is gone and the field is
+    // a masked password again, whatever the eye toggle left behind.
+    maskPassphraseField();
+  }
   query("#creation-create-actions").classList.toggle("hidden", active);
   query("#creation-confirm-actions").classList.toggle("hidden", !active);
   // Dim everything except the Passphrase field and this confirm pill itself
@@ -5244,9 +5340,14 @@ query("#creation-load-file").addEventListener("change", (event) => {
 // a form submit. Only #creation-confirm-saved below is a real submit button:
 // see its own comment for why that split exists.
 query("#publish-create").addEventListener("click", async () => {
+  // After Create the embedded frame's button asks again to go to the save page.
+  if (EMBED && embedSave) { embedNotify({ event: "save-page" }); return; }
   if (!draft) return;
   const button = query("#publish-create");
   button.disabled = true;
+  // The embedding page starts preparing the sign-in request now, in parallel with the identity being
+  // made, so nothing waits for it when the page moves on. The host name pins it to this identity.
+  if (EMBED) { try { embedNotify({ event: "creating", handle: selectedCreationAliasHost() }); } catch { /* an invalid alias fails below */ } }
   try {
     const currentDraft = draft;
     const entry = await provisionalGenesisEntry();
@@ -5311,16 +5412,28 @@ query("#publish-create").addEventListener("click", async () => {
         const usernameField = query("#create-username");
         if (usernameField) usernameField.value = "";
       } else {
-        setCreationConfirmStep(true);
+        if (EMBED) {
+          // A frame never gets the save prompt: hand the Passphrase to a popup.
+          startEmbedSave(finalEntry.state.id);
+        } else {
+          // The Alias changed the DID's host part: save the final one.
+          setHiddenUsername(finalEntry.state.id);
+          setCreationConfirmStep(true);
+        }
+        embedNotify({ event: "created", did: finalEntry.state.id });
       }
     } else {
       await restoreStoredIdentityRecord();
       output("#create-result", "Store the single 24-word Passphrase. It could not be saved locally automatically; see the message below.");
+      embedNotify({ event: "error", message: "The identity could not be saved in this browser." });
     }
   } catch (error) {
     output("#create-result", errorMessage(error), true);
+    embedNotify({ event: "error", message: errorMessage(error) });
   } finally {
-    button.disabled = false;
+    // After a successful embedded create the page is about to move: the button keeps
+    // its look (see startEmbedSave) instead of flashing back to enabled.
+    if (!(EMBED && embedSave)) button.disabled = false;
   }
 });
 
@@ -5332,6 +5445,18 @@ query("#publish-create").addEventListener("click", async () => {
 // macrotask queued here reliably tells us whether that happened; if so,
 // finish the job ourselves instead of leaving the user stuck on this screen.
 let createFormSubmitting = false;
+
+// Proton Pass only treats a form as submitted when the navigation is a POST (a
+// GET one is never confirmed -- found 2026-10-11, when saving the Passphrase
+// stopped being offered), so over http(s) the confirm step posts the form. The
+// server answers a POST to a wallet route with the app itself (see the Caddyfile's
+// `method @post GET`). A file:// build cannot POST and keeps the native GET.
+// The action keeps this page's own query string (a pending /authorize request).
+if (location.protocol !== "file:") {
+  const createForm = query("#create-load-form");
+  createForm.method = "post";
+  createForm.action = EMBED ? "/?embed=create" : location.pathname + location.search;
+}
 
 query("#create-load-form").addEventListener("submit", event => {
   // #creation-confirm-saved only exists to let a real, untouched-by-JS click
@@ -5358,7 +5483,7 @@ query("#create-load-form").addEventListener("submit", event => {
   stashPendingAuthorizeSearch();
   createFormSubmitting = true;
   setTimeout(() => {
-    if (event.defaultPrevented) location.href = location.pathname + location.hash;
+    if (event.defaultPrevented) location.href = location.pathname + (EMBED ? "?embed=create" : "") + location.hash;
   }, 0);
 });
 
@@ -5945,4 +6070,379 @@ function packMasonry(container) {
   new MutationObserver(scheduleMasonry).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   window.addEventListener("resize", scheduleMasonry);
   scheduleMasonry();
+}
+
+
+// ── Embedded create (biset landing) ─────────────────────────────────────────
+// Rendered inside an iframe on a page we trust to frame us (the server sends
+// frame-ancestors; this is the second check). The whole form is ours -- the
+// Alias and Passphrase fields AND the Create button -- so the click is a real
+// user gesture inside this frame, which is what makes password managers
+// (Proton Pass, the browser's own) offer to save the Passphrase: they act on a
+// trusted submit of a form in the frame they run in, and a click forwarded
+// from the parent page is neither trusted nor a submit here. The parent only
+// supplies the surrounding page and listens: nothing secret crosses the port,
+// the one result is the new DID.
+if (EMBED) {
+  const root = document.documentElement;
+  root.dataset.embed = "create";
+  const dev = location.hostname.endsWith(".localhost");
+  const parentAllowed = origin => dev ? /^http:\/\/mail\.did\.localhost(:\d+)?$/.test(origin) : origin === "https://mail.did.md";
+  const aliasLabel = () => query("#creation-alias-row .field-heading-label");
+  // The address is typed as its local part; "@did.md" is a fixed label beside it (the DID's host is
+  // <local>.did.md, which is what selectedCreationAliasHost() builds from the value).
+  const MAIL_DOMAIN = "@did.md";
+  const prepare = () => {
+    if (!draft || !aliasLabel()) return false;
+    const alias = query("#creation-alias");
+    if (!alias.dataset.mailReady) {
+      alias.dataset.mailReady = "1";
+      alias.value = alias.value.replace(/\.did\.md$/, "");
+      alias.placeholder = "name";
+      const suffix = document.createElement("span");
+      suffix.className = "embed-mail-suffix";
+      suffix.textContent = MAIL_DOMAIN;
+      suffix.setAttribute("aria-hidden", "true");
+      alias.after(suffix);
+      // Runs before the form's own input handler (capture): whatever is typed or pasted,
+      // including "name@did.md", leaves only a valid local part.
+      // The field is exactly as wide as what is typed (the font is monospace, so a character is
+      // one "ch"), so "@did.md" is joined to the text: x@did.md, xx@did.md, xxx@did.md.
+      // The empty field is as wide as its placeholder; 2px keep the caret visible at the end.
+      const fit = () => { alias.style.width = `calc(${Math.max(alias.value.length, alias.value ? 0 : alias.placeholder.length)}ch + 2px)`; };
+      alias.addEventListener("input", () => {
+        const clean = alias.value.toLowerCase().replace(/@.*$/, "").replace(/[^a-z0-9-]/g, "");
+        if (clean !== alias.value) alias.value = clean;
+        fit();
+      }, { capture: true });
+      fit();
+    }
+    // The embedded form always asks for an Alias (the toggle is hidden).
+    if (query("#creation-alias-toggle").getAttribute("aria-checked") !== "true") setCreationAliasEnabled(true);
+    else { updateCreationDidSuffix(); checkCreationAlias(); }
+    return true;
+  };
+  void (async () => {
+    for (let i = 0; i < 100 && !prepare() && !storedIdentityRecord; i += 1) await new Promise(resolve => setTimeout(resolve, 50));
+    const label = aliasLabel();
+    if (label) label.firstChild.textContent = "Mail ";
+  })();
+  // The frame loads again once this browser holds an identity: show that
+  // instead of a second Create.
+  void identityRestored.then(() => {
+    // The form (or the finished view) is shown only now, so one never flashes before the other.
+    root.dataset.embedReady = "1";
+    // A draft may already have started in the race with this read; it is moot.
+    if (!storedIdentityRecord) return;
+    showEmbedDone(storedIdentityRecord.did);
+    embedNotify({ event: "existing", did: storedIdentityRecord.did });
+  });
+  const methods = {
+    "wallet.describe": async () => ({ protocol: 1, methods: Object.keys(methods), created: Boolean(storedIdentityRecord) }),
+  };
+  addEventListener("message", event => {
+    if (!parentAllowed(event.origin) || event.source !== parent || !event.ports[0]) return;
+    const port = event.ports[0];
+    embedPort = port;
+    port.onmessage = async message => {
+      const { id, method } = message.data ?? {};
+      try {
+        const handler = Object.hasOwn(methods, method) ? methods[method] : null;
+        if (!handler) throw new Error(`Unknown method: ${String(method)}`);
+        port.postMessage({ id, result: await handler() });
+      } catch (error) {
+        port.postMessage({ id, error: { message: errorMessage(error) } });
+      }
+    };
+    const notifyHeight = () => {
+      const height = Math.ceil(document.body.scrollHeight);
+      // The done view keeps the form's height (showEmbedDone), so the embedding page does not move.
+      if (root.dataset.embedState !== "done") { try { localStorage.setItem("dito.embed-height", String(height)); } catch { /* ignore */ } }
+      port.postMessage({ event: "resize", height });
+    };
+    new ResizeObserver(notifyHeight).observe(document.body);
+    port.postMessage({ event: "ready" });
+    if (storedIdentityRecord && root.dataset.embedState === "done") embedNotify({ event: "existing", did: storedIdentityRecord.did });
+  });
+  // The ready ping carries nothing; production pins its target origin.
+  parent.postMessage({ type: "dito:ready" }, dev ? "*" : "https://mail.did.md");
+}
+
+function showEmbedDone(did) {
+  document.documentElement.dataset.embedState = "done";
+  try {
+    const height = Number(localStorage.getItem("dito.embed-height"));
+    if (height >= 100 && height <= 800) document.body.style.minHeight = `${height}px`;
+  } catch { /* ignore */ }
+  query("#embed-done")?.remove();
+  const done = document.createElement("div");
+  done.id = "embed-done";
+  const didText = document.createElement("div");
+  // The mail address is how the identity is known here (a DID <local>.did.md is <local>@did.md).
+  didText.textContent = did.split(":").at(-1).replace(/\.did\.md$/, "@did.md");
+  // Unload drops this browser's copy only (keys, keyring, grants); a
+  // published did.jsonl stays where it is. Two clicks, since the Passphrase
+  // is the only way back in.
+  const unload = document.createElement("button");
+  unload.type = "button";
+  unload.className = "embed-unload";
+  unload.textContent = "Unload from this browser";
+  let armed = null;
+  unload.addEventListener("click", async () => {
+    if (!armed) {
+      unload.textContent = "Sure? Click again";
+      unload.classList.add("armed");
+      armed = setTimeout(() => { armed = null; unload.textContent = "Unload from this browser"; unload.classList.remove("armed"); }, 6000);
+      return;
+    }
+    clearTimeout(armed);
+    unload.disabled = true;
+    try {
+      await clearBrowserIdentityState();
+      embedNotify({ event: "unloaded" });
+      location.replace(`${location.pathname}?embed=create`);
+    } catch (error) {
+      unload.disabled = false;
+      unload.textContent = errorMessage(error);
+    }
+  });
+  done.append(didText, unload);
+  document.body.append(done);
+}
+
+// Proton Pass (and the like) only offer to save from the top-level frame, never
+// from an iframe (ARC.md, "Password-manager autosave"). So after Create the frame
+// hands the Passphrase to a top-level page of this wallet in the SAME tab: it parks
+// {did, passphrase} in sessionStorage (shared by this origin's documents in this
+// tab, gone with the tab) and asks the embedding page to navigate to
+// /?embed=save&return=<its own URL>. Yes on the last page sends the tab back there.
+const EMBED_SAVE_STORE = "dito.embed-save";
+const EMBED_RETURN_STORE = "dito.embed-return";
+const EMBED_SAVE_MAX_AGE_MS = 10 * 60_000;
+// How long the save page shows its form before submitting it itself: the password
+// manager's detector needs the DOM to settle (about 40 ms), an idle callback and its
+// classifier. 400 ms was too short (2026-10-11); 1500 ms is known to fire. To find the
+// shortest value on a machine without a rebuild, set in the wallet origin's console:
+//   localStorage.setItem("dito.saveDelayMs", "800")      (remove the key to go back)
+const EMBED_SAVE_AUTO_SUBMIT_MS = 1500;
+const embedSaveDelayMs = () => {
+  try { const value = Number(localStorage.getItem("dito.saveDelayMs")); return value >= 0 && value <= 10000 && localStorage.getItem("dito.saveDelayMs") !== null ? value : EMBED_SAVE_AUTO_SUBMIT_MS; }
+  catch { return EMBED_SAVE_AUTO_SUBMIT_MS; }
+};
+
+// Only the embedding page's own origin may be returned to (no open redirect).
+function validEmbedReturn(value) {
+  try {
+    const url = new URL(value);
+    const dev = location.hostname.endsWith(".localhost");
+    const ok = dev ? /^http:\/\/mail\.did\.localhost(:\d+)?$/.test(url.origin) : url.origin === "https://mail.did.md";
+    return ok ? url.href : null;
+  } catch { return null; }
+}
+
+// The sign-in's redirect (fixed by the relying party's signer and published in its DID document) must
+// be on the origin of the page that opened this tab. On a developer machine (*.localhost) that page is
+// mail.did.localhost, standing in for https://mail.did.md.
+function embedSignInTargetsPage(redirectUri, returnUrl) {
+  try {
+    const target = new URL(redirectUri).origin;
+    const page = new URL(returnUrl).origin;
+    if (target === page) return true;
+    return location.hostname.endsWith(".localhost") && target === "https://mail.did.md" && /^http:\/\/mail\.did\.localhost(:\d+)?$/.test(page);
+  } catch { return false; }
+}
+
+function readEmbedSave() {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(EMBED_SAVE_STORE) ?? "null");
+    if (data && typeof data.did === "string" && typeof data.passphrase === "string" && Date.now() - data.at < EMBED_SAVE_MAX_AGE_MS) return data;
+  } catch { /* storage blocked or malformed */ }
+  return null;
+}
+
+function startEmbedSave(did) {
+  const passphrase = query("#master-mnemonic").value;
+  maskPassphraseField();
+  // The password manager's account name is the mail address (name@did.md), not the DID.
+  const mail = selectedCreationAliasHost().replace(/\.did\.md$/, "@did.md");
+  try { sessionStorage.setItem(EMBED_SAVE_STORE, JSON.stringify({ did, mail, passphrase, at: Date.now() })); }
+  catch { output("#create-result", "This browser blocks the storage the save step needs.", true); return; }
+  embedSave = { did };
+  // Nothing changes on screen: the embedding page goes straight to "creating .".
+  // Only if it has not moved after a while does the button come back, to ask again.
+  embedNotify({ event: "save-page" });
+  setTimeout(() => {
+    const button = query("#publish-create");
+    button.disabled = false;
+    button.textContent = "Continue";
+  }, 4000);
+}
+
+// The relying party's signed sign-in request, handed over by the embedding page as the query
+// string of /authorize, is accepted only in the shape a JAR relying party sends (client_id,
+// request, response_type) for a did:webvh client; it is only ever opened on this origin.
+function validEmbedLogin(value) {
+  try {
+    if (typeof value !== "string" || !value) return null;
+    const url = new URL(`/authorize${value.startsWith("?") ? value : `?${value}`}`, location.origin);
+    const keys = [...url.searchParams.keys()];
+    const shaped = keys.length === 3 && ["client_id", "request", "response_type"].every(key => keys.includes(key));
+    return url.origin === location.origin && url.pathname === "/authorize" && shaped && url.searchParams.get("client_id").startsWith("did:webvh:")
+      ? `${url.pathname}${url.search}` : null;
+  } catch { return null; }
+}
+
+// The save pages. ?embed=save shows "creating ." and, under it, a form of exactly the shape the
+// password manager needs (ARC.md section 9): a hidden "username" holding the mail address, a visible
+// password input, a real submit button. It submits that form itself. The POST lands on the last page:
+// the Passphrase to copy, "Saved the passphrase?", Yes. Yes sends the tab back to the embedding page.
+//
+// When the embedding page also asked to sign in (login=<its signed request>), the form posts to
+// /authorize?... instead, and that page (EMBED_LOGIN) is the last page: while the person answers the
+// password manager, it unlocks the identity just made with the parked Passphrase, approves the request
+// (publishing the DID document edit and signing the capability) and holds the prepared response;
+// Yes hands it to the relying party. Consent is the Create click the person made on its page, inside
+// this wallet's own frame; the request is still verified in full (its signature against the relying
+// party's DID, its redirect against that DID's document), and it is only approved for the origin of
+// the page that opened this tab.
+if (EMBED_SAVE) {
+  document.documentElement.dataset.embed = "save";
+  let loginAction = null;
+  if (EMBED_SAVE === "save") {
+    const back = validEmbedReturn(EMBED_RETURN_PARAM);
+    try { if (back) sessionStorage.setItem(EMBED_RETURN_STORE, back); } catch { /* the Yes button then closes the tab */ }
+    loginAction = validEmbedLogin(EMBED_LOGIN_PARAM);
+    try { sessionStorage.setItem(EMBED_LOGIN_STORE, loginAction ? "1" : "0"); } catch { /* no sign-in then */ }
+  }
+  const clearStores = () => {
+    try { for (const key of [EMBED_SAVE_STORE, EMBED_RETURN_STORE, EMBED_LOGIN_STORE]) sessionStorage.removeItem(key); } catch { /* ignore */ }
+  };
+  const goBack = () => {
+    let back = null;
+    try { back = validEmbedReturn(sessionStorage.getItem(EMBED_RETURN_STORE)); } catch { /* ignore */ }
+    clearStores();
+    if (back) location.replace(back);
+    else window.close();
+  };
+  const data = readEmbedSave();
+  // The panel and its "creating" are in the HTML already (public/index.html).
+  const panel = document.getElementById("embed-save");
+  const confirmRow = onYes => {
+    const row = document.createElement("div");
+    row.className = "embed-save-confirm";
+    const question = document.createElement("span");
+    question.textContent = "Saved the passphrase?";
+    const yes = document.createElement("button");
+    yes.type = "button";
+    yes.className = "primary";
+    yes.textContent = "Yes";
+    yes.addEventListener("click", onYes ?? goBack);
+    row.append(question, yes);
+    return row;
+  };
+  if (EMBED_SAVE === "save-done") {
+    // The last page. No form and no input here (a leftover password form reads as a
+    // failed submit to the manager), and nothing moves on its own: the manager's prompt
+    // is shown on this page about a second after the POST and the person answers it
+    // before pressing Yes.
+    panel.replaceChildren();
+    if (data) {
+      const field = document.createElement("div");
+      field.className = "embed-save-field";
+      const value = document.createElement("span");
+      value.textContent = data.passphrase;
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "embed-save-copy";
+      copy.setAttribute("aria-label", "Copy passphrase");
+      copy.textContent = "Copy";
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(data.passphrase); copy.textContent = "Copied"; }
+        catch { copy.textContent = "Select and copy"; }
+        setTimeout(() => { copy.textContent = "Copy"; }, 1500);
+      });
+      field.append(value, copy);
+      panel.append(field);
+    }
+    if (!EMBED_LOGIN) {
+      panel.append(confirmRow());
+    } else {
+      // Yes while the sign-in is still working shows "creating ." until it is done.
+      let plan = null;
+      let failure = null;
+      let pressed = false;
+      let row = confirmRow(() => finish());
+      panel.append(row);
+      const waiting = () => {
+        const stage = document.createElement("div");
+        stage.className = "embed-save-stage";
+        const status = document.createElement("div");
+        status.className = "embed-save-status";
+        status.textContent = "creating";
+        stage.append(status);
+        return stage;
+      };
+      const finish = () => {
+        if (plan) { clearStores(); plan.go(); return; }
+        if (failure) { goBack(); return; }
+        pressed = true;
+        row.replaceWith(row = waiting());
+      };
+      const fail = error => {
+        failure = error;
+        console.warn("[embedded sign-in]", error);
+        const note = document.createElement("p");
+        note.className = "embed-save-error";
+        note.textContent = `Could not sign in: ${error instanceof Error ? error.message : String(error)}`;
+        panel.append(note);
+        if (pressed) finish();
+      };
+      void (async () => {
+        try {
+          await identityRestored;
+          await authorizationReady;
+          if (authorizationError) throw authorizationError;
+          if (!walletAuthorization) throw new Error("The sign-in request could not be read.");
+          let back = null;
+          try { back = validEmbedReturn(sessionStorage.getItem(EMBED_RETURN_STORE)); } catch { /* ignore */ }
+          if (!back || !embedSignInTargetsPage(walletAuthorization.redirectUri, back)) throw new Error("This sign-in is not for the page that asked for it.");
+          if (!data || !storedIdentityRecord || storedIdentityRecord.did !== data.did) throw new Error("The identity to sign in is not in this browser.");
+          await unlockIdentity(await storageKeyForDid(data.did), data.passphrase);
+          embedLoginDeliver = prepared => { plan = prepared; };
+          try { await approveAuthorization(); } finally { embedLoginDeliver = null; }
+          if (!plan) throw new Error("The sign-in did not produce a response.");
+          if (pressed) finish();
+        } catch (error) { fail(error); }
+      })();
+    }
+  } else {
+    // All the person sees is "creating ." with its dots moving (CSS, in the HTML).
+    const stage = panel.querySelector(".embed-save-stage");
+    if (!data) {
+      panel.replaceChildren(confirmRow());
+    } else {
+      // The password input and the submit button are kept at full size and full opacity
+      // (the detector must count them visible); only their text, background and border
+      // are transparent, and they sit under the animation. Built complete before it is
+      // attached, so the detector sees the hidden username with its value already set.
+      const form = document.createElement("form");
+      form.className = "embed-save-ghost";
+      form.method = "post";
+      form.action = loginAction ?? "/?embed=save-done";
+      const username = document.createElement("input");
+      username.type = "hidden"; username.id = "save-username"; username.name = "username"; username.value = data.mail ?? data.did;
+      const password = document.createElement("input");
+      password.type = "password"; password.id = "save-passphrase"; password.name = "password";
+      password.autocomplete = "new-password"; password.value = data.passphrase;
+      password.tabIndex = -1;
+      const submit = document.createElement("button");
+      submit.type = "submit"; submit.tabIndex = -1; submit.textContent = "Save";
+      form.append(username, password, submit);
+      stage.append(form);
+      password.dispatchEvent(new Event("input", { bubbles: true }));
+      // Arriving here is the whole gesture: the form submits on its own once the password
+      // manager has had time to see it (see EMBED_SAVE_AUTO_SUBMIT_MS).
+      setTimeout(() => { if (document.contains(submit) && !submit.disabled) submit.click(); }, embedSaveDelayMs());
+    }
+  }
 }

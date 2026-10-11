@@ -6,11 +6,29 @@
     <meta name="description" content="Create, publish, and inspect did:webvh identities.">
     <title>did.md — verifiable web identities</title>
     <link rel="stylesheet" href="/styles.css?v=20260914-124259">
+    <script>
+      // The embedded save pages (ARC.md, section 9.4) are decided here, before the
+      // first paint: the wallet's own screen stays hidden and "creating" is shown
+      // right away. The wallet script is large; waiting for it to start showed the
+      // home screen for a moment first.
+      (function () {
+        try {
+          var mode = new URLSearchParams(location.search).get("embed");
+          if (window.top === window && (mode === "save" || mode === "save-done")) document.documentElement.dataset.embed = "save";
+          // The last page of an embedded sign-in is /authorize itself (see app.ts, EMBED_LOGIN).
+          else if (window.top === window && location.pathname === "/authorize" && sessionStorage.getItem("dito.embed-login") === "1") document.documentElement.dataset.embed = "save";
+          // The embedded create form: hidden until the wallet knows whether this browser already has an
+          // identity, so the form never shows for a moment before the finished view replaces it.
+          else if (window.top !== window && mode === "create") document.documentElement.dataset.embed = "create";
+        } catch (error) { /* the wallet script decides again */ }
+      })();
+    </script>
   </head>
   <body>
     <header id="site-header" class="site-header"></header>
     <main id="app"></main>
     <footer id="site-footer"></footer>
+    <div id="embed-save"><div class="embed-save-stage"><div class="embed-save-status" id="embed-boot">creating</div></div></div>
     <script type="module" src="/build/app.js?v=20260914-124259"></script>
   </body>
 </html>

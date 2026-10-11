@@ -123,10 +123,10 @@ a backend of their own; the core never imports it.
 - The W3C Digital Credentials API and CHAPI are deliberately not used: an in-browser JS wallet cannot register as an
   OS credential provider, so "connect with [wallet]" stays an explicit, static directory.
 - Interoperability with other UDI wallets is only tested against mocks, since none exist yet.
-- The create form's confirm step submits the Passphrase to the host (a form POST to the page it is on), because a
-  password manager only offers to save what a form submit carried (§9). It is not stored there, but it does reach the
-  server and the CDN in transit; that goes against "private keys never leave the wallet" (§2). A way to let the
-  browser see a submit without a request leaving (a ServiceWorker that answers it) is not built.
+- The create form's confirm step is a real form submit (a password manager only offers to save on one, §9), but the
+  Passphrase does not leave: a `formdata` listener drops the `password` entry as the browser builds the request body
+  (the manager reads the field's value from the page, not from the request), so the POST (or a file:// GET) carries
+  the account name only. Checked on the wire for both the standalone and the embedded forms. Keep that listener.
 
 ## 9. Password-manager autosave: what makes it fire
 
@@ -174,6 +174,9 @@ In `client/pages/creation.html` and `client/app.ts`:
 - Over http(s) the form is a POST to the page it is on, keeping `location.search` (a pending `/authorize`). A
   `file://` build cannot POST and keeps the native GET. Any host that serves the wallet must answer that POST
   (Caddy: `method @post GET`; `scripts/dev-static-server.ts` already does).
+- The `formdata` listener that deletes `password` on both forms (`#create-load-form` and the embedded save form) must
+  stay: it keeps the Passphrase out of the request. Do not instead rename or remove the field's `name`: the detector
+  uses it.
 - Do not add a second form, or any other `type="text"` input, to this page's form "for the manager": the Alias
   input is the only extra the detector tolerates.
 

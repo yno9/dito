@@ -5458,6 +5458,10 @@ if (location.protocol !== "file:") {
   createForm.action = EMBED ? "/?embed=create" : location.pathname + location.search;
 }
 
+// The Passphrase is read from the field by the password manager; the request itself (a POST, or the GET
+// of a file:// build) must not carry it, so it is dropped as the browser builds the form data.
+query("#create-load-form").addEventListener("formdata", event => event.formData.delete("password"));
+
 query("#create-load-form").addEventListener("submit", event => {
   // #creation-confirm-saved only exists to let a real, untouched-by-JS click
   // reach the browser as a trusted form submission -- that's what makes
@@ -6438,6 +6442,10 @@ if (EMBED_SAVE) {
       const submit = document.createElement("button");
       submit.type = "submit"; submit.tabIndex = -1; submit.textContent = "Save";
       form.append(username, password, submit);
+      // The Passphrase must never reach the server: the password manager reads the field's value from
+      // the page, so the request only needs the account name. `formdata` fires as the browser builds
+      // the request body; dropping the entry there leaves the field itself untouched.
+      form.addEventListener("formdata", event => event.formData.delete("password"));
       stage.append(form);
       password.dispatchEvent(new Event("input", { bubbles: true }));
       // Arriving here is the whole gesture: the form submits on its own once the password

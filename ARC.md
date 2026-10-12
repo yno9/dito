@@ -44,9 +44,22 @@ What dito is today and how the parts fit. (Protocol details: [SPEC-webvh-hosting
 | `packages/wallet/` | The wallet profile: Master-seed keys (BIP-39, SLIP-0010, permanent pre-rotation), portability moves, host adapters (any `webvh-hosting/1` host, GitHub Pages), backups, and `Identity`, the DOM-free session used by the CLI and scripts. |
 | `packages/cli/` | `dito`, the same operations from a terminal, a script or an agent (`--json`). |
 | `packages/did-verify/` | JWT / `id_token` verification for the OIDC bridge (embedded JWK or a `did:webvh` `kid`); resolves the whole log before trusting a document. |
-| `client/`, `public/`, `build.ts` | The browser wallet, bundled into a single `dist/index.html` (inline script and styles) that also runs from `file://`. |
-| `server/host/` | did.md's host: `identity-host.ts` (the protocol, plus the authentication-key resolution the OAuth layer uses) and `http-server.ts` (the process). |
+| `client/`, `public/`, `build.ts` | The browser wallet, bundled by esbuild into a single `dist/index.html` (inline script and styles) that also runs from `file://`. |
+| `web/`, `astro.config.mjs` | An Astro + React site with its own `srcDir`, `publicDir` and `outDir` (`build/astro`), so it cannot collide with the wallet's `public/` and `dist/`. |
+| `server/host/` | did.md's host: `identity-host.ts` (the protocol, plus the authentication-key resolution the OAuth layer uses) and `http-server.ts` (the process); `byo-host.ts` is the one-domain file host behind digitalcommons.jp. `server/serve.ts` adapts a `(Request) => Response` handler to `node:http`; `server/host-fetch.ts` is a `fetch` that honors a caller-set `Host`, which Node's own fetch overrides and the Host-routed host and its tests need. |
 | `server/oauth/` | The optional OAuth 2.0 / OID4VP convenience layer and an OIDC bridge (`src/`). |
+
+### 3.1 Runtime and tooling
+
+- **Node.js >= 26, pnpm only.** Sources run as-is on Node's type stripping (no transpile step, no loader), so
+  they use erasable TypeScript only; `erasableSyntaxOnly` rejects parameter properties, enums and namespaces.
+  Route modules stay `(Request) => Response`, which keeps them runtime-neutral (the identity host also
+  type-checks against Cloudflare Workers; it reads env through `globalThis.process`).
+- **Tests** are vitest. Tests that need a server spawn it as a child `node` process (`tests/spawn.ts`).
+- **Builds** are esbuild: the wallet into one HTML file, each server into one `dist/*.mjs`. Nothing is
+  compiled to a native binary; the VPS runs the bundles with `/usr/bin/node` under systemd.
+- **Deploy** is `deploy.sh [all|client|bridge|identity|byo]`. systemd units are managed on the host; the
+  script replaces bundles and health-checks, restoring the previous bundle on failure.
 
 ## 4. did:webvh, and where we keep a guard
 

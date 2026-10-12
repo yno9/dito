@@ -16,7 +16,8 @@
     "build:identity": "esbuild server/host/http-server.ts --bundle --platform=node --format=esm --banner:js=\"import{createRequire as __cr}from\\\"node:module\\\";const require=__cr(import.meta.url);\" --outfile=dist/did-md-server.mjs",
     "astro:dev": "astro dev",
     "astro:build": "astro build",
-    "astro:preview": "astro preview"
+    "astro:preview": "astro preview",
+    "build:byo": "esbuild server/host/byo-host.ts --bundle --platform=node --format=esm --banner:js=\"import{createRequire as __cr}from\\\"node:module\\\";const require=__cr(import.meta.url);\" --outfile=dist/byo-host.mjs"
   },
   "dependencies": {
     "@astrojs/react": "^7.0.1",

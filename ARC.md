@@ -190,8 +190,11 @@ In `client/pages/creation.html` and `client/app.ts`:
 - The `formdata` listener that deletes `password` on both forms (`#create-load-form` and the embedded save form) must
   stay: it keeps the Passphrase out of the request. Do not instead rename or remove the field's `name`: the detector
   uses it.
-- Do not add a second form, or any other `type="text"` input, to this page's form "for the manager": the Alias
-  input is the only extra the detector tolerates.
+- Do not add a second form, or any other `type="text"` input, to this page's form "for the manager". The Alias input
+  is tolerated only while it is not displayed at the confirm step: measured 2026-10-16 with the detector Pass bundles
+  (`@protontech/autofill` 0.0.38040317, random forest), a displayed Alias input there turns the form into `noop` and
+  the Passphrase field is no longer detected, so nothing is saved. `body.creation-confirm-dim #creation-alias` is
+  therefore `display: none` (styles.css). Its value, `autocomplete`, status icon and toggle made no difference.
 
 ### 9.3 Things that were not the cause
 

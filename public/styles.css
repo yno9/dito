@@ -3594,3 +3594,8 @@ html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0
 #embed-approve button { margin: 8px 8px 0 0; padding: 10px 24px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font: inherit; cursor: pointer; }
 #embed-approve button:disabled { opacity: .5; }
 #embed-approve .embed-approve-cancel { background: transparent; color: inherit; border: 1px solid #ccc; }
+
+/* At the confirm step the Alias is already published and cannot change, and a visible text input
+   in the form makes Proton Pass classify it "noop" and drop the Passphrase field (ARC.md 9.2): so
+   it is not displayed then. */
+body.creation-confirm-dim #creation-alias { display: none !important; }

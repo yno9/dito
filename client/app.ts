@@ -6154,7 +6154,14 @@ if (EMBED) {
     root.dataset.embedReady = "1";
     // A draft may already have started in the race with this read; it is moot.
     if (!storedIdentityRecord) return;
-    showEmbedDone(storedIdentityRecord.did);
+    // This browser already holds the identity: open on the log-in form for its address (the
+    // availability check finds its did.jsonl and switches the form to log-in), not a second Create.
+    const host = decodeURIComponent(storedIdentityRecord.did.split(":").at(-1) ?? "");
+    const alias = query("#creation-alias");
+    if (host.endsWith(".did.md") && !alias.value) {
+      alias.value = host.replace(/\.did\.md$/, "");
+      alias.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     embedNotify({ event: "existing", did: storedIdentityRecord.did });
   });
   // The Mail address already has an identity (its did.jsonl exists): the same form logs in. The

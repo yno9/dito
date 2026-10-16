@@ -3574,7 +3574,7 @@ html[data-embed="save"] #embed-save { display: block; }
    page (ARC.md section 9.4), so its row is not in this frame. The field is the row's grey box holding the typed
    part and a fixed "@did.md" that cannot be edited or deleted. Hidden until the wallet has looked for an
    existing identity (data-embed-ready), so the form never flashes before the finished view. */
-html[data-embed="create"] #creation-passphrase-row { display: none; }
+html[data-embed="create"]:not([data-embed-mode="login"]) #creation-passphrase-row { display: none; }
 html[data-embed="create"]:not([data-embed-ready]) #app { visibility: hidden; }
 html[data-embed="create"] #creation-alias-create-row > .field-value-row { background: #f6f6f6; border-radius: 0.5rem; margin-top: 0.5rem; padding: 0 2.5rem 0 1rem; }
 html[data-embed="create"] #creation-alias { flex: 0 1 auto; min-width: 3ch; max-width: 100%; min-width: 0; margin: 0; padding: 1rem 0; background: transparent; }

@@ -427,7 +427,8 @@ function updateOverviewState() {
 
 function updateIdentityOptionsVisibility() {
   const hasIdentity = Boolean(loaded || storedIdentityRecord);
-  query("#create-form-area").classList.toggle("hidden", hasIdentity || !draft);
+  // The embedded frame shows the form (as the log-in form) when this browser holds an identity.
+  query("#create-form-area").classList.toggle("hidden", EMBED ? !(hasIdentity || draft) : hasIdentity || !draft);
   query("#nav-unload").classList.toggle("hidden", !hasIdentity);
   query("#header-load-toggle").classList.toggle("hidden", hasIdentity);
   // The Apps/Docs/Keys/Files tabs have nothing to show before an identity
@@ -2202,6 +2203,8 @@ function dropPassphraseOverlay() {
 }
 
 function showDraftPhrase() {
+  // The embedded log-in form types the existing identity's Passphrase: a draft must not fill it.
+  if (document.documentElement.dataset.embedMode === "login") return;
   const field = query("#master-mnemonic");
   const phrase = draft?.material?.masterMnemonic || lastCreatePhrase;
   if (field && phrase) {
@@ -5276,6 +5279,8 @@ for (const eventName of ["beforeinput", "paste", "drop"]) {
 for (const eventName of ["input", "change"]) {
   query("#master-mnemonic").addEventListener(eventName, () => {
     if (query("#create-load-form").classList.contains("creation-load-mode")) return;
+    // The embedded log-in form is typed into: the field holds the person's own Passphrase.
+    if (document.documentElement.dataset.embedMode === "login") return;
     const field = query("#master-mnemonic");
     const canonical = draft?.material?.masterMnemonic ?? "";
     if (field.value !== canonical) field.value = canonical;
@@ -6111,7 +6116,7 @@ if (EMBED) {
   // <local>.did.md, which is what selectedCreationAliasHost() builds from the value).
   const MAIL_DOMAIN = "@did.md";
   const prepare = () => {
-    if (!draft || !aliasLabel()) return false;
+    if ((!draft && !storedIdentityRecord) || !aliasLabel()) return false;
     const alias = query("#creation-alias");
     if (!alias.dataset.mailReady) {
       alias.dataset.mailReady = "1";
@@ -6154,9 +6159,11 @@ if (EMBED) {
     if (!storedIdentityRecord) return;
     // This browser already holds the identity: open on the log-in form for its address (the
     // availability check finds its did.jsonl and switches the form to log-in), not a second Create.
+    prepare();
+    updateIdentityOptionsVisibility();
     const host = decodeURIComponent(storedIdentityRecord.did.split(":").at(-1) ?? "");
     const alias = query("#creation-alias");
-    if (host.endsWith(".did.md") && !alias.value) {
+    if (host.endsWith(".did.md")) {
       alias.value = host.replace(/\.did\.md$/, "");
       alias.dispatchEvent(new Event("input", { bubbles: true }));
     }

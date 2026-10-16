@@ -3573,3 +3573,7 @@ html[data-embed="create"] .embed-mail-suffix { flex: none; font: 200 1rem / 1.5r
 html[data-embed="create"] #creation-alias:focus { outline: none; }
 html[data-embed="create"] #creation-alias-create-row > .field-value-row:focus-within { box-shadow: inset 0 0 0 1px #b8b8b8; }
 html[data-embed="save"] #embed-save .embed-save-error { margin: 16px 0 0; font: 13px/1.5 system-ui, sans-serif; color: #b3261e; overflow-wrap: anywhere; }
+
+/* Embedded form in log-in mode (the Mail address already has an identity): the Passphrase is typed, not shown to copy. */
+html[data-embed-mode="login"] #master-mnemonic-copy-hint,
+html[data-embed-mode="login"] .passphrase-copy-btn { display: none; }

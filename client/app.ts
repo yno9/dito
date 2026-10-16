@@ -339,6 +339,9 @@ const EMBED_RETURN_PARAM = (() => {
 let embedLoginDeliver = null;
 let authorizationError = null;
 let embedPort = null;
+let embedParentOrigin = "";
+// Set by the embedded form: what the button does while the form is in log-in mode.
+let embedLoginStart = null;
 // Set once an embedded create has persisted the identity: what the save page asks for.
 let embedSave = null;
 const embedNotify = message => embedPort?.postMessage(message);
@@ -3951,9 +3954,9 @@ async function jarAuthorizationParameters(clientId, jwt) {
   };
 }
 
-async function oauthAuthorizationParameters() {
-  if (location.pathname !== "/authorize") return null;
-  const params = new URLSearchParams(location.search);
+async function oauthAuthorizationParameters(search = null) {
+  if (search === null && location.pathname !== "/authorize") return null;
+  const params = new URLSearchParams(search ?? location.search);
   const keys = [...params.keys()];
   if (params.get("client_id")?.startsWith("did:webvh:")) {
     const jarKeys = ["client_id", "request", "response_type"];
@@ -4135,7 +4138,7 @@ async function oauthDeliveryPlan(request, values) {
     };
   }
   target.hash = new URLSearchParams(payload).toString();
-  return { go: () => location.replace(target.toString()) };
+  return { payload, go: () => location.replace(target.toString()) };
 }
 
 async function oauthDeliver(request, values) {
@@ -5243,7 +5246,7 @@ query("#master-mnemonic").addEventListener("input", () => {
 // has to happen at the JS level instead, exactly like #publish-create above.
 for (const eventName of ["beforeinput", "paste", "drop"]) {
   query("#master-mnemonic").addEventListener(eventName, (event) => {
-    if (!query("#create-load-form").classList.contains("creation-load-mode")) event.preventDefault();
+    if (!query("#create-load-form").classList.contains("creation-load-mode") && document.documentElement.dataset.embedMode !== "login") event.preventDefault();
   });
 }
 
@@ -5288,7 +5291,7 @@ for (const eventName of ["input", "change"]) {
 // password manager's autofill suggestion from popping up on click in the
 // first place, rather than just reverting it after the fact.
 query("#master-mnemonic").addEventListener("mousedown", (event) => {
-  if (!query("#create-load-form").classList.contains("creation-load-mode")) event.preventDefault();
+  if (!query("#create-load-form").classList.contains("creation-load-mode") && document.documentElement.dataset.embedMode !== "login") event.preventDefault();
 });
 
 // "import" on the Load form: a `<scid>.jwe` plus its mnemonic (the one field
@@ -5340,6 +5343,7 @@ query("#creation-load-file").addEventListener("change", (event) => {
 // a form submit. Only #creation-confirm-saved below is a real submit button:
 // see its own comment for why that split exists.
 query("#publish-create").addEventListener("click", async () => {
+  if (EMBED && document.documentElement.dataset.embedMode === "login") { embedLoginStart?.(); return; }
   // After Create the embedded frame's button asks again to go to the save page.
   if (EMBED && embedSave) { embedNotify({ event: "save-page" }); return; }
   if (!draft) return;
@@ -6153,19 +6157,79 @@ if (EMBED) {
     showEmbedDone(storedIdentityRecord.did);
     embedNotify({ event: "existing", did: storedIdentityRecord.did });
   });
+  // The Mail address already has an identity (its did.jsonl exists): the same form logs in. The
+  // Passphrase field is then typed into instead of filled, and the button says Log in.
+  const setLoginMode = on => {
+    if (on === (root.dataset.embedMode === "login")) return;
+    const field = query("#master-mnemonic");
+    const button = query("#publish-create");
+    if (on) {
+      root.dataset.embedMode = "login";
+      field.value = "";
+      field.autocomplete = "current-password";
+      field.readOnly = false;
+      button.textContent = "Log in";
+    } else {
+      delete root.dataset.embedMode;
+      field.autocomplete = "new-password";
+      button.textContent = "Create";
+      showDraftPhrase();
+    }
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  new MutationObserver(() => setLoginMode(query("#creation-alias-status").dataset.state === "unavailable"))
+    .observe(query("#creation-alias-status"), { attributes: true, attributeFilter: ["data-state"] });
+  embedLoginStart = () => {
+    const passphrase = query("#master-mnemonic").value.trim();
+    if (!passphrase) { embedNotify({ event: "error", message: "Enter the Passphrase." }); return; }
+    query("#publish-create").disabled = true;
+    try { embedNotify({ event: "login", handle: selectedCreationAliasHost() }); } catch (error) { query("#publish-create").disabled = false; embedNotify({ event: "error", message: errorMessage(error) }); }
+  };
+  // The signed sign-in request comes from the embedding page; the Passphrase never leaves this frame.
+  // What goes back is the relying party's response, which is public by design (fragment payload).
+  const login = async ({ request }) => {
+    const button = query("#publish-create");
+    try {
+      const search = validEmbedLogin(request)?.replace(/^\/authorize/, "");
+      if (!search) throw new Error("The sign-in request is invalid.");
+      const parameters = await oauthAuthorizationParameters(search);
+      if (!parameters || !parameters.clientId.startsWith("did:webvh:")) throw new Error("The sign-in request is invalid.");
+      if (!embedSignInTargetsPage(parameters.redirectUri, embedParentOrigin)) throw new Error("This sign-in is not for the page that asked for it.");
+      walletAuthorization = { ...parameters, clientName: parameters.clientId, outcomeReporting: false };
+      const host = selectedCreationAliasHost();
+      const logUrl = `https://${host}/.well-known/did.jsonl`;
+      const logResponse = await fetch(logUrl, { cache: "no-store" });
+      if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
+      const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
+      if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+      const passphrase = query("#master-mnemonic").value.trim();
+      await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
+      let plan = null;
+      embedLoginDeliver = prepared => { plan = prepared; };
+      try { await approveAuthorization(); } finally { embedLoginDeliver = null; }
+      if (!plan?.payload) throw new Error("The sign-in did not produce a response.");
+      return { response: plan.payload };
+    } catch (error) {
+      walletAuthorization = null;
+      embedNotify({ event: "error", message: errorMessage(error) });
+      throw error;
+    } finally { button.disabled = false; }
+  };
   const methods = {
     "wallet.describe": async () => ({ protocol: 1, methods: Object.keys(methods), created: Boolean(storedIdentityRecord) }),
+    "wallet.login": login,
   };
   addEventListener("message", event => {
     if (!parentAllowed(event.origin) || event.source !== parent || !event.ports[0]) return;
     const port = event.ports[0];
     embedPort = port;
+    embedParentOrigin = event.origin;
     port.onmessage = async message => {
       const { id, method } = message.data ?? {};
       try {
         const handler = Object.hasOwn(methods, method) ? methods[method] : null;
         if (!handler) throw new Error(`Unknown method: ${String(method)}`);
-        port.postMessage({ id, result: await handler() });
+        port.postMessage({ id, result: await handler(message.data.params ?? {}) });
       } catch (error) {
         port.postMessage({ id, error: { message: errorMessage(error) } });
       }

@@ -166,7 +166,33 @@
         </span>
       </label>
 
-      <!-- ## h2 / [field] — Alias -->
+      <div id="creation-actions-block" class="field-block alias-block">
+        <div id="creation-create-actions" class="actions">
+          <button id="publish-create" class="primary" type="button">
+            Create your ID
+          </button>
+        </div>
+        <div id="creation-confirm-actions" class="actions confirm-pill hidden">
+          <button id="creation-confirm-saved" class="primary" type="submit">
+            <span class="creation-confirm-prompt">Saved the passphrase?</span>
+            <span class="creation-confirm-saved-label">Yes</span>
+          </button>
+        </div>
+        <!-- Import: a plain hyperlink-style button under Create. -->
+        <button
+          type="button"
+          id="header-load-toggle"
+          class="creation-import-link"
+          aria-pressed="false"
+        >
+          Import did:webvh
+        </button>
+      </div>
+    </form>
+      <!-- ## h2 / [field] — Alias
+           Outside the <form> on purpose: a text input inside it makes Proton Pass classify the form
+           "noop" at the confirm step and drop the Passphrase field (ARC.md 9.2). The Alias is never
+           submitted, and the page's flex order (styles.css) keeps it between the Passphrase and Create. -->
       <div id="creation-alias-create-row" class="field-block alias-block">
         <h2 id="creation-alias-row" class="field-heading alias-disabled">
           <label class="field-heading-label" for="creation-alias">
@@ -199,28 +225,7 @@
             aria-label="Alias availability unknown"
           ></span>
         </div>
-        <div id="creation-create-actions" class="actions">
-          <button id="publish-create" class="primary" type="button">
-            Create your ID
-          </button>
-        </div>
-        <div id="creation-confirm-actions" class="actions confirm-pill hidden">
-          <button id="creation-confirm-saved" class="primary" type="submit">
-            <span class="creation-confirm-prompt">Saved the passphrase?</span>
-            <span class="creation-confirm-saved-label">Yes</span>
-          </button>
-        </div>
-        <!-- Import: a plain hyperlink-style button under Create. -->
-        <button
-          type="button"
-          id="header-load-toggle"
-          class="creation-import-link"
-          aria-pressed="false"
-        >
-          Import did:webvh
-        </button>
       </div>
-    </form>
     <output id="create-result"></output>
   </div>
 </section>

@@ -190,11 +190,13 @@ In `client/pages/creation.html` and `client/app.ts`:
 - The `formdata` listener that deletes `password` on both forms (`#create-load-form` and the embedded save form) must
   stay: it keeps the Passphrase out of the request. Do not instead rename or remove the field's `name`: the detector
   uses it.
-- Do not add a second form, or any other `type="text"` input, to this page's form "for the manager". The Alias input
-  is tolerated only while it is not displayed at the confirm step: measured 2026-10-16 with the detector Pass bundles
-  (`@protontech/autofill` 0.0.38040317, random forest), a displayed Alias input there turns the form into `noop` and
-  the Passphrase field is no longer detected, so nothing is saved. `body.creation-confirm-dim #creation-alias` is
-  therefore `display: none` (styles.css). Its value, `autocomplete`, status icon and toggle made no difference.
+- Do not add a second form, or any other `type="text"` input, **inside** this page's form "for the manager". The Alias
+  input is outside it (`#creation-alias-create-row` is a sibling of the form; `#create-load-form` is
+  `display: contents` and the flex order in styles.css keeps the Alias between the Passphrase and Create). Measured
+  2026-10-16 with the detector Pass bundles (`@protontech/autofill` 0.0.38040317, random forest): a displayed text
+  input inside the form at the confirm step turns it into `noop` and the Passphrase field is no longer detected, so
+  nothing is saved. Attributes do not help (`data-protonpass-ignore`, `form="x"`, `type="search"` all left it `noop`);
+  `readonly`/`disabled` do, but they are the "busy" markers 9.1 forbids; moving the input out of the form does.
 
 ### 9.3 Things that were not the cause
 

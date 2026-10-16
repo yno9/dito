@@ -309,6 +309,11 @@ const requestedAliasFromUrl = (() => {
 const EMBED = (() => {
   try { return window.top !== window && new URLSearchParams(location.search).get("embed") === "create"; } catch { return false; }
 })();
+// Embedded in biset's account page (?embed=approve): asks for the Passphrase to approve one
+// request (a DID document edit, say) and hands the response back over the MessageChannel.
+const EMBED_APPROVE = (() => {
+  try { return window.top !== window && new URLSearchParams(location.search).get("embed") === "approve"; } catch { return false; }
+})();
 // The top-level pages the embedded create form sends the tab to, to save the
 // Passphrase (see "Embedded create" at the end of this file): ?embed=save shows
 // the form, ?embed=save-done is the page its POST lands on. Both read their query
@@ -3758,12 +3763,7 @@ function renderWalletAuthorization() {
   const didCommLabel = query("#wallet-authorize-didcomm-label");
   const didComm = query("#wallet-authorize-didcomm");
   const edit = didDocumentEditDetail(walletAuthorization.authorizationDetails, walletAuthorization.did ?? loaded?.entries.at(-1).state.id ?? "");
-  const changes = edit ? [
-    ...(edit.removeEndpoints ?? []).map(removal => `Remove from service ${removal.serviceId} the endpoints matching ${JSON.stringify(removal.match)}`),
-    ...edit.services.map(service => `${service.endpointMode === "merge" ? "Add to service" : "Add or replace service"}: ${service.type} (${service.id}) → ${typeof service.serviceEndpoint === "string" ? service.serviceEndpoint : JSON.stringify(service.serviceEndpoint)}`),
-    ...edit.verificationMethods.map(method => `${method.mode === "ifAbsent" ? "Add, unless one with this id exists," : "Add or replace"} verification method: ${method.type} (${method.id}) for ${(method.relationships ?? ["keyAgreement"]).join(", ")}${(method.relationships ?? []).includes("authentication") ? " — it can prove to others that it acts for you" : ""}`),
-    ...edit.remove.map(id => `Remove: ${id}`),
-  ] : [];
+  const changes = edit ? describeDidDocumentEdit(edit) : [];
   didCommLabel.textContent = "DID document changes";
   didCommLabel.classList.toggle("hidden", !changes.length);
   didComm.classList.toggle("hidden", !changes.length);
@@ -6106,8 +6106,6 @@ function packMasonry(container) {
 if (EMBED) {
   const root = document.documentElement;
   root.dataset.embed = "create";
-  const dev = location.hostname.endsWith(".localhost");
-  const parentAllowed = origin => dev ? /^http:\/\/mail\.did\.localhost(:\d+)?$/.test(origin) : origin === "https://mail.did.md";
   const aliasLabel = () => query("#creation-alias-row .field-heading-label");
   // The address is typed as its local part; "@did.md" is a fixed label beside it (the DID's host is
   // <local>.did.md, which is what selectedCreationAliasHost() builds from the value).
@@ -6192,40 +6190,77 @@ if (EMBED) {
     query("#publish-create").disabled = true;
     try { embedNotify({ event: "login", handle: selectedCreationAliasHost() }); } catch (error) { query("#publish-create").disabled = false; embedNotify({ event: "error", message: errorMessage(error) }); }
   };
-  // The signed sign-in request comes from the embedding page; the Passphrase never leaves this frame.
-  // What goes back is the relying party's response, which is public by design (fragment payload).
   const login = async ({ request }) => {
     const button = query("#publish-create");
     try {
-      const search = validEmbedLogin(request)?.replace(/^\/authorize/, "");
-      if (!search) throw new Error("The sign-in request is invalid.");
-      const parameters = await oauthAuthorizationParameters(search);
-      if (!parameters || !parameters.clientId.startsWith("did:webvh:")) throw new Error("The sign-in request is invalid.");
-      if (!embedSignInTargetsPage(parameters.redirectUri, embedParentOrigin)) throw new Error("This sign-in is not for the page that asked for it.");
-      walletAuthorization = { ...parameters, clientName: parameters.clientId, outcomeReporting: false };
-      const host = selectedCreationAliasHost();
-      const logUrl = `https://${host}/.well-known/did.jsonl`;
-      const logResponse = await fetch(logUrl, { cache: "no-store" });
-      if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
-      const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
-      if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
-      const passphrase = query("#master-mnemonic").value.trim();
-      await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
-      let plan = null;
-      embedLoginDeliver = prepared => { plan = prepared; };
-      try { await approveAuthorization(); } finally { embedLoginDeliver = null; }
-      if (!plan?.payload) throw new Error("The sign-in did not produce a response.");
-      return { response: plan.payload };
+      const approval = await embedApprovalFor(request, selectedCreationAliasHost());
+      return { response: await approval.run(query("#master-mnemonic").value.trim()) };
     } catch (error) {
       walletAuthorization = null;
       embedNotify({ event: "error", message: errorMessage(error) });
       throw error;
     } finally { button.disabled = false; }
   };
-  const methods = {
-    "wallet.describe": async () => ({ protocol: 1, methods: Object.keys(methods), created: Boolean(storedIdentityRecord) }),
-    "wallet.login": login,
+  serveEmbedPort({ "wallet.approve": login }, () => {
+    if (storedIdentityRecord && root.dataset.embedState === "done") embedNotify({ event: "existing", did: storedIdentityRecord.did });
+  });
+}
+
+// ?embed=approve: the frame asks for the Passphrase itself, next to what the request changes, and
+// answers `wallet.approve` with the relying party's response once it is approved.
+if (EMBED_APPROVE) {
+  document.documentElement.dataset.embed = "approve";
+  const approve = async ({ request }) => {
+    await identityRestored;
+    if (!storedIdentityRecord) throw new Error("This browser holds no identity to approve with.");
+    const did = storedIdentityRecord.did;
+    const approval = await embedApprovalFor(request, decodeURIComponent(did.split(":").at(-1) ?? ""));
+    let failure = "";
+    try {
+      for (;;) {
+        const passphrase = await askEmbedPassphrase(approval.changes, failure);
+        try { return { response: await approval.run(passphrase) }; }
+        catch (error) { failure = errorMessage(error); }
+      }
+    } finally { walletAuthorization = null; document.getElementById("embed-approve")?.remove(); }
   };
+  serveEmbedPort({ "wallet.approve": approve });
+}
+
+// The signed request comes from the embedding page; the Passphrase never leaves this frame. What
+// goes back is the relying party's response, which is public by design (fragment payload).
+async function embedApprovalFor(request, host) {
+  const search = validEmbedLogin(request)?.replace(/^\/authorize/, "");
+  if (!search) throw new Error("The sign-in request is invalid.");
+  const parameters = await oauthAuthorizationParameters(search);
+  if (!parameters || !parameters.clientId.startsWith("did:webvh:")) throw new Error("The sign-in request is invalid.");
+  if (!embedSignInTargetsPage(parameters.redirectUri, embedParentOrigin)) throw new Error("This sign-in is not for the page that asked for it.");
+  walletAuthorization = { ...parameters, clientName: parameters.clientId, outcomeReporting: false };
+  const edit = didDocumentEditDetail(parameters.authorizationDetails, "");
+  return {
+    changes: edit ? describeDidDocumentEdit(edit) : [],
+    async run(passphrase) {
+      const logUrl = `https://${host}/.well-known/did.jsonl`;
+      const logResponse = await fetch(logUrl, { cache: "no-store" });
+      if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
+      const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
+      if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+      await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
+      let plan = null;
+      embedLoginDeliver = prepared => { plan = prepared; };
+      try { await approveAuthorization(); } finally { embedLoginDeliver = null; }
+      if (!plan?.payload) throw new Error("The approval did not produce a response.");
+      return plan.payload;
+    },
+  };
+}
+
+// Answers the embedding page's calls over the MessageChannel it opens with `dito:hello`.
+function serveEmbedPort(methods, onConnect = () => {}) {
+  const root = document.documentElement;
+  const dev = location.hostname.endsWith(".localhost");
+  const parentAllowed = origin => dev ? /^http:\/\/mail\.did\.localhost(:\d+)?$/.test(origin) : origin === "https://mail.did.md";
+  const all = { "wallet.describe": async () => ({ protocol: 1, methods: Object.keys(all), created: Boolean(storedIdentityRecord) }), ...methods };
   addEventListener("message", event => {
     if (!parentAllowed(event.origin) || event.source !== parent || !event.ports[0]) return;
     const port = event.ports[0];
@@ -6234,7 +6269,7 @@ if (EMBED) {
     port.onmessage = async message => {
       const { id, method } = message.data ?? {};
       try {
-        const handler = Object.hasOwn(methods, method) ? methods[method] : null;
+        const handler = Object.hasOwn(all, method) ? all[method] : null;
         if (!handler) throw new Error(`Unknown method: ${String(method)}`);
         port.postMessage({ id, result: await handler(message.data.params ?? {}) });
       } catch (error) {
@@ -6244,15 +6279,57 @@ if (EMBED) {
     const notifyHeight = () => {
       const height = Math.ceil(document.body.scrollHeight);
       // The done view keeps the form's height (showEmbedDone), so the embedding page does not move.
-      if (root.dataset.embedState !== "done") { try { localStorage.setItem("dito.embed-height", String(height)); } catch { /* ignore */ } }
+      if (root.dataset.embedState !== "done" && root.dataset.embed === "create") { try { localStorage.setItem("dito.embed-height", String(height)); } catch { /* ignore */ } }
       port.postMessage({ event: "resize", height });
     };
     new ResizeObserver(notifyHeight).observe(document.body);
     port.postMessage({ event: "ready" });
-    if (storedIdentityRecord && root.dataset.embedState === "done") embedNotify({ event: "existing", did: storedIdentityRecord.did });
+    onConnect();
   });
   // The ready ping carries nothing; production pins its target origin.
   parent.postMessage({ type: "dito:ready" }, dev ? "*" : "https://mail.did.md");
+}
+
+// The approve frame's one screen: what will change, the Passphrase, Approve / Cancel.
+function askEmbedPassphrase(changes, failure) {
+  document.getElementById("embed-approve")?.remove();
+  const panel = document.createElement("form");
+  panel.id = "embed-approve";
+  const heading = document.createElement("h1");
+  heading.textContent = changes.length ? "Approve these changes" : "Approve";
+  panel.append(heading);
+  if (changes.length) {
+    const list = document.createElement("ul");
+    list.replaceChildren(...changes.map(change => { const item = document.createElement("li"); item.textContent = change; return item; }));
+    panel.append(list);
+  }
+  const label = document.createElement("label");
+  label.textContent = "Passphrase";
+  const field = document.createElement("input");
+  field.type = "password"; field.autocomplete = "current-password"; field.required = true;
+  label.append(field);
+  const message = document.createElement("p");
+  message.className = "embed-approve-error"; message.textContent = failure;
+  const approve = document.createElement("button");
+  approve.type = "submit"; approve.textContent = "Approve";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.className = "embed-approve-cancel"; cancel.textContent = "Cancel";
+  panel.append(label, message, approve, cancel);
+  document.body.append(panel);
+  field.focus();
+  return new Promise((resolve, reject) => {
+    panel.addEventListener("submit", event => { event.preventDefault(); approve.disabled = true; resolve(field.value.trim()); });
+    cancel.addEventListener("click", () => reject(new Error("Cancelled.")));
+  });
+}
+
+function describeDidDocumentEdit(edit) {
+  return [
+    ...(edit.removeEndpoints ?? []).map(removal => `Remove from service ${removal.serviceId} the endpoints matching ${JSON.stringify(removal.match)}`),
+    ...edit.services.map(service => `${service.endpointMode === "merge" ? "Add to service" : "Add or replace service"}: ${service.type} (${service.id}) → ${typeof service.serviceEndpoint === "string" ? service.serviceEndpoint : JSON.stringify(service.serviceEndpoint)}`),
+    ...edit.verificationMethods.map(method => `${method.mode === "ifAbsent" ? "Add, unless one with this id exists," : "Add or replace"} verification method: ${method.type} (${method.id}) for ${(method.relationships ?? ["keyAgreement"]).join(", ")}${(method.relationships ?? []).includes("authentication") ? " — it can prove to others that it acts for you" : ""}`),
+    ...edit.remove.map(id => `Remove: ${id}`),
+  ];
 }
 
 function showEmbedDone(did) {

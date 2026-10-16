@@ -3577,3 +3577,20 @@ html[data-embed="save"] #embed-save .embed-save-error { margin: 16px 0 0; font: 
 /* Embedded form in log-in mode (the Mail address already has an identity): the Passphrase is typed, not shown to copy. */
 html[data-embed-mode="login"] #master-mnemonic-copy-hint,
 html[data-embed-mode="login"] .passphrase-copy-btn { display: none; }
+
+/* Embedded approve (?embed=approve inside biset's account page): only the request's changes, the
+   Passphrase and Approve / Cancel. */
+html[data-embed="approve"] #site-header,
+html[data-embed="approve"] #site-footer,
+html[data-embed="approve"] #app { display: none; }
+html[data-embed="approve"],
+html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0; min-height: 0; overflow: hidden; }
+#embed-approve { padding: 20px; font: 15px/1.5 system-ui, sans-serif; color: inherit; }
+#embed-approve h1 { margin: 0 0 12px; font-size: 18px; }
+#embed-approve ul { margin: 0 0 16px; padding-left: 20px; font-size: 13px; overflow-wrap: anywhere; }
+#embed-approve label { display: block; font-size: 13px; opacity: .7; }
+#embed-approve input[type="password"] { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font: 14px ui-monospace, monospace; }
+#embed-approve .embed-approve-error { min-height: 1.5em; margin: 8px 0 0; color: #d33; font-size: 13px; }
+#embed-approve button { margin: 8px 8px 0 0; padding: 10px 24px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font: inherit; cursor: pointer; }
+#embed-approve button:disabled { opacity: .5; }
+#embed-approve .embed-approve-cancel { background: transparent; color: inherit; border: 1px solid #ccc; }

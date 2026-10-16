@@ -5353,7 +5353,7 @@ query("#publish-create").addEventListener("click", async () => {
   if (EMBED && embedSave) { embedNotify({ event: "save-page" }); return; }
   if (!draft) return;
   const button = query("#publish-create");
-  button.disabled = true;
+  setButtonBusy(button, true);
   // The embedding page starts preparing the sign-in request now, in parallel with the identity being
   // made, so nothing waits for it when the page moves on. The host name pins it to this identity.
   if (EMBED) { try { embedNotify({ event: "creating", handle: selectedCreationAliasHost() }); } catch { /* an invalid alias fails below */ } }
@@ -5454,7 +5454,7 @@ query("#publish-create").addEventListener("click", async () => {
   } finally {
     // After a successful embedded create the page is about to move: the button keeps
     // its look (see startEmbedSave) instead of flashing back to enabled.
-    if (!(EMBED && embedSave)) button.disabled = false;
+    if (!(EMBED && embedSave)) setButtonBusy(button, false);
   }
 });
 
@@ -6194,8 +6194,8 @@ if (EMBED) {
   embedLoginStart = () => {
     const passphrase = query("#master-mnemonic").value.trim();
     if (!passphrase) { embedNotify({ event: "error", message: "Enter the Passphrase." }); return; }
-    query("#publish-create").disabled = true;
-    try { embedNotify({ event: "login", handle: selectedCreationAliasHost() }); } catch (error) { query("#publish-create").disabled = false; embedNotify({ event: "error", message: errorMessage(error) }); }
+    setButtonBusy(query("#publish-create"), true);
+    try { embedNotify({ event: "login", handle: selectedCreationAliasHost() }); } catch (error) { setButtonBusy(query("#publish-create"), false); embedNotify({ event: "error", message: errorMessage(error) }); }
   };
   const login = async ({ request }) => {
     const button = query("#publish-create");
@@ -6206,9 +6206,11 @@ if (EMBED) {
       walletAuthorization = null;
       embedNotify({ event: "error", message: errorMessage(error) });
       throw error;
-    } finally { button.disabled = false; }
+    } finally { setButtonBusy(button, false); }
   };
-  serveEmbedPort({ "wallet.approve": login }, () => {
+  // The embedding page could not prepare the request: the button stops working.
+  const cancel = async () => { setButtonBusy(query("#publish-create"), false); };
+  serveEmbedPort({ "wallet.approve": login, "wallet.cancel": cancel }, () => {
     if (storedIdentityRecord && root.dataset.embedState === "done") embedNotify({ event: "existing", did: storedIdentityRecord.did });
   });
 }
@@ -6339,6 +6341,29 @@ function describeDidDocumentEdit(edit) {
   ];
 }
 
+// While a button works its label gives way to dots that count up in a loop (・ ・・ ・・・); the
+// accessible name stays the label. Only `disabled` is set: Pass reads readonly / aria-busy as "busy".
+const BUSY_FRAMES = ["・", "・・", "・・・"];
+const busyButtons = new WeakMap();
+function setButtonBusy(button, busy) {
+  if (busy === busyButtons.has(button)) { if (!busy) button.disabled = false; return; }
+  if (busy) {
+    button.disabled = true;
+    button.dataset.label = button.textContent;
+    button.setAttribute("aria-label", button.textContent.trim());
+    let frame = 0;
+    const paint = () => { button.textContent = BUSY_FRAMES[frame++ % BUSY_FRAMES.length]; };
+    paint();
+    busyButtons.set(button, setInterval(paint, 350));
+  } else {
+    clearInterval(busyButtons.get(button));
+    busyButtons.delete(button);
+    button.textContent = button.dataset.label ?? button.textContent;
+    button.removeAttribute("aria-label");
+    button.disabled = false;
+  }
+}
+
 function showEmbedDone(did) {
   document.documentElement.dataset.embedState = "done";
   try {
@@ -6444,7 +6469,7 @@ function startEmbedSave(did) {
   embedNotify({ event: "save-page" });
   setTimeout(() => {
     const button = query("#publish-create");
-    button.disabled = false;
+    setButtonBusy(button, false);
     button.textContent = "Continue";
   }, 4000);
 }

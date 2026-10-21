@@ -3521,6 +3521,7 @@ html[data-embed="create"] .field-heading { margin: 0 0 6px; font-size: 14px; lin
 html[data-embed="create"] .field-heading-label { display: inline; }
 html[data-embed="create"] .actions { margin: 4px 0 0; }
 html[data-embed="create"] #creation-create-actions { margin-top: 0; }
+html[data-embed="create"] .recovery-field-row { margin-top: 0; }
 html[data-embed="create"][data-embed-state="done"] #app { display: none; }
 html[data-embed="create"] #embed-done { display: none; }
 html[data-embed="create"][data-embed-state="done"] #embed-done {

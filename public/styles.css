@@ -3563,6 +3563,9 @@ html[data-embed="save"] #embed-save .embed-save-ghost { display: grid; }
    form's button covered the Passphrase input and the username. Only the status text (pointer-events: none)
    is drawn over them. */
 html[data-embed="save"] #embed-save .embed-save-stage > .embed-save-ghost { grid-area: 2 / 1; }
+html[data-embed="save"] #embed-save .embed-save-stacked > .embed-save-ghost { grid-area: 1 / 1; }
+html[data-embed="save"] #embed-save .embed-save-stacked .embed-save-ghost > * { grid-area: 1 / 1; }
+html[data-embed="save"] #embed-save .embed-save-stacked input, html[data-embed="save"] #embed-save .embed-save-stacked button { height: 48px !important; }
 html[data-embed="save"] #embed-save .embed-save-ghost input[type="password"],
 html[data-embed="save"] #embed-save .embed-save-user,
 html[data-embed="save"] #embed-save .embed-save-ghost button { display: block; width: 100%; height: 32px; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: transparent; outline: none; box-shadow: none; cursor: default; }

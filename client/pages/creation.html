@@ -82,7 +82,7 @@
            part of what stopped password managers from recognizing it. -->
       <label
         id="creation-passphrase-row"
-        class="field-block passphrase-block"
+        class="field-block field-block-passphrase passphrase-block"
         data-for="master-mnemonic"
       >
         <span class="field-heading">
@@ -98,7 +98,7 @@
             </span>
           </span>
         </span>
-        <span class="recovery-field-row">
+        <span class="field-row field-row-passphrase recovery-field-row">
           <span id="master-mnemonic-wrap" class="recovery-field-wrap">
             <input
               id="master-mnemonic"
@@ -109,7 +109,7 @@
               autocorrect="off"
               spellcheck="false"
               placeholder="Passphrase"
-              class="recovery-field passphrase-field"
+              class="field-input field-input-passphrase recovery-field passphrase-field"
             />
             <button
               type="button"
@@ -193,7 +193,7 @@
            Outside the <form> on purpose: a text input inside it makes Proton Pass classify the form
            "noop" at the confirm step and drop the Passphrase field (ARC.md 9.2). The Alias is never
            submitted, and the page's flex order (styles.css) keeps it between the Passphrase and Create. -->
-      <div id="creation-alias-create-row" class="field-block alias-block">
+      <div id="creation-alias-create-row" class="field-block field-block-mail alias-block">
         <h2 id="creation-alias-row" class="field-heading alias-disabled">
           <label class="field-heading-label" for="creation-alias">
             alias <span class="alias-hint">(can be changed later)</span>
@@ -207,7 +207,7 @@
             aria-label="Use alias"
           ></button>
         </h2>
-        <div class="field-value-row">
+        <div class="field-row field-row-mail field-value-row">
           <input
             id="creation-alias"
             type="text"
@@ -216,7 +216,7 @@
             autocorrect="off"
             autocomplete="off"
             aria-label="Alias"
-            class="field-value recovery-field"
+            class="field-input field-input-mail field-value recovery-field"
           />
           <span
             id="creation-alias-status"

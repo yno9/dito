@@ -2175,6 +2175,19 @@ let lastCreatePhrase = "";
 // the old offscreen #create-username kept the form from being recognised).
 // The input is replaced rather than edited, so the detector sees it appear
 // with its value already set.
+// The embedded frame's form is what Proton Pass records when Create is pressed (one Stage per attempt in its
+// log, and its username is what the save prompt then shows). Its hidden username starts as the provisional DID
+// (`...:ex.alias`); the account name we want saved is the mail address. The value is edited in place, never the
+// element replaced: Proton reads `field.value` when it stages, and replacing the input made the detector see
+// the form change under it (the first attempt, replacing it on every keystroke, stopped it firing).
+function syncEmbedUsername() {
+  if (!EMBED) return;
+  const input = query("#create-username");
+  if (!input) return;
+  try { input.value = selectedCreationAliasHost().replace(/\.did\.md$/, "@did.md"); } catch { /* an invalid Alias: leave it */ }
+}
+if (EMBED) document.addEventListener("click", syncEmbedUsername, true);
+
 function setHiddenUsername(did) {
   const form = query("#create-load-form");
   if (!form) return;
@@ -4950,6 +4963,7 @@ async function beginCreateDraft() {
     // programmatically filled or offscreen.
     setHiddenUsername(entry.state.id);
     resetCreationAlias();
+    syncEmbedUsername();
     if (requestedAliasFromUrl) setCreationAliasEnabled(true);
   } catch (error) {
     output("#create-result", errorMessage(error), true);
@@ -5166,6 +5180,7 @@ query("#creation-alias-toggle").addEventListener("click", () => {
 query("#creation-alias").addEventListener("input", () => {
   updateCreationDidSuffix();
   checkCreationAlias();
+  syncEmbedUsername();
 });
 
 function updateCreationLoadSubmit() {

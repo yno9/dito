@@ -5167,6 +5167,16 @@ query("#creation-alias-toggle").addEventListener("click", () => {
   setCreationAliasEnabled(enabled);
 });
 
+// The "x" shown when the Alias is taken (an identity already exists there) clears the field, so the next
+// address can be typed at once.
+query("#creation-alias-status").addEventListener("click", () => {
+  if (query("#creation-alias-status").dataset.state !== "unavailable") return;
+  const input = query("#creation-alias");
+  input.value = "";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.focus();
+});
+
 query("#creation-alias").addEventListener("input", () => {
   updateCreationDidSuffix();
   checkCreationAlias();

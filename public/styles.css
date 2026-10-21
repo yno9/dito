@@ -1332,6 +1332,14 @@ button#creation-confirm-saved.primary {
   content: "×";
 }
 
+/* The Alias field's own "x" clears the field when clicked (app.ts). */
+#creation-alias-status[data-state="unavailable"] {
+  cursor: pointer;
+}
+#creation-alias-status[data-state="unavailable"]:hover {
+  color: var(--ink);
+}
+
 .alias-status-icon[data-state="checking"] {
   width: 0.9rem;
   height: 0.9rem;

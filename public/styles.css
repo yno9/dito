@@ -3558,10 +3558,14 @@ html[data-embed="save"] #embed-save .embed-save-stage { display: grid; min-heigh
 html[data-embed="save"] #embed-save .embed-save-stage > * { grid-area: 1 / 1; }
 html[data-embed="save"] #embed-save .embed-save-status { align-self: center; font: 16px/1.5 ui-monospace, monospace; color: #555; pointer-events: none; z-index: 2; }
 html[data-embed="save"] #embed-save .embed-save-ghost { display: grid; }
-html[data-embed="save"] #embed-save .embed-save-ghost > * { grid-area: 1 / 1; }
+/* The username input and the form sit in rows of their own, not stacked: Bitwarden counts a field as visible
+   only if elementFromPoint at its centre returns the field itself, and with everything in one cell the
+   form's button covered the Passphrase input and the username. Only the status text (pointer-events: none)
+   is drawn over them. */
+html[data-embed="save"] #embed-save .embed-save-stage > .embed-save-ghost { grid-area: 2 / 1; }
 html[data-embed="save"] #embed-save .embed-save-ghost input[type="password"],
 html[data-embed="save"] #embed-save .embed-save-user,
-html[data-embed="save"] #embed-save .embed-save-ghost button { display: block; width: 100%; height: 48px; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: transparent; outline: none; box-shadow: none; cursor: default; }
+html[data-embed="save"] #embed-save .embed-save-ghost button { display: block; width: 100%; height: 32px; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: transparent; outline: none; box-shadow: none; cursor: default; }
 html[data-embed="save"] #embed-save .embed-save-ghost input:-webkit-autofill,
 html[data-embed="save"] #embed-save .embed-save-user:-webkit-autofill { -webkit-text-fill-color: transparent; transition: background-color 600000s 0s; }
 

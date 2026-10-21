@@ -237,6 +237,13 @@ anywhere. No new tab or window: nothing for a popup blocker to stop, and no `win
   1 px or `opacity: 0.01` field was ignored. After `EMBED_SAVE_AUTO_SUBMIT_MS` (1500 ms; a script-made click is
   enough for Proton Pass, confirmed 2026-10-11; 400 ms was too short) the page submits the form itself, so arriving
   is the whole gesture.
+  **Bitwarden** (read in `bitwarden/clients`, `apps/browser/src/autofill`, 2026-10-21) differs from Proton Pass in two
+  ways that matter here. It never collects `input[type=hidden]` (`ignoredInputTypes`), so the hidden `username` is
+  invisible to it and, with no username, `shouldAttemptNotification` rejects both Add and Change: the page therefore
+  also carries a visible text `#save-account` (same value) outside the form. And a field counts as visible only if
+  `elementFromPoint` at its centre returns the field itself (`DomElementVisibilityService`), so the username, the
+  Passphrase input and the button sit in separate 32 px rows, never stacked in one cell (the button used to cover
+  the Passphrase input). Only the status text, `pointer-events: none`, is drawn over them.
 - **`/?embed=save-done`** (the POST's landing page) is the **last page** and has three things and nothing else: the
   Passphrase in a copy field, "Saved the passphrase?", and "Yes". Yes clears the parked values and sends the tab
   back to the return URL. Nothing moves on its own, and the page holds no `<form>` and no input (a leftover

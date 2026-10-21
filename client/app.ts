@@ -2169,11 +2169,10 @@ function setHiddenUsername(did) {
   const form = query("#create-load-form");
   if (!form) return;
   query("#create-username")?.remove();
-  // The embedded frame's form is not the one that is finally saved (the save page is), but a password manager
-  // records its submission, and the username in it was the provisional DID (`...:ex.alias`). Without any
-  // username that submission was not recognised at all. So the frame's form carries the mail address, the
-  // same account name as the save page, kept in step with the Alias (the input listener below).
-  if (EMBED) { try { did = selectedCreationAliasHost().replace(/\.did\.md$/, "@did.md"); } catch { /* an invalid Alias: keep the DID given */ } }
+  // The embedded frame's form is not what gets saved (the save page is), but a password manager that
+  // sees its submission records the username in it; the provisional DID (`...:ex.alias`) ended up as the
+  // saved account name that way. The frame's form carries no username: the save page's mail address wins.
+  if (EMBED) return;
   const input = document.createElement("input");
   input.type = "hidden";
   input.id = "create-username";
@@ -4945,7 +4944,6 @@ async function beginCreateDraft() {
     // programmatically filled or offscreen.
     setHiddenUsername(entry.state.id);
     resetCreationAlias();
-    if (EMBED) setHiddenUsername(entry.state.id);
     if (requestedAliasFromUrl) setCreationAliasEnabled(true);
   } catch (error) {
     output("#create-result", errorMessage(error), true);
@@ -5162,7 +5160,6 @@ query("#creation-alias-toggle").addEventListener("click", () => {
 query("#creation-alias").addEventListener("input", () => {
   updateCreationDidSuffix();
   checkCreationAlias();
-  if (EMBED && query("#create-username")) setHiddenUsername(query("#create-username").value);
 });
 
 function updateCreationLoadSubmit() {

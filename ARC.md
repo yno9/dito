@@ -157,7 +157,7 @@ experiment in the browser. Rules can change with an extension update; when it st
 | A password input it recognises | A real, **visible** `<input type="password">` (the detector treats a field below roughly 30×15 px as invisible), in a `<form>` or alone. Not `readonly`, `disabled`, `aria-disabled` or `aria-busy`. |
 | A form that is not "busy" | The form, its buttons, its fields and **every ancestor** are checked for those four attributes at submit time. A single `readonly` field (the old overlay `<textarea>`) is enough. |
 | No decoy inputs | A `type="text"` input that is offscreen, tiny, transparent or `readonly` is flagged invisible and skews the form's classification. With the old offscreen username and the overlay textarea in the form it stopped firing; removing the username plus either the textarea or the Alias field brought it back. `data-protonpass-ignore` on those fields did not bring it back; a visible text "username" stopped it firing; a 1 px transparent one fired but saved an empty username. |
-| An account name | `<input type="hidden" name="username" value="…">`: `name` or `id` containing `user`, `login`, `email` or `identifier`; value non-empty, at most 320 characters, not `0`/`1`/`true`/`false`. It must hold its value **when the detector scans**, so it is replaced (never edited) once the value is known. A hidden input is the only way that gave the DID as the saved username; a text input gave an empty one. |
+| An account name | `<input type="hidden" name="username" value="…">`: `name` or `id` containing `user`, `login`, `email` or `identifier`; value non-empty, at most 320 characters, not `0`/`1`/`true`/`false`. It must hold a value **when the detector scans**; the value is read again when the form is submitted, so it can be edited in place afterwards (replacing the element made the detector lose the form). A hidden input is the only way that gave a saved username; a text input gave an empty one. Priority in Pass' `getFormData`: a visible username field, then an email field, then the hidden username. |
 | A real submit gesture | The user's own click on a submit button, or Enter, fires the form's `submit` event; that is what we verified. Whether a script-made click would also count is untested, so the confirm button is always the user's click. (Create itself may be a script click: it only persists locally.) |
 | A recognised submission | A navigation: POST or GET both fired for the final form (a plain form fired for POST and not for GET, so POST is the safe one). Or a script submit that removes the form **at least 250 ms after** the click or Enter; sooner and Pass discards it as a misread Cancel. |
 | A server answer | The request must succeed. `file_server` answers a POST with 405, so Caddy rewrites it to a GET (see `method @post GET` in the Caddyfile). |
@@ -244,6 +244,12 @@ anywhere. No new tab or window: nothing for a popup blocker to stop, and no `win
   `elementFromPoint` at its centre returns the field itself (`DomElementVisibilityService`), so the username, the
   Passphrase input and the button sit in separate 32 px rows, never stacked in one cell (the button used to cover
   the Passphrase input). Only the status text, `pointer-events: none`, is drawn over them.
+  **Proton Pass, embedded (2026-10-21, from its extension log and sources):** its log shows one `Stage` per attempt, and
+  that is the **frame's** form at the moment Create is pressed, not the save page's. The save prompt then shows the
+  username that form holds. The frame's hidden `#create-username` starts as the provisional DID (`...:ex.alias`), so
+  that is what got saved. `syncEmbedUsername()` (app.ts) edits its value in place to the mail address on every Alias
+  input and in a capture-phase click listener before Proton reads it. Do not replace the element (it stopped Pass
+  firing), do not drop it (no username: no prompt), and do not rely on the save page's form for the account name.
 - **`/?embed=save-done`** (the POST's landing page) is the **last page** and has three things and nothing else: the
   Passphrase in a copy field, "Saved the passphrase?", and "Yes". Yes clears the parked values and sends the tab
   back to the return URL. Nothing moves on its own, and the page holds no `<form>` and no input (a leftover

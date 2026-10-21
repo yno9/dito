@@ -309,16 +309,6 @@ const requestedAliasFromUrl = (() => {
 const EMBED = (() => {
   try { return window.top !== window && new URLSearchParams(location.search).get("embed") === "create"; } catch { return false; }
 })();
-// Bisecting Proton Pass (console of this origin: localStorage.setItem("dito.frameVariant", "ignore")):
-// the frame's own form is told not to autosave, so only the save page can make a prompt.
-if (EMBED) {
-  try {
-    if (localStorage.getItem("dito.frameVariant") === "ignore") {
-      const mark = () => query("#create-load-form")?.setAttribute("data-protonpass-autosave-ignore", "true");
-      mark(); document.addEventListener("DOMContentLoaded", mark);
-    }
-  } catch { /* storage blocked */ }
-}
 // Embedded in biset's account page (?embed=approve): asks for the Passphrase to approve one
 // request (a DID document edit, say) and hands the response back over the MessageChannel.
 const EMBED_APPROVE = (() => {
@@ -6671,12 +6661,7 @@ if (EMBED_SAVE) {
       // the page, so the request only needs the account name. `formdata` fires as the browser builds
       // the request body; dropping the entry there leaves the field itself untouched.
       form.addEventListener("formdata", event => event.formData.delete("password"));
-      // Bisecting a password manager that stopped offering to save: in this origin's console,
-      // localStorage.setItem("dito.saveVariant", "nouser") drops the visible username, "stacked" puts
-      // everything back in one cell (the layout before 2026-10-21); remove the key for the default.
-      let variant = ""; try { variant = localStorage.getItem("dito.saveVariant") ?? ""; } catch { /* storage blocked */ }
-      if (variant === "stacked") stage.classList.add("embed-save-stacked");
-      if (variant === "nouser") stage.append(form); else stage.append(visibleUsername, form);
+      stage.append(visibleUsername, form);
       visibleUsername.dispatchEvent(new Event("input", { bubbles: true }));
       password.dispatchEvent(new Event("input", { bubbles: true }));
       // Arriving here is the whole gesture: the form submits on its own once the password

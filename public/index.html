@@ -20,6 +20,9 @@
           // The embedded create form: hidden until the wallet knows whether this browser already has an
           // identity, so the form never shows for a moment before the finished view replaces it.
           else if (window.top !== window && mode === "create") document.documentElement.dataset.embed = "create";
+          // The embedded approval hides the wallet's own screen from the first paint too; otherwise the
+          // frame is the whole home page (a white block) until the wallet script has started.
+          else if (window.top !== window && mode === "approve") document.documentElement.dataset.embed = "approve";
         } catch (error) { /* the wallet script decides again */ }
       })();
     </script>

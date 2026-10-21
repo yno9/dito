@@ -3970,11 +3970,17 @@ async function jarAuthorizationParameters(clientId, jwt) {
   };
 }
 
-async function oauthAuthorizationParameters(search = null) {
+// `embedded`: only the embedded sign-in (the frame, or the last page of an embedded create) passes it.
+// There a did:webvh relying party sends its parameters plainly, without a signed request: the request
+// is only ever approved for the page that opened the frame or the tab (its redirect origin must be
+// that page's origin, embedSignInTargetsPage), and the redirect must be on the host its DID names, so
+// no signature is needed to know who is asking.
+async function oauthAuthorizationParameters(search = null, { embedded = false } = {}) {
   if (search === null && location.pathname !== "/authorize") return null;
   const params = new URLSearchParams(search ?? location.search);
   const keys = [...params.keys()];
-  if (params.get("client_id")?.startsWith("did:webvh:")) {
+  const plainRp = embedded && params.get("client_id")?.startsWith("did:webvh:") && !params.has("request");
+  if (params.get("client_id")?.startsWith("did:webvh:") && !plainRp) {
     const jarKeys = ["client_id", "request", "response_type"];
     if (keys.length !== jarKeys.length || keys.some(key => !jarKeys.includes(key)) || !validResponseType(params.get("response_type"))) throw new Error("The authorization request is invalid.");
     return jarAuthorizationParameters(params.get("client_id"), params.get("request"));
@@ -3984,7 +3990,8 @@ async function oauthAuthorizationParameters(search = null) {
   const optional = ["alias", "authorization_details", "capability_type", "dpop_jkt", "login_hint", "nonce"];
   if (keys.length < required.length || new Set(keys).size !== keys.length || keys.some(key => !required.includes(key) && !optional.includes(key))) throw new Error("The authorization request is invalid.");
   const value = Object.fromEntries([...required, ...optional].map(key => [key, params.get(key)]));
-  if (!/^client_[A-Za-z0-9_-]{32,128}$/.test(value.client_id ?? "") || !validResponseType(value.response_type) || !/^[A-Za-z0-9._~-]{16,512}$/.test(value.state ?? "")) throw new Error("The authorization request is invalid.");
+  if (plainRp && (value.response_type !== "vp_token id_token" || didHost(value.client_id) !== hostOf(value.redirect_uri))) throw new Error("The authorization request is invalid.");
+  if (!(plainRp || /^client_[A-Za-z0-9_-]{32,128}$/.test(value.client_id ?? "")) || !validResponseType(value.response_type) || !/^[A-Za-z0-9._~-]{16,512}$/.test(value.state ?? "")) throw new Error("The authorization request is invalid.");
   if (usesCode && (value.code_challenge_method !== "S256" || !/^[A-Za-z0-9_-]{43}$/.test(value.code_challenge ?? ""))) throw new Error("The authorization request is invalid.");
   let redirect;
   try { redirect = new URL(value.redirect_uri ?? ""); } catch { throw new Error("The redirect URI is invalid."); }
@@ -4025,7 +4032,12 @@ async function oauthAuthorizationParameters(search = null) {
     deviceJkt: value.dpop_jkt ?? undefined, loginHint: value.login_hint ?? undefined, loginHost,
     redirectUri: value.redirect_uri, state: value.state, nonce: value.nonce ?? undefined,
     scope, authorizationDetails, capabilityType,
+    ...(plainRp ? { clientDisplayHost: redirect.host } : {}),
   };
+}
+
+function hostOf(url) {
+  try { return new URL(url ?? "").host; } catch { return null; }
 }
 
 // Settles when the boot-time read of the stored identity has finished.
@@ -4038,7 +4050,7 @@ async function beginOAuthAuthorization() {
   // JWE loading surface or the precise request-validation error.
   selectTab("home");
   try {
-    const request = await oauthAuthorizationParameters();
+    const request = await oauthAuthorizationParameters(null, { embedded: EMBED_LOGIN });
     if (!request) return;
     // A did:webvh-authenticated relying party (PLAN6) has no DCR
     // registration to look up: jarAuthorizationParameters already verified
@@ -6268,7 +6280,7 @@ if (EMBED_APPROVE) {
 async function embedApprovalFor(request, host) {
   const search = validEmbedLogin(request)?.replace(/^\/authorize/, "");
   if (!search) throw new Error("The sign-in request is invalid.");
-  const parameters = await oauthAuthorizationParameters(search);
+  const parameters = await oauthAuthorizationParameters(search, { embedded: true });
   if (!parameters || !parameters.clientId.startsWith("did:webvh:")) throw new Error("The sign-in request is invalid.");
   if (!embedSignInTargetsPage(parameters.redirectUri, embedParentOrigin)) throw new Error("This sign-in is not for the page that asked for it.");
   walletAuthorization = { ...parameters, clientName: parameters.clientId, outcomeReporting: false };
@@ -6509,9 +6521,13 @@ function validEmbedLogin(value) {
     if (typeof value !== "string" || !value) return null;
     const url = new URL(`/authorize${value.startsWith("?") ? value : `?${value}`}`, location.origin);
     const keys = [...url.searchParams.keys()];
-    const shaped = keys.length === 3 && ["client_id", "request", "response_type"].every(key => keys.includes(key));
-    return url.origin === location.origin && url.pathname === "/authorize" && shaped && url.searchParams.get("client_id").startsWith("did:webvh:")
-      ? `${url.pathname}${url.search}` : null;
+    const clientId = url.searchParams.get("client_id") ?? "";
+    // A did:webvh relying party sends a signed request (client_id, request, response_type) or its
+    // parameters plainly (oauthAuthorizationParameters checks them strictly, and the redirect against
+    // the page that asked).
+    const shaped = clientId.startsWith("did:webvh:") && new Set(keys).size === keys.length
+      && (keys.includes("request") ? keys.length === 3 && ["client_id", "request", "response_type"].every(key => keys.includes(key)) : true);
+    return url.origin === location.origin && url.pathname === "/authorize" && shaped ? `${url.pathname}${url.search}` : null;
   } catch { return null; }
 }
 

@@ -2169,10 +2169,6 @@ function setHiddenUsername(did) {
   const form = query("#create-load-form");
   if (!form) return;
   query("#create-username")?.remove();
-  // The embedded frame's form is not what gets saved (the save page is), but a password manager that
-  // sees its submission records the username in it; the provisional DID (`...:ex.alias`) ended up as the
-  // saved account name that way. The frame's form carries no username: the save page's mail address wins.
-  if (EMBED) return;
   const input = document.createElement("input");
   input.type = "hidden";
   input.id = "create-username";

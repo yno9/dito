@@ -3601,6 +3601,10 @@ html[data-embed="save"] #embed-save .embed-save-error { margin: 16px 0 0; font: 
 /* Embedded form in log-in mode (the Mail address already has an identity): the Passphrase is typed, not shown to copy. */
 html[data-embed-mode="login"] #master-mnemonic-copy-hint,
 html[data-embed-mode="login"] .passphrase-copy-btn { display: none; }
+/* With the copy button gone the eye takes the right edge, and the field no longer reserves the room for both. */
+html[data-embed-mode="login"] .recovery-eye-toggle { right: 1rem; }
+html[data-embed-mode="login"] .recovery-field-wrap:has(.recovery-copy) #master-mnemonic,
+html[data-embed-mode="login"] .recovery-field-wrap:has(.recovery-copy) .passphrase-display-overlay { padding-right: 2.5rem; }
 
 /* Embedded approve (?embed=approve inside biset's account page): only the request's changes, the
    Passphrase and Approve / Cancel. */

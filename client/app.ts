@@ -6174,6 +6174,8 @@ if (EMBED) {
     for (let i = 0; i < 100 && !prepare() && !storedIdentityRecord; i += 1) await new Promise(resolve => setTimeout(resolve, 50));
     const label = aliasLabel();
     if (label) label.firstChild.textContent = "Mail alias ";
+    const passphraseLabel = query("#creation-passphrase-row .field-heading-label");
+    if (passphraseLabel?.firstChild) passphraseLabel.firstChild.textContent = "Passphrase ";
   })();
   // The frame loads again once this browser holds an identity: show that
   // instead of a second Create.

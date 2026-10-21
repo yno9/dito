@@ -3591,7 +3591,7 @@ html[data-embed="save"] #embed-save { display: block; }
    existing identity (data-embed-ready), so the form never flashes before the finished view. */
 html[data-embed="create"]:not([data-embed-mode="login"]) #creation-passphrase-row { display: none; }
 html[data-embed="create"]:not([data-embed-ready]) #app { visibility: hidden; }
-html[data-embed="create"] #creation-alias-create-row > .field-value-row { background: #f6f6f6; border-radius: 0.5rem; margin-top: 0.5rem; padding: 0 2.5rem 0 1rem; }
+html[data-embed="create"] #creation-alias-create-row > .field-value-row { background: #f6f6f6; border-radius: 0.5rem; padding: 0 2.5rem 0 1rem; }
 html[data-embed="create"] #creation-alias { flex: 0 1 auto; min-width: 3ch; max-width: 100%; min-width: 0; margin: 0; padding: 1rem 0; background: transparent; }
 html[data-embed="create"] .embed-mail-suffix { flex: none; font: 200 1rem / 1.5rem monospace; color: var(--muted, #777); user-select: none; pointer-events: none; }
 html[data-embed="create"] #creation-alias:focus { outline: none; }

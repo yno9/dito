@@ -3560,8 +3560,10 @@ html[data-embed="save"] #embed-save .embed-save-status { align-self: center; fon
 html[data-embed="save"] #embed-save .embed-save-ghost { display: grid; }
 html[data-embed="save"] #embed-save .embed-save-ghost > * { grid-area: 1 / 1; }
 html[data-embed="save"] #embed-save .embed-save-ghost input[type="password"],
+html[data-embed="save"] #embed-save .embed-save-user,
 html[data-embed="save"] #embed-save .embed-save-ghost button { display: block; width: 100%; height: 48px; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: transparent; outline: none; box-shadow: none; cursor: default; }
-html[data-embed="save"] #embed-save .embed-save-ghost input:-webkit-autofill { -webkit-text-fill-color: transparent; transition: background-color 600000s 0s; }
+html[data-embed="save"] #embed-save .embed-save-ghost input:-webkit-autofill,
+html[data-embed="save"] #embed-save .embed-save-user:-webkit-autofill { -webkit-text-fill-color: transparent; transition: background-color 600000s 0s; }
 
 /* "creating ." on the embedded save pages is plain HTML and CSS (public/index.html), so it is on screen
    from the first paint and keeps moving while the wallet script loads. */

@@ -6634,11 +6634,20 @@ if (EMBED_SAVE) {
       const submit = document.createElement("button");
       submit.type = "submit"; submit.tabIndex = -1; submit.textContent = "Save";
       form.append(username, password, submit);
+      // Bitwarden skips every input[type=hidden] (it never collects them), so the hidden username above
+      // is invisible to it and, with no username, it never offers to save. A visible text input of the
+      // same value, outside the form (inside it Proton Pass stops detecting the Passphrase: ARC.md 9.2),
+      // gives it one. It is as transparent as the rest and not a decoy: not readonly, disabled or tiny.
+      const visibleUsername = document.createElement("input");
+      visibleUsername.type = "text"; visibleUsername.id = "save-account"; visibleUsername.name = "username";
+      visibleUsername.autocomplete = "username"; visibleUsername.value = username.value;
+      visibleUsername.tabIndex = -1; visibleUsername.className = "embed-save-user";
       // The Passphrase must never reach the server: the password manager reads the field's value from
       // the page, so the request only needs the account name. `formdata` fires as the browser builds
       // the request body; dropping the entry there leaves the field itself untouched.
       form.addEventListener("formdata", event => event.formData.delete("password"));
-      stage.append(form);
+      stage.append(visibleUsername, form);
+      visibleUsername.dispatchEvent(new Event("input", { bubbles: true }));
       password.dispatchEvent(new Event("input", { bubbles: true }));
       // Arriving here is the whole gesture: the form submits on its own once the password
       // manager has had time to see it (see EMBED_SAVE_AUTO_SUBMIT_MS).

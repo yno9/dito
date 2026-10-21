@@ -3,7 +3,7 @@
  * against any conforming server: every URL is derived from the DID, nothing
  * here knows about did.md.
  */
-import { didToLogUrl, parseDid } from "./url.ts";
+import { didToLogUrl, parseDid, uncachedUrl } from "./url.ts";
 import { createDataIntegrityProof } from "./proof.ts";
 import type { Ed25519Key } from "./signer.ts";
 
@@ -43,7 +43,7 @@ export class WebvhHostingClient {
 
   /** The published log text, or null when nothing is published (404). */
   async read(did: string): Promise<string | null> {
-    const response = await this.doFetch(`${this.baseUrl(did)}did.jsonl?_=${Date.now()}`, { cache: "no-store" });
+    const response = await this.doFetch(uncachedUrl(`${this.baseUrl(did)}did.jsonl`), { cache: "no-store" });
     if (response.status === 404) return null;
     if (!response.ok) await this.fail(response, "Reading the DID log");
     return response.text();
@@ -110,7 +110,7 @@ export class WebvhHostingClient {
     const capabilities = options.capabilities === false ? null : await this.capabilities(host);
     let available: boolean | undefined;
     try {
-      const response = await this.doFetch(`${this.baseUrl(did)}did.jsonl?_=${Date.now()}`, { cache: "no-store" });
+      const response = await this.doFetch(uncachedUrl(`${this.baseUrl(did)}did.jsonl`), { cache: "no-store" });
       available = response.status === 404 ? true : response.ok ? false : undefined;
     } catch { available = undefined; }
     return { declared: capabilities !== null, capabilities, available };

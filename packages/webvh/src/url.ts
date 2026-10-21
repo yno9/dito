@@ -50,3 +50,16 @@ export function didToLogUrl(did: string): string {
   const host = port ? `${domain}:${port}` : domain;
   return segments.length ? `https://${host}/${segments.map(encodeURIComponent).join("/")}/did.jsonl` : `https://${host}/.well-known/did.jsonl`;
 }
+
+/**
+ * `url` with a query that no cache has seen. A host's log is cached by its CDN for 30 seconds
+ * (`s-maxage`); a read that is followed by a write must not be handed a copy older than the
+ * last write, or the new entry is numbered from the old log and the host refuses it
+ * (`version '4' in log doesn't match expected '5'`). `cache: "no-store"` only bypasses the
+ * browser's own cache.
+ */
+export function uncachedUrl(url: string | URL, now: number = Date.now()): string {
+  const target = new URL(url);
+  target.searchParams.set("_", String(now));
+  return target.toString();
+}

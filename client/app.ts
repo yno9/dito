@@ -55,7 +55,7 @@ import { parseLoginHost, didIsHostedAt } from "../packages/wallet/src/login-hint
 import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
 import { applyOutcome, grantDisplayState, shouldPoll } from "../packages/wallet/src/grant-outcome.ts";
 import { assertEditSparesMethods, assertEndpointRemovals, assertServiceEndpointMode, assertVerificationMethodEdit, VERIFICATION_RELATIONSHIPS, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
-import { ROOT_KEY_FRAGMENT, WebvhHostingClient, currentParameters, parseLog as parseWebvhLog, resolveLog } from "../packages/webvh/src/index.ts";
+import { ROOT_KEY_FRAGMENT, WebvhHostingClient, currentParameters, parseLog as parseWebvhLog, resolveLog, uncachedUrl } from "../packages/webvh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
 import dashboardHeaderTemplate from "./pages/dashboard-header.html";
 import footerTemplate from "./pages/footer.html";
@@ -1767,7 +1767,7 @@ function legacyContainerPath(username, name) {
 }
 
 async function fetchCompleteDidLog(record) {
-  const response = await fetch(hostLogUrl(record.did), { cache: "no-store" });
+  const response = await fetch(uncachedUrl(hostLogUrl(record.did)), { cache: "no-store" });
   if (!response.ok) throw new Error(`Could not read the complete DID log for ${record.did}.`);
   const didJsonl = await response.text();
   if (didJsonl.length > 16 * 1024 * 1024) throw new Error(`The DID log for ${record.did} exceeds the container limit.`);
@@ -2257,7 +2257,7 @@ async function fetchIdentityLog(storageKey, did, logUrl) {
     if (!text) throw new Error("This identity has no locally loaded log.");
   } else {
     try {
-      const response = await fetch(logUrl ?? hostLogUrl(did), { cache: "no-store" });
+      const response = await fetch(uncachedUrl(logUrl ?? hostLogUrl(did)), { cache: "no-store" });
       if (!response.ok) throw new Error(await response.text());
       text = await response.text();
     } catch (error) {
@@ -5310,7 +5310,7 @@ onClick("#creation-load-submit", "#wallet-result", async () => {
     // check the Passphrase against it (loadMasterIdentity verifies the whole
     // log). The password-protected record is saved only after that succeeds.
     const logUrl = creationLoadLogUrl(sourceText);
-    const response = await fetch(logUrl, { cache: "no-store" });
+    const response = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
     if (!response.ok) throw new Error(`DID document returned ${response.status}`);
     const did = parseLog(await response.text()).at(-1)?.state?.id;
     if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
@@ -6250,7 +6250,7 @@ async function embedApprovalFor(request, host) {
     changes: edit ? describeDidDocumentEdit(edit) : [],
     async run(passphrase) {
       const logUrl = `https://${host}/.well-known/did.jsonl`;
-      const logResponse = await fetch(logUrl, { cache: "no-store" });
+      const logResponse = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
       if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
       const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
       if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");

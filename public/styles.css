@@ -3528,13 +3528,11 @@ html[data-embed="create"][data-embed-state="done"] #embed-done {
   display: block; padding: 14px; border-radius: 12px; background: #f5f5f5;
   font: 14px/1.4 ui-monospace, monospace; overflow-wrap: anywhere;
 }
-/* Order: Mail, Passphrase, Create -- the alias block dissolves into the flex column and each part
-   is ordered. */
-html[data-embed="create"] #creation-alias-create-row { display: contents; }
-html[data-embed="create"] #creation-alias-row { order: 1; }
-html[data-embed="create"] #creation-alias-create-row > .field-value-row { order: 2; }
-html[data-embed="create"] #creation-passphrase-row { order: 3; }
-html[data-embed="create"] #creation-actions-block { order: 4; }
+/* Order: Mail, Passphrase, Create. The Mail block stays whole (label and field in one grid, like the
+   Passphrase block), so both labels sit the same distance from their field; only the blocks are ordered. */
+html[data-embed="create"] #creation-alias-create-row { order: 1; }
+html[data-embed="create"] #creation-passphrase-row { order: 2; }
+html[data-embed="create"] #creation-actions-block { order: 3; }
 html[data-embed="create"] .embed-unload {
   display: block; margin: 10px 0 0; padding: 0; border: 0; background: none;
   font: inherit; font-size: 13px; color: #6b6b6b; cursor: pointer; text-decoration: underline;

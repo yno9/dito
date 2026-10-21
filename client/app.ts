@@ -309,6 +309,16 @@ const requestedAliasFromUrl = (() => {
 const EMBED = (() => {
   try { return window.top !== window && new URLSearchParams(location.search).get("embed") === "create"; } catch { return false; }
 })();
+// Bisecting Proton Pass (console of this origin: localStorage.setItem("dito.frameVariant", "ignore")):
+// the frame's own form is told not to autosave, so only the save page can make a prompt.
+if (EMBED) {
+  try {
+    if (localStorage.getItem("dito.frameVariant") === "ignore") {
+      const mark = () => query("#create-load-form")?.setAttribute("data-protonpass-autosave-ignore", "true");
+      mark(); document.addEventListener("DOMContentLoaded", mark);
+    }
+  } catch { /* storage blocked */ }
+}
 // Embedded in biset's account page (?embed=approve): asks for the Passphrase to approve one
 // request (a DID document edit, say) and hands the response back over the MessageChannel.
 const EMBED_APPROVE = (() => {

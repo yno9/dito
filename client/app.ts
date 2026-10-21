@@ -6146,7 +6146,7 @@ if (EMBED) {
     if (!alias.dataset.mailReady) {
       alias.dataset.mailReady = "1";
       alias.value = alias.value.replace(/\.did\.md$/, "");
-      alias.placeholder = "name";
+      alias.placeholder = "alias";
       const suffix = document.createElement("span");
       suffix.className = "embed-mail-suffix";
       suffix.textContent = MAIL_DOMAIN;

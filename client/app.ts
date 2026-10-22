@@ -6255,9 +6255,12 @@ if (EMBED) {
       return { response: await approval.run(query("#master-mnemonic").value.trim()) };
     } catch (error) {
       walletAuthorization = null;
+      setButtonBusy(button, false);
       embedNotify({ event: "error", message: errorMessage(error) });
       throw error;
-    } finally { setButtonBusy(button, false); }
+    }
+    // On success the dots keep going: the embedding page still completes the sign-in and starts the app,
+    // and then replaces this frame (or asks it to stop with wallet.cancel when that fails).
   };
   // The embedding page could not prepare the request: the button stops working.
   const cancel = async () => { setButtonBusy(query("#publish-create"), false); };

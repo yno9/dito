@@ -3633,6 +3633,9 @@ function selectApplicationTab(tab) {
 // (from selectTab and once restoreStoredIdentityRecord's async check
 // resolves) since it is a no-op once a draft or a stored identity exists.
 function maybeBeginCreateDraft() {
+  // The save pages and the embedded sign-in's last page have nothing to create: a draft there is a second
+  // (hidden) Passphrase form with a new phrase in it, for a password manager to weigh against the one it staged.
+  if (EMBED_SAVE || EMBED_LOGIN) return;
   if (currentTab === "home" && !loaded && !storedIdentityRecord && !draft) void beginCreateDraft();
 }
 
@@ -6680,8 +6683,8 @@ function debugFormInventory(label) {
         readOnly: element.readOnly === true, disabled: element.disabled === true, form: element.form?.id || (element.form ? "(form)" : ""),
       };
     };
-    console.info(`[dito-forms] ${label} ${location.pathname}${location.search.slice(0, 40)} t=${Math.round(performance.now())}ms`,
-      { forms: [...document.forms].map(form => ({ id: form.id, action: form.getAttribute("action"), method: form.method })), inputs: [...document.querySelectorAll("input,textarea")].map(describe) });
+    console.info(`[dito-forms] ${label} ${location.pathname} t=${Math.round(performance.now())}ms ` + JSON.stringify(
+      { forms: [...document.forms].map(form => ({ id: form.id, class: form.className, method: form.method })), inputs: [...document.querySelectorAll("input,textarea")].map(describe) }));
   } catch (error) { console.info("[dito-forms] failed", error); }
 }
 const embedSaveDelayMs = () => {

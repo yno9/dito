@@ -6545,11 +6545,28 @@ function askEmbedAliasPassphrase(currentHost, alias, failure) {
   panel.append(account, heading, change, label, message, submit);
   document.body.append(panel);
   field.focus();
+  // The password manager (Proton Pass) takes the account from this frame's form as it is submitted, so the
+  // hidden username becomes the NEW address then (edited in place, never replaced): the saved account is
+  // offered an update to it. Before that it holds the current one, which is what autofill looks for.
+  const newMail = `${alias}@${DOMAIN}`;
+  const syncAccount = () => { account.value = newMail; };
+  panel.addEventListener("submit", syncAccount, true);
+  submit.addEventListener("click", syncAccount, true);
+  let submitted = false;
   return new Promise((resolve, reject) => {
-    panel.addEventListener("submit", event => { event.preventDefault(); setButtonBusy(submit, true); resolve(field.value.trim()); });
+    panel.addEventListener("submit", event => {
+      event.preventDefault();
+      if (submitted) return;
+      submitted = true;
+      // The manager discards a form that is "busy" (a disabled button) at submit time, and one that goes
+      // away within 250 ms of it: the dots start a moment later, and the form stays until the move is done.
+      setTimeout(() => setButtonBusy(submit, true), 400);
+      resolve(field.value.trim());
+    });
     field.addEventListener("input", () => {
-      if (submit.disabled) return;
+      if (submitted) return;
       try { seedFromMnemonic(field.value); } catch { return; }
+      syncAccount();
       panel.requestSubmit(submit);
     });
     back.addEventListener("click", () => reject(Object.assign(new Error("Back."), { back: true })));

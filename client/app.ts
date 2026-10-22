@@ -6480,10 +6480,8 @@ function askEmbedAliasName(currentHost, failure) {
   const message = document.createElement("p");
   message.className = "embed-approve-error"; message.textContent = failure;
   const next = document.createElement("button");
-  next.type = "submit"; next.textContent = "Next";
-  const cancel = document.createElement("button");
-  cancel.type = "button"; cancel.className = "embed-approve-cancel"; cancel.textContent = "Cancel";
-  panel.append(heading, current, label, message, next, cancel);
+  next.type = "submit"; next.textContent = "Next"; next.className = "embed-approve-wide";
+  panel.append(heading, current, label, message, next);
   document.body.append(panel);
   alias.focus();
   const fit = () => { alias.style.width = `calc(${Math.max(alias.value.length, alias.value ? 0 : alias.placeholder.length)}ch + 2px)`; };
@@ -6515,7 +6513,6 @@ function askEmbedAliasName(currentHost, failure) {
   });
   return new Promise((resolve, reject) => {
     panel.addEventListener("submit", event => { event.preventDefault(); next.disabled = true; resolve(alias.value.trim()); });
-    cancel.addEventListener("click", () => reject(new Error("Cancelled.")));
   });
 }
 
@@ -6528,7 +6525,11 @@ function askEmbedAliasPassphrase(currentHost, alias, failure) {
   const account = document.createElement("input");
   account.type = "hidden"; account.name = "username"; account.autocomplete = "username"; account.value = currentHost.replace(/\.did\.md$/, "@did.md");
   const heading = document.createElement("h1");
-  heading.textContent = "Change your alias";
+  heading.className = "embed-approve-heading";
+  heading.append("Change your alias");
+  const back = document.createElement("button");
+  back.type = "button"; back.className = "embed-approve-back"; back.textContent = "\u2190"; back.setAttribute("aria-label", "Back");
+  heading.append(back);
   const change = document.createElement("p");
   change.className = "embed-approve-note";
   change.textContent = `${currentHost.replace(/\.did\.md$/, "@did.md")} → ${alias}@${DOMAIN}`;
@@ -6540,12 +6541,8 @@ function askEmbedAliasPassphrase(currentHost, alias, failure) {
   const message = document.createElement("p");
   message.className = "embed-approve-error"; message.textContent = failure;
   const submit = document.createElement("button");
-  submit.type = "submit"; submit.textContent = "Change";
-  const back = document.createElement("button");
-  back.type = "button"; back.className = "embed-approve-cancel"; back.textContent = "Back";
-  const cancel = document.createElement("button");
-  cancel.type = "button"; cancel.className = "embed-approve-cancel"; cancel.textContent = "Cancel";
-  panel.append(account, heading, change, label, message, submit, back, cancel);
+  submit.type = "submit"; submit.textContent = "Change"; submit.className = "embed-approve-wide";
+  panel.append(account, heading, change, label, message, submit);
   document.body.append(panel);
   field.focus();
   return new Promise((resolve, reject) => {
@@ -6556,7 +6553,6 @@ function askEmbedAliasPassphrase(currentHost, alias, failure) {
       panel.requestSubmit(submit);
     });
     back.addEventListener("click", () => reject(Object.assign(new Error("Back."), { back: true })));
-    cancel.addEventListener("click", () => reject(new Error("Cancelled.")));
   });
 }
 

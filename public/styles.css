@@ -3629,3 +3629,6 @@ html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0
 #embed-approve .embed-alias-row input[type="text"] { display: block; width: auto; margin: 0; padding: 12px 0; border: 0; outline: 0; background: transparent; color: inherit; font: 14px ui-monospace, monospace; }
 #embed-approve .embed-alias-row .alias-status-icon { margin-left: auto; }
 #embed-approve .embed-alias-row .embed-mail-suffix { font: 14px ui-monospace, monospace; }
+#embed-approve .embed-approve-wide { display: block; width: 100%; margin: 8px 0 0; }
+#embed-approve .embed-approve-heading { display: flex; align-items: center; justify-content: space-between; }
+#embed-approve .embed-approve-back { margin: 0; padding: 2px 10px; background: transparent; color: inherit; border: 0; font-size: 20px; line-height: 1; }

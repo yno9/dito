@@ -3515,6 +3515,7 @@ html[data-embed="create"] .eyecatch-header,
 html[data-embed="create"] #eyecatch,
 html[data-embed="create"] .disposable-id-block,
 html[data-embed="create"] .creation-import-link,
+html[data-embed="create"] .creation-links,
 html[data-embed="create"] #creation-alias-toggle,
 html[data-embed="create"] #overview-null { display: none; }
 html[data-embed="create"] .panel { padding: 0; margin: 0; }
@@ -3650,3 +3651,9 @@ html:not([data-embed]) .embed-mail-suffix { flex: none; font: 200 0.9rem / 1.5re
 html:not([data-embed]) #creation-alias:focus { outline: none; }
 html:not([data-embed]) #creation-alias-status { top: 0; }
 html:not([data-embed]) #creation-alias-create-row > .field-value-row:focus-within { box-shadow: inset 0 0 0 1px #b8b8b8; }
+/* The landing: no switches in the headings; the choice is "Create without alias" under Create. */
+html:not([data-embed]) #creation-alias-toggle,
+html:not([data-embed]) #creation-did-toggle { display: none; }
+.creation-links { display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-top: 0.75rem; }
+.creation-links .creation-import-link { margin: 0; }
+.creation-links-sep { opacity: 0.4; }

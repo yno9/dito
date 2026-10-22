@@ -5133,6 +5133,7 @@ function updateCreationDidSuffix() {
 }
 
 function setCreationAliasEnabled(enabled) {
+  query("#creation-without-alias").textContent = enabled ? "Create without alias" : "Create with alias";
   query("#creation-alias-row").classList.toggle("alias-disabled", !enabled);
   query("#creation-alias-toggle").setAttribute("aria-checked", String(enabled));
   updateCreationDidSuffix();
@@ -5218,6 +5219,10 @@ query("#creation-alias-toggle").addEventListener("click", () => {
 });
 // The same switch, in the did:webvh heading: back to the alias.
 query("#creation-did-toggle").addEventListener("click", () => setCreationAliasEnabled(true));
+// Under Create: "Create without alias" switches the first field to the did:webvh, and back.
+query("#creation-without-alias").addEventListener("click", () => {
+  setCreationAliasEnabled(query("#creation-alias-toggle").getAttribute("aria-checked") !== "true");
+});
 
 // The "x" shown when the Alias is taken (an identity already exists there) clears the field, so the next
 // address can be typed at once.

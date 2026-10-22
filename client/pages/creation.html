@@ -178,7 +178,7 @@
       <div id="creation-actions-block" class="field-block alias-block">
         <div id="creation-create-actions" class="actions">
           <button id="publish-create" class="primary" type="button">
-            Create your ID
+            Create your did:webvh
           </button>
         </div>
         <div id="creation-confirm-actions" class="actions confirm-pill hidden">
@@ -187,15 +187,22 @@
             <span class="creation-confirm-saved-label">Yes</span>
           </button>
         </div>
-        <!-- Import: a plain hyperlink-style button under Create. -->
-        <button
-          type="button"
-          id="header-load-toggle"
-          class="creation-import-link"
-          aria-pressed="false"
-        >
-          Import did:webvh
-        </button>
+        <!-- Under Create: Import | Create without alias (the second switches the first field between the
+             alias and the did:webvh). -->
+        <div class="creation-links">
+          <button
+            type="button"
+            id="header-load-toggle"
+            class="creation-import-link"
+            aria-pressed="false"
+          >
+            Import
+          </button>
+          <span class="creation-links-sep" aria-hidden="true">|</span>
+          <button type="button" id="creation-without-alias" class="creation-import-link">
+            Create without alias
+          </button>
+        </div>
       </div>
     </form>
       <!-- ## h2 / [field] — Alias

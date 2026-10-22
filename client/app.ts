@@ -6512,7 +6512,7 @@ function askEmbedAliasName(currentHost, failure) {
     alias.focus();
   });
   return new Promise((resolve, reject) => {
-    panel.addEventListener("submit", event => { event.preventDefault(); next.disabled = true; resolve(alias.value.trim()); });
+    panel.addEventListener("submit", event => { event.preventDefault(); setButtonBusy(next, true); resolve(alias.value.trim()); });
   });
 }
 
@@ -6546,7 +6546,7 @@ function askEmbedAliasPassphrase(currentHost, alias, failure) {
   document.body.append(panel);
   field.focus();
   return new Promise((resolve, reject) => {
-    panel.addEventListener("submit", event => { event.preventDefault(); submit.disabled = true; resolve(field.value.trim()); });
+    panel.addEventListener("submit", event => { event.preventDefault(); setButtonBusy(submit, true); resolve(field.value.trim()); });
     field.addEventListener("input", () => {
       if (submit.disabled) return;
       try { seedFromMnemonic(field.value); } catch { return; }

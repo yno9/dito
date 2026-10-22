@@ -6304,21 +6304,36 @@ async function moveAliasInFrame() {
   await identityRestored;
   if (!storedIdentityRecord) throw new Error("This browser holds no identity to change.");
   const currentHost = decodeURIComponent(storedIdentityRecord.did.split(":").at(-1) ?? "");
+  // Two screens, so that no screen holds a text field and a password field together: a password manager
+  // takes the text field before a password field for the username and fills the saved one into it.
+  let alias = null;
   let failure = "";
   try {
     for (;;) {
-      const { alias, passphrase } = await askEmbedAlias(currentHost, failure);
+      while (!alias) {
+        const chosen = await askEmbedAliasName(currentHost, failure);
+        try { await checkEmbedAlias(currentHost, chosen); alias = chosen; failure = ""; }
+        catch (error) { failure = errorMessage(error); }
+      }
+      let passphrase;
+      try { passphrase = await askEmbedAliasPassphrase(currentHost, alias, failure); }
+      catch (error) { if (error?.back) { alias = null; failure = ""; continue; } throw error; }
       try { return await embedMoveAlias(currentHost, alias, passphrase); }
       catch (error) { failure = errorMessage(error); }
     }
   } finally { document.getElementById("embed-approve")?.remove(); }
 }
 
-async function embedMoveAlias(currentHost, alias, passphrase) {
+async function checkEmbedAlias(currentHost, alias) {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(alias)) throw new Error("Use lowercase letters, digits and hyphens.");
   const target = `${alias}.${DOMAIN}`;
   if (target === currentHost) throw new Error("That is already your address.");
   if ((await new WebvhHostingClient().probe(target)).available !== true) throw new Error("That address is taken.");
+}
+
+async function embedMoveAlias(currentHost, alias, passphrase) {
+  await checkEmbedAlias(currentHost, alias);
+  const target = `${alias}.${DOMAIN}`;
   const logUrl = `https://${currentHost}/.well-known/did.jsonl`;
   const logResponse = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
   if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
@@ -6437,7 +6452,8 @@ function askEmbedPassphrase(changes, failure) {
   });
 }
 
-function askEmbedAlias(currentHost, failure) {
+// Screen one: the new name only (no password field on it).
+function askEmbedAliasName(currentHost, failure) {
   document.getElementById("embed-approve")?.remove();
   const panel = document.createElement("form");
   panel.id = "embed-approve";
@@ -6446,17 +6462,40 @@ function askEmbedAlias(currentHost, failure) {
   const current = document.createElement("p");
   current.className = "embed-approve-note";
   current.textContent = `Now ${currentHost.replace(/\.did\.md$/, "@did.md")}`;
-  const aliasLabel = document.createElement("label");
-  aliasLabel.textContent = "New address";
+  const label = document.createElement("label");
+  label.textContent = "New address";
   const alias = document.createElement("input");
-  // Not a login field: a password manager takes a text field before a password field for the username and
-  // fills the saved one in. The account name it should use is the hidden one below.
   alias.type = "text"; alias.name = "new-address"; alias.autocomplete = "off"; alias.required = true; alias.placeholder = "name"; alias.spellcheck = false;
-  for (const ignore of ["data-1p-ignore", "data-lpignore", "data-bwignore", "data-form-type"]) alias.setAttribute(ignore, ignore === "data-form-type" ? "other" : "true");
+  alias.addEventListener("input", () => { const clean = alias.value.toLowerCase().split(/[@.]/)[0].replace(/[^a-z0-9-]/g, ""); if (clean !== alias.value) alias.value = clean; });
+  label.append(alias);
+  const message = document.createElement("p");
+  message.className = "embed-approve-error"; message.textContent = failure;
+  const next = document.createElement("button");
+  next.type = "submit"; next.textContent = "Next";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.className = "embed-approve-cancel"; cancel.textContent = "Cancel";
+  panel.append(heading, current, label, message, next, cancel);
+  document.body.append(panel);
+  alias.focus();
+  return new Promise((resolve, reject) => {
+    panel.addEventListener("submit", event => { event.preventDefault(); next.disabled = true; resolve(alias.value.trim()); });
+    cancel.addEventListener("click", () => reject(new Error("Cancelled.")));
+  });
+}
+
+// Screen two: the Passphrase for the account the password manager knows (the hidden current address);
+// the new name is only shown. A valid mnemonic changes the address without a click.
+function askEmbedAliasPassphrase(currentHost, alias, failure) {
+  document.getElementById("embed-approve")?.remove();
+  const panel = document.createElement("form");
+  panel.id = "embed-approve";
   const account = document.createElement("input");
   account.type = "hidden"; account.name = "username"; account.autocomplete = "username"; account.value = currentHost.replace(/\.did\.md$/, "@did.md");
-  alias.addEventListener("input", () => { const clean = alias.value.toLowerCase().split(/[@.]/)[0].replace(/[^a-z0-9-]/g, ""); if (clean !== alias.value) alias.value = clean; });
-  aliasLabel.append(alias);
+  const heading = document.createElement("h1");
+  heading.textContent = "Change your address";
+  const change = document.createElement("p");
+  change.className = "embed-approve-note";
+  change.textContent = `${currentHost.replace(/\.did\.md$/, "@did.md")} → ${alias}@${DOMAIN}`;
   const label = document.createElement("label");
   label.textContent = "Passphrase";
   const field = document.createElement("input");
@@ -6464,15 +6503,23 @@ function askEmbedAlias(currentHost, failure) {
   label.append(field);
   const message = document.createElement("p");
   message.className = "embed-approve-error"; message.textContent = failure;
-  const change = document.createElement("button");
-  change.type = "submit"; change.textContent = "Change";
+  const submit = document.createElement("button");
+  submit.type = "submit"; submit.textContent = "Change";
+  const back = document.createElement("button");
+  back.type = "button"; back.className = "embed-approve-cancel"; back.textContent = "Back";
   const cancel = document.createElement("button");
   cancel.type = "button"; cancel.className = "embed-approve-cancel"; cancel.textContent = "Cancel";
-  panel.append(account, heading, current, aliasLabel, label, message, change, cancel);
+  panel.append(account, heading, change, label, message, submit, back, cancel);
   document.body.append(panel);
-  alias.focus();
+  field.focus();
   return new Promise((resolve, reject) => {
-    panel.addEventListener("submit", event => { event.preventDefault(); change.disabled = true; resolve({ alias: alias.value.trim(), passphrase: field.value.trim() }); });
+    panel.addEventListener("submit", event => { event.preventDefault(); submit.disabled = true; resolve(field.value.trim()); });
+    field.addEventListener("input", () => {
+      if (submit.disabled) return;
+      try { seedFromMnemonic(field.value); } catch { return; }
+      panel.requestSubmit(submit);
+    });
+    back.addEventListener("click", () => reject(Object.assign(new Error("Back."), { back: true })));
     cancel.addEventListener("click", () => reject(new Error("Cancelled.")));
   });
 }

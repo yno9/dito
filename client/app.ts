@@ -6235,6 +6235,13 @@ if (EMBED) {
   };
   new MutationObserver(() => setLoginMode(query("#creation-alias-status").dataset.state === "unavailable"))
     .observe(query("#creation-alias-status"), { attributes: true, attributeFilter: ["data-state"] });
+  // Logging in: a complete Passphrase (a valid mnemonic, not a half-typed last word) logs in without a click.
+  query("#master-mnemonic").addEventListener("input", () => {
+    const button = query("#publish-create");
+    if (root.dataset.embedMode !== "login" || button.disabled) return;
+    try { seedFromMnemonic(query("#master-mnemonic").value); } catch { return; }
+    button.click();
+  });
   embedLoginStart = () => {
     const passphrase = query("#master-mnemonic").value.trim();
     if (!passphrase) { embedNotify({ event: "error", message: "Enter the Passphrase." }); return; }

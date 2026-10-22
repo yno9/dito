@@ -4174,7 +4174,7 @@ async function oauthDeliveryPlan(request, values) {
     };
   }
   target.hash = new URLSearchParams(payload).toString();
-  return { payload, go: () => location.replace(target.toString()) };
+  return { payload, url: target.toString(), go: () => location.replace(target.toString()) };
 }
 
 async function oauthDeliver(request, values) {
@@ -6392,6 +6392,7 @@ async function embedMoveAlias(currentHost, alias, passphrase) {
   // frame): the embedding page goes on to the save page (?embed=save), which reads these.
   try { sessionStorage.setItem(EMBED_SAVE_STORE, JSON.stringify({ did: movedDid, mail: target.replace(/\.did\.md$/, "@did.md"), passphrase, at: Date.now() })); }
   catch { /* storage blocked: the person is not asked to update the saved account */ }
+  setEmbedLoginStores();
   return { did: movedDid, host: target };
 }
 
@@ -6765,6 +6766,16 @@ function readEmbedSave() {
   return null;
 }
 
+// What the last page (the sign-in's own /authorize page) needs from the tab: that it is an embedded sign-in, and
+// where the embedding page is (its origin; biset restores its own page). The embedding page sends the tab to
+// /authorize itself; nothing in a URL decides this.
+function setEmbedLoginStores() {
+  try {
+    sessionStorage.setItem(EMBED_LOGIN_STORE, "1");
+    if (embedParentOrigin) sessionStorage.setItem(EMBED_RETURN_STORE, `${embedParentOrigin}/`);
+  } catch { /* the sign-in then does not run; Yes goes back */ }
+}
+
 function goToSavePage() {
   if (EMBED) embedNotify({ event: "save-page" });
   else {
@@ -6784,6 +6795,7 @@ function startEmbedSave(did) {
   try { sessionStorage.setItem(EMBED_SAVE_STORE, JSON.stringify({ did, mail, passphrase, at: Date.now() })); }
   catch { output("#create-result", "This browser blocks the storage the save step needs.", true); return; }
   embedSave = { did };
+  if (EMBED) setEmbedLoginStores();
   // Nothing changes on screen: the embedding page goes straight to "creating ." (and the landing goes
   // there itself, to the same pages). Only if it has not moved after a while does the button come back.
   goToSavePage();
@@ -6861,7 +6873,7 @@ if (EMBED_SAVE) {
     row.append(question, yes);
     return row;
   };
-  const confirmSaveForm = (saved, back) => {
+  const confirmSaveForm = (saved, back, onSubmit) => {
     // A visible account name outside the form (Bitwarden collects no hidden input), the form with the hidden
     // account name, the Passphrase and the submit button (Proton Pass); transparent, but full size.
     const visibleUsername = document.createElement("input");
@@ -6886,7 +6898,7 @@ if (EMBED_SAVE) {
     row.append(question, yes);
     // The Passphrase never reaches the server: only the account name is sent.
     form.addEventListener("formdata", event => event.formData.delete("password"));
-    form.addEventListener("submit", () => clearStores());
+    form.addEventListener("submit", event => { if (onSubmit && onSubmit(event) === false) return; clearStores(); });
     form.append(username, password, row);
     return [visibleUsername, form];
   };
@@ -6922,12 +6934,11 @@ if (EMBED_SAVE) {
       if (data && back && new URL(back).origin === location.origin) panel.append(...confirmSaveForm(data, back));
       else panel.append(confirmRow());
     } else {
-      // Yes while the sign-in is still working shows "creating ." until it is done.
+      // Yes is the same real submit as the landing's, to the relying party's callback address once the sign-in
+      // has produced its response. Yes before that shows "creating ." until it is done, and then goes on.
       let plan = null;
       let failure = null;
       let pressed = false;
-      let row = confirmRow(() => finish());
-      panel.append(row);
       const waiting = () => {
         const stage = document.createElement("div");
         stage.className = "embed-save-stage";
@@ -6937,12 +6948,17 @@ if (EMBED_SAVE) {
         stage.append(status);
         return stage;
       };
-      const finish = () => {
-        if (plan) { clearStores(); plan.go(); return; }
-        if (failure) { goBack(); return; }
+      const parts = data ? confirmSaveForm(data, "about:blank", event => {
+        if (plan && !plan.url) { event.preventDefault(); clearStores(); plan.go(); return false; }
+        if (plan) return true;
+        event.preventDefault();
+        if (failure) { goBack(); return false; }
         pressed = true;
-        row.replaceWith(row = waiting());
-      };
+        parts[1].querySelector(".embed-save-confirm").replaceWith(waiting());
+        return false;
+      }) : null;
+      if (parts) panel.append(...parts);
+      else panel.append(confirmRow());
       const fail = error => {
         failure = error;
         console.warn("[embedded sign-in]", error);
@@ -6950,7 +6966,7 @@ if (EMBED_SAVE) {
         note.className = "embed-save-error";
         note.textContent = `Could not sign in: ${error instanceof Error ? error.message : String(error)}`;
         panel.append(note);
-        if (pressed) finish();
+        if (pressed) goBack();
       };
       void (async () => {
         try {
@@ -6966,7 +6982,8 @@ if (EMBED_SAVE) {
           embedLoginDeliver = prepared => { plan = prepared; };
           try { await approveAuthorization(); } finally { embedLoginDeliver = null; }
           if (!plan) throw new Error("The sign-in did not produce a response.");
-          if (pressed) finish();
+          if (parts) parts[1].action = plan.url ?? "about:blank";
+          if (pressed) parts ? parts[1].requestSubmit() : plan.go();
         } catch (error) { fail(error); }
       })();
     }

@@ -66,3 +66,27 @@ test("public reads are CDN-cacheable (s-maxage), 404s and writes are not", async
     expect(other.headers.get("cache-control")).toMatch(/s-maxage=30/);
   }
 });
+
+test("a name that sounds like the service (postmaster, didmail, support ...) cannot be registered, and says so when asked", async () => {
+  await ready();
+  const key = keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
+  const next = keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
+  const publish = async (host: string) => {
+    const created = await createLog({
+      domain: host, signer: new Ed25519Signer(key), updateKeys: [key.multikey], nextKeyHashes: [await nextKeyHash(next.multikey)],
+      verificationMethods: [{ id: "#k", type: "Multikey", publicKeyMultibase: key.multikey }], authentication: ["#k"],
+    });
+    return viaHost(`https://${host}/.well-known/did.jsonl`, { method: "PUT", headers: { "content-type": "text/jsonl" }, body: serializeLog(created.log) });
+  };
+  for (const name of ["postmaster", "didmail", "support", "mailer-daemon", "xn--mail-6za"]) {
+    const refused = await publish(`${name}.did.md`);
+    expect([name, refused.status, (await refused.text()).trim()]).toEqual([name, 400, "this name is reserved"]);
+    const asked = await (await viaHost(`https://api.did.md/v1/availability?username=${name}`)).json() as { available: boolean; reserved?: boolean };
+    expect([name, asked.available, asked.reserved]).toEqual([name, false, true]);
+  }
+  // an ordinary name is unaffected, and says nothing about being reserved
+  const host = `ordinary${Date.now().toString(36)}.did.md`
+  expect((await publish(host)).status).toBe(201);
+  const taken = await (await viaHost(`https://api.did.md/v1/availability?username=${host.split(".")[0]}`)).json() as { available: boolean; reserved?: boolean };
+  expect([taken.available, taken.reserved]).toEqual([false, undefined]);
+});

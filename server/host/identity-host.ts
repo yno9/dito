@@ -26,6 +26,7 @@ import { validateLogAt, MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parse
 import { didToLogUrl as webvhDidToLogUrl, maySignIn, parseDid as webvhParseDid, verifyDataIntegrityProof as verifyProof, verifyProofSignature } from "../../packages/webvh/src/index.ts";
 import { multibaseDecode } from "didwebvh-ts";
 import { fetchWithHost } from "../host-fetch.ts";
+import { isReservedName } from "./reserved-names.ts";
 export { MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, parseWitnessFile, type Json, type Obj, type Entry, type Proof, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
 
 // Small helpers this host (and oauth-server.ts) use around the did:webvh log.
@@ -260,6 +261,8 @@ async function serveLog(request: Request, username: string, resource: string) {
     // resources remain limited to 1 MiB.
     const incoming = parseJsonl(await requestBody(request, resource === "did.jsonl" ? MAX_LOG_BYTES : MAX_REQUEST_BYTES));
     const existingText = await identityStore.read(username, "log"); const existing = existingText === null ? [] : parseJsonl(existingText);
+    // A name that sounds like the service itself is not given out (an identity already published under one keeps working).
+    if (!existing.length && isReservedName(username)) throw new Invalid("this name is reserved");
     let combined: Entry[];
     if (request.method === "POST") {
       if (!existing.length) throw new Invalid("POST requires an existing log; publish genesis with PUT");
@@ -476,7 +479,9 @@ export async function identityFetch(request: Request, url: URL): Promise<Respons
   }
   if (url.pathname === "/v1/availability" && request.method === "GET") {
     const username = safeName(url.searchParams.get("username") ?? "", "username");
-    return json(request, { available: (await identityStore.read(username, "log")) === null, didLog: `${identityOrigin(username)}/.well-known/did.jsonl` });
+    const taken = (await identityStore.read(username, "log")) !== null;
+    const reserved = !taken && isReservedName(username);
+    return json(request, { available: !taken && !reserved, ...(reserved ? { reserved: true } : {}), didLog: `${identityOrigin(username)}/.well-known/did.jsonl` });
   }
   // did:webvh Hosting Protocol capability document (SPEC-webvh-hosting.md §5):
   // lets a client tell "this host speaks the protocol" from "unknown".

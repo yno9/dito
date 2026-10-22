@@ -8,6 +8,8 @@
  * door to new ones (identity-host.ts, `serveLog`, first publish of a log).
  */
 
+import { hostLimits } from './limits.ts'
+
 const RESERVED = new Set([
   // the service and its parts
   'did', 'did-md', 'didmd', 'didmail', 'dito', 'biset', 'wallet', 'wallet-probe', 'mediator', 'oidc', 'oidc-bridge', 'oauth', 'auth', 'login', 'signin', 'signup', 'account', 'accounts', 'client', 'app', 'api', 'pds', 'relay', 'bridge', 'gateway',
@@ -21,10 +23,10 @@ const RESERVED = new Set([
   'noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'bounce', 'bounces', 'notifications', 'notification', 'alerts', 'robot', 'bot',
 ])
 
-/** Names added by the operator (comma separated, in `RESERVED_USERNAMES`), without touching the code. */
+/** Names added by the operator without touching the code: `RESERVED_USERNAMES` (comma separated), and the setting in v2 admin. */
 function extra(): Set<string> {
   const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {}
-  return new Set((env.RESERVED_USERNAMES ?? '').split(',').map(name => name.trim().toLowerCase()).filter(Boolean))
+  return new Set([...(env.RESERVED_USERNAMES ?? '').split(','), ...hostLimits().reservedNames].map(name => name.trim().toLowerCase()).filter(Boolean))
 }
 
 /** Whether `name` (an identity's username, already a lower-case DNS label) is one that may not be registered. */

@@ -320,3 +320,22 @@ When the page moves on, biset passes the request's query string to the save page
    try the combinations: the detector's result depended on the pair, not on a single element.
 4. Read the detector, not guesses: `@protontech/autofill` (`constants/selectors.js`, `constants/heuristics.js`,
    `utils/exclusion.js`, `features/v1/field.username*.js`) and `applications/pass-extension/src/app/content/services/form/form.tracker.ts`.
+
+
+## ID ホストの上限と v2 admin（2026-10-22）
+
+ID を誰でも作れる入口（`PUT {name}.did.md/.well-known/did.jsonl`）には、上限がなかった。いまは次を持つ（`server/host/limits.ts`）。値は **v2 admin から、再起動なしで**変えられる（`admin.manifest.json` が項目を v2 admin に伝え、`v2-admin-settings.ts` が管理側のスナップショットを読む。管理側が止まっても、最後の値か既定値で動く）。
+
+| 項目 | 既定 | 働き |
+|---|---|---|
+| `limits.createPerHour` | 60 | 新しい ID を 1 時間に受ける数（全体）。0 で作成を止める |
+| `limits.maxIdentities` | 20,000 | これだけ持ったら新しい ID は 503 |
+| `limits.maxLogBytes` | 256 KiB | did.jsonl の大きさ（以前は 16 MiB） |
+| `limits.maxWitnessBytes`、`limits.maxJsonBytes` | 256 KiB、64 KiB | witness、routing など |
+| `limits.maxConcurrentValidations` | 4 | 同時に署名を検証するログの数。超えたら待たせず 503 |
+| `names.reserved` | なし | 組み込みの予約名（`reserved-names.ts`）に足す名前 |
+
+- 新しい ID の上限と総数は、署名の検証の**前**（安い段階）で見る。
+- **停止**: `stop-identity` は、ID の文書（did.jsonl、did.json、atproto-did、routing）を 404 にし、書き込みを 403 にする。何も消さない。`release-identity` で戻す。停止の印は `disabled.json`。
+- v2 admin 用の口（`/admin/metrics`、`/admin/actions/*`）は、この処理の自分のポート（127.0.0.1:8787）にあり、Caddy は `/admin/*` を通さない。`/etc/v2-admin/tokens/dito` の Bearer トークンがなければ 404（トークンのファイルがなければ、口そのものがない）。
+- IP ごとの作成の上限は未実装（Caddy が Cloudflare の IP を信用する設定と一緒に入れる）。

@@ -20,13 +20,14 @@
  * files makes that dependency direction, and which half is essential, read
  * directly from the codebase instead of needing to be explained.
  */
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { validateLogAt, MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, serialise, parseWitnessFile, mirrorDocument, type Json, type Obj, type Entry, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
 import { didToLogUrl as webvhDidToLogUrl, maySignIn, parseDid as webvhParseDid, verifyDataIntegrityProof as verifyProof, verifyProofSignature } from "../../packages/webvh/src/index.ts";
 import { multibaseDecode } from "didwebvh-ts";
 import { fetchWithHost } from "../host-fetch.ts";
 import { isReservedName } from "./reserved-names.ts";
+import { counters, Gate, HourlyCount, hostLimits, Refusal } from "./limits.ts";
 export { MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, parseWitnessFile, type Json, type Obj, type Entry, type Proof, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
 
 // Small helpers this host (and oauth-server.ts) use around the did:webvh log.
@@ -63,7 +64,8 @@ export function proofObject(value: unknown, label: string) {
 const env: Record<string, string | undefined> = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 export const DATA_DIR = env.DATA_DIR ?? "./data";
 export const IDENTITY_DOMAIN = (env.IDENTITY_DOMAIN ?? "did.md").toLowerCase();
-export const MAX_LOG_BYTES = 16 << 20;
+/** The defaults; the live values come from hostLimits() (v2 admin can change them while the host runs). */
+export const MAX_LOG_BYTES = 256 << 10;
 /** Public reads may be served from a CDN for this long (SPEC-webvh-hosting.md §2).
  * Reads are ~all the traffic and never need this host; only writes do. Browsers
  * still revalidate (max-age=0); a CDN in front (Cloudflare) keeps a copy. A
@@ -71,8 +73,8 @@ export const MAX_LOG_BYTES = 16 << 20;
  * does). 404s are not cached, so a fresh identity is visible immediately. */
 export const PUBLIC_READ_CACHE_SECONDS = 30;
 const PUBLIC_READ_CACHE_CONTROL = `public, max-age=0, s-maxage=${PUBLIC_READ_CACHE_SECONDS}`;
-export const MAX_REQUEST_BYTES = 1 << 20;
-export const MAX_WITNESS_BYTES = 4 << 20;
+export const MAX_REQUEST_BYTES = 64 << 10;
+export const MAX_WITNESS_BYTES = 256 << 10;
 export const CORS_BASE = {
   "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
   "access-control-allow-headers": "authorization, content-type, dpop",
@@ -139,13 +141,15 @@ export async function exclusive<T>(key: string, task: () => Promise<T>): Promise
 // uses them directly for its own, unrelated single-file state (DCR client
 // registrations under a fixed "oauth" key, not a per-username slot) and has
 // no reason to route through this abstraction.
-export type IdentitySlot = "log" | "witness" | "web" | "routing";
-const SLOT_FILENAME: Record<IdentitySlot, string> = { log: "did.jsonl", witness: "did-witness.json", web: "did.json", routing: "routing.json" };
+export type IdentitySlot = "log" | "witness" | "web" | "routing" | "disabled";
+const SLOT_FILENAME: Record<IdentitySlot, string> = { log: "did.jsonl", witness: "did-witness.json", web: "did.json", routing: "routing.json", disabled: "disabled.json" };
 export interface IdentityStore {
   read(username: string, slot: IdentitySlot): Promise<string | null>;
   write(username: string, slot: IdentitySlot, content: string): Promise<void>;
   remove(username: string, slot: IdentitySlot): Promise<void>;
   exclusive<T>(username: string, task: () => Promise<T>): Promise<T>;
+  /** Every username that has anything stored (for the count and the numbers v2 admin shows); a backend that cannot says so by leaving it out. */
+  list?(): Promise<string[]>;
 }
 // The VPS/Node default: identical behavior to what this module always did
 // (same file layout, same in-process lock map), just reached through the
@@ -155,6 +159,7 @@ class FsIdentityStore implements IdentityStore {
   async write(username: string, slot: IdentitySlot, content: string): Promise<void> { atomicWrite(join(basePath(username), SLOT_FILENAME[slot]), content); }
   async remove(username: string, slot: IdentitySlot): Promise<void> { removeIfExists(join(basePath(username), SLOT_FILENAME[slot])); }
   exclusive<T>(username: string, task: () => Promise<T>): Promise<T> { return exclusive(username, task); }
+  async list(): Promise<string[]> { try { return readdirSync(join(DATA_DIR, "logs")); } catch { return []; } }
 }
 let identityStore: IdentityStore = new FsIdentityStore();
 /** Swaps the storage backend (e.g. a Durable-Object-backed store on a cloud
@@ -188,7 +193,48 @@ function usernameFor(request: Request) {
   return safeName(host.slice(0, -suffix.length), "username");
 }
 const RESOURCE_SLOT: Record<string, IdentitySlot> = { "did.jsonl": "log", "did-witness.json": "witness", "did.json": "web", "routing.json": "routing" };
+// ── What this host will take (limits.ts): how many identities, how fast new ones come, how many logs are checked at once ──
+const createdThisHour = new HourlyCount();
+const validations = new Gate();
+let knownIdentities: { count: number; at: number } | undefined;
+async function identityCount(): Promise<number> {
+  if (!identityStore.list) return 0;
+  if (!knownIdentities || Date.now() - knownIdentities.at > 60_000) knownIdentities = { count: (await identityStore.list()).length, at: Date.now() };
+  return knownIdentities.count;
+}
+/** The work that costs the processor (checking every proof of a log): only so many at once. */
+function validated<T>(task: () => Promise<T>): Promise<T> {
+  return validations.run(hostLimits().maxConcurrentValidations, task).catch(error => { if (error instanceof Refusal && error.status === 503) counters.refusedBusy += 1; throw error; });
+}
+/** A refusal that is not the request's fault, as a response (429/503 carry Retry-After). */
+export function refusalResponse(request: Request, error: Refusal): Response {
+  const response = text(request, error.message, error.status);
+  if (error.retryAfterSeconds) response.headers.set("retry-after", String(error.retryAfterSeconds));
+  return response;
+}
+
+/** For v2 admin (admin-api.ts): how the host stands. */
+export async function hostStats() {
+  return { identities: await identityCount(), createdThisHour: createdThisHour.count(), validating: validations.active, ...counters };
+}
+/** Stops (reason given) or lets back (null) an identity: its documents go dark to readers and it cannot be written; nothing is deleted. */
+export async function setIdentityStopped(username: string, reason: string | null): Promise<"stopped" | "released" | "unchanged" | "unknown"> {
+  safeName(username, "username");
+  return identityStore.exclusive(username, async () => {
+    if ((await identityStore.read(username, "log")) === null) return "unknown";
+    const stopped = (await identityStore.read(username, "disabled")) !== null;
+    if (reason === null) { if (!stopped) return "unchanged"; await identityStore.remove(username, "disabled"); return "released"; }
+    if (stopped) return "unchanged";
+    await identityStore.write(username, "disabled", `${JSON.stringify({ at: new Date().toISOString(), reason })}\n`);
+    return "stopped";
+  });
+}
+
 async function serveLog(request: Request, username: string, resource: string) {
+  // An identity an operator has stopped is gone to readers (as if never published) and closed to writers, until it is let back.
+  const stopped = (await identityStore.read(username, "disabled")) !== null;
+  if (stopped && request.method !== "GET") { counters.refusedStopped += 1; throw new Refusal(403, "this identity has been stopped by the operator"); }
+  if (stopped) return new Response("not found\n", { status: 404, headers: { ...publicDocumentCors(), "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   if (request.method === "GET") {
     if (resource === "atproto-did") {
       // atproto handle resolution reads a single plaintext account DID.
@@ -213,12 +259,12 @@ async function serveLog(request: Request, username: string, resource: string) {
       // it holds mutable service discovery metadata, not DID controller state.
       // It still must be authenticated by the current Sign/update key.  The
       // proof is transport-only and is never served back as routing data.
-      const incoming = asObj(JSON.parse(await requestBody(request, MAX_REQUEST_BYTES)), "routing document");
+      const incoming = asObj(JSON.parse(await requestBody(request, hostLimits().maxJsonBytes)), "routing document");
       const proof = proofObject(incoming.proof, "routing document.proof");
       const document: Obj = { ...incoming }; delete document.proof;
       const source = await identityStore.read(username, "log"); if (source === null) throw new Invalid("routing.json requires a published did.jsonl");
       const witnesses = await identityStore.read(username, "witness"); const witness = witnesses === null ? [] : parseWitnessFile(witnesses);
-      const checked = await validateLog(parseJsonl(source), witness, username);
+      const checked = await validated(() => validateLog(parseJsonl(source), witness, username));
       if (!(await verifyProof(document, proof, checked.parameters.updateKeys))) throw new Invalid("routing.json has no valid current update-key proof");
       await identityStore.write(username, "routing", `${JSON.stringify(document)}\n`);
       return new Response(null, { status: 204, headers: cors(request) });
@@ -233,8 +279,8 @@ async function serveLog(request: Request, username: string, resource: string) {
     return identityStore.exclusive(username, async () => {
       const source = await identityStore.read(username, "log"); if (source === null) return text(request, "not found", 404);
       const witnesses = await identityStore.read(username, "witness"); const witness = witnesses === null ? [] : parseWitnessFile(witnesses);
-      const checked = await validateLog(parseJsonl(source), witness, username);
-      const incoming = asObj(JSON.parse(await requestBody(request, MAX_REQUEST_BYTES)), "disconnect request");
+      const checked = await validated(() => validateLog(parseJsonl(source), witness, username));
+      const incoming = asObj(JSON.parse(await requestBody(request, hostLimits().maxJsonBytes)), "disconnect request");
       const proof = proofObject(incoming.proof, "disconnect request.proof");
       const document: Obj = { ...incoming }; delete document.proof;
       if (document.did !== checked.latest.state.id) throw new Invalid("disconnect request.did does not match the published DID");
@@ -249,20 +295,26 @@ async function serveLog(request: Request, username: string, resource: string) {
   if (request.method !== "PUT" && !(resource === "did.jsonl" && request.method === "POST")) return text(request, "method not allowed", 405);
   return identityStore.exclusive(username, async () => {
     if (resource === "did-witness.json") {
-      const body = await requestBody(request, MAX_WITNESS_BYTES); const witness = parseWitnessFile(body);
+      const body = await requestBody(request, hostLimits().maxWitnessBytes); const witness = parseWitnessFile(body);
       const existingLog = await identityStore.read(username, "log");
       // Future proofs are intentionally accepted before publishing the entry;
       // when a current log exists it must remain valid after this replacement.
-      if (existingLog !== null) await validateLog(parseJsonl(existingLog), witness, username);
+      if (existingLog !== null) await validated(() => validateLog(parseJsonl(existingLog), witness, username));
       await identityStore.write(username, "witness", JSON.stringify(witness));
       return new Response(null, { status: 204, headers: cors(request) });
     }
     // A complete portable history may be up to the log limit.  Ordinary JSON
     // resources remain limited to 1 MiB.
-    const incoming = parseJsonl(await requestBody(request, resource === "did.jsonl" ? MAX_LOG_BYTES : MAX_REQUEST_BYTES));
+    const incoming = parseJsonl(await requestBody(request, resource === "did.jsonl" ? hostLimits().maxLogBytes : hostLimits().maxJsonBytes));
     const existingText = await identityStore.read(username, "log"); const existing = existingText === null ? [] : parseJsonl(existingText);
     // A name that sounds like the service itself is not given out (an identity already published under one keeps working).
-    if (!existing.length && isReservedName(username)) throw new Invalid("this name is reserved");
+    if (!existing.length && isReservedName(username)) { counters.refusedReserved += 1; throw new Invalid("this name is reserved"); }
+    // A new identity: only so many, only so fast (before any proof is checked, which is the costly part).
+    if (!existing.length) {
+      const limits = hostLimits();
+      if (createdThisHour.count() >= limits.createPerHour) { counters.refusedRate += 1; throw new Refusal(429, "too many new identities this hour; try again later", 300); }
+      if (await identityCount() >= limits.maxIdentities) { counters.refusedCapacity += 1; throw new Refusal(503, "this host cannot take more identities"); }
+    }
     let combined: Entry[];
     if (request.method === "POST") {
       if (!existing.length) throw new Invalid("POST requires an existing log; publish genesis with PUT");
@@ -275,10 +327,11 @@ async function serveLog(request: Request, username: string, resource: string) {
       }
       combined = incoming;
     }
-    const full = serialise(combined); if (new TextEncoder().encode(full).byteLength > MAX_LOG_BYTES) throw new Invalid("log exceeds its 16 MiB limit");
+    const full = serialise(combined); if (new TextEncoder().encode(full).byteLength > hostLimits().maxLogBytes) throw new Invalid(`log exceeds its ${hostLimits().maxLogBytes} byte limit`);
     const witnesses = await identityStore.read(username, "witness"); const witness = witnesses === null ? [] : parseWitnessFile(witnesses);
-    const checked = await validateLog(combined, witness, username);
+    const checked = await validated(() => validateLog(combined, witness, username));
     await identityStore.write(username, "log", full);
+    if (!existing.length) { createdThisHour.add(); counters.created += 1; if (knownIdentities) knownIdentities.count += 1; }
     await identityStore.write(username, "web", `${JSON.stringify(mirrorDocument(checked.latest.state, checked.latest.state.id as string))}\n`);
     return new Response(null, { status: existing.length ? 204 : 201, headers: cors(request) });
   });
@@ -486,7 +539,7 @@ export async function identityFetch(request: Request, url: URL): Promise<Respons
   // did:webvh Hosting Protocol capability document (SPEC-webvh-hosting.md §5):
   // lets a client tell "this host speaks the protocol" from "unknown".
   if (url.pathname === "/.well-known/did-hosting.json" && request.method === "GET") {
-    return new Response(`${JSON.stringify({ protocol: "webvh-hosting/1", writes: true, delete: true, witness: true, maxLogBytes: MAX_LOG_BYTES })}\n`, {
+    return new Response(`${JSON.stringify({ protocol: "webvh-hosting/1", writes: true, delete: true, witness: true, maxLogBytes: hostLimits().maxLogBytes })}\n`, {
       headers: { ...publicDocumentCors(), "content-type": "application/json; charset=utf-8", "cache-control": "no-cache" },
     });
   }
@@ -498,10 +551,14 @@ export async function identityFetch(request: Request, url: URL): Promise<Respons
   if (resource === "did.jsonl" || resource === "did-witness.json") {
     let response: Response;
     try { response = await serveLog(request, usernameFor(request), resource); }
-    catch (error) { if (!(error instanceof Invalid)) throw error; response = text(request, error.message, 400); }
+    catch (error) {
+      if (error instanceof Refusal) response = refusalResponse(request, error);
+      else if (error instanceof Invalid) response = text(request, error.message, 400);
+      else throw error;
+    }
     const headers = new Headers(response.headers);
     for (const [name, value] of Object.entries(publicDocumentCors())) headers.set(name, value);
     return new Response(response.body, { status: response.status, headers });
   }
-  return await serveLog(request, usernameFor(request), resource);
+  try { return await serveLog(request, usernameFor(request), resource); } catch (error) { if (error instanceof Refusal) return refusalResponse(request, error); throw error; }
 }

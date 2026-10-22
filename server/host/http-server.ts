@@ -14,10 +14,26 @@
  */
 import { identityFetch, publicDocumentCors, cors, IDENTITY_DOMAIN, Invalid, PORT, text } from "./identity-host.ts";
 import { serve } from "../serve.ts";
+import { adminFetch } from "./admin-api.ts";
+import { LIMIT_SETTINGS, Refusal, setHostLimits, type HostLimits } from "./limits.ts";
+import { openSettings } from "./v2-admin-settings.ts";
+
+// The numbers v2 admin can change while the host runs (admin.manifest.json lists them). With no admin, the defaults are in force.
+const settings = openSettings({
+  service: "dito",
+  settings: LIMIT_SETTINGS,
+  ...(process.env.V2_ADMIN_SETTINGS_INTERVAL_MS ? { intervalMs: Number(process.env.V2_ADMIN_SETTINGS_INTERVAL_MS) } : {}),
+  onProblem: message => console.warn(`[settings] ${message}`),
+});
+setHostLimits((): HostLimits => ({
+  maxLogBytes: settings.get("limits.maxLogBytes"), maxWitnessBytes: settings.get("limits.maxWitnessBytes"), maxJsonBytes: settings.get("limits.maxJsonBytes"),
+  maxIdentities: settings.get("limits.maxIdentities"), maxConcurrentValidations: settings.get("limits.maxConcurrentValidations"),
+  createPerHour: settings.get("limits.createPerHour"), reservedNames: settings.get("names.reserved"),
+}));
 
 function fail(request: Request, error: unknown) {
-  const status = error instanceof Invalid ? 400 : 500;
-  const message = error instanceof Invalid ? error.message : "internal error";
+  const status = error instanceof Invalid ? 400 : error instanceof Refusal ? error.status : 500;
+  const message = error instanceof Invalid || error instanceof Refusal ? error.message : "internal error";
   // Same rule as identityFetch: protocol resources are readable from any origin.
   const pathname = (() => { try { return new URL(request.url).pathname; } catch { return ""; } })();
   const headers = pathname.startsWith("/.well-known/") ? publicDocumentCors() : cors(request);
@@ -37,6 +53,8 @@ const app = serve({
       }
       // Preflights for /.well-known/* belong to identityFetch (any origin allowed).
       if (request.method === "OPTIONS" && !url.pathname.startsWith("/.well-known/")) return new Response(null, { status: 204, headers: cors(request) });
+      const admin = await adminFetch(request, url);
+      if (admin) return admin;
       return (await identityFetch(request, url)) ?? text(request, "not found", 404);
     } catch (error) {
       console.error(error);

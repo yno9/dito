@@ -3592,7 +3592,7 @@ html[data-embed="create"]:not([data-embed-mode="login"]) #creation-passphrase-ro
 html[data-embed="create"]:not([data-embed-ready]) #app { visibility: hidden; }
 html[data-embed="create"] #creation-alias-create-row > .field-value-row { background: #f6f6f6; border-radius: 0.5rem; padding: 0 2.5rem 0 1rem; }
 html[data-embed="create"] #creation-alias { flex: 0 1 auto; min-width: 3ch; max-width: 100%; min-width: 0; margin: 0; padding: 1rem 0; background: transparent; }
-html[data-embed="create"] .embed-mail-suffix { flex: none; font: 200 1rem / 1.5rem monospace; color: var(--muted, #777); user-select: none; pointer-events: none; }
+html[data-embed="create"] .embed-mail-suffix, #embed-approve .embed-mail-suffix { flex: none; font: 200 1rem / 1.5rem monospace; color: var(--muted, #777); user-select: none; pointer-events: none; }
 html[data-embed="create"] #creation-alias:focus { outline: none; }
 html[data-embed="create"] #creation-alias-status { top: 0; }
 html[data-embed="create"] #creation-alias-create-row > .field-value-row:focus-within { box-shadow: inset 0 0 0 1px #b8b8b8; }
@@ -3623,3 +3623,8 @@ html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0
 #embed-approve button { margin: 8px 8px 0 0; padding: 10px 24px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font: inherit; cursor: pointer; }
 #embed-approve button:disabled { opacity: .5; }
 #embed-approve .embed-approve-cancel { background: transparent; color: inherit; border: 1px solid #ccc; }
+
+/* The address field of the embedded alias screen: the local part, "@did.md" joined to it, the availability mark. */
+#embed-approve .embed-alias-row { display: flex; align-items: center; margin-top: 6px; padding: 0 12px; border: 1px solid #ccc; border-radius: 8px; }
+#embed-approve .embed-alias-row input[type="text"] { display: block; width: auto; margin: 0; padding: 12px 0; border: 0; outline: 0; background: transparent; color: inherit; font: 14px ui-monospace, monospace; }
+#embed-approve .embed-alias-row .alias-status-icon { margin-left: auto; }

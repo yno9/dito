@@ -6464,10 +6464,19 @@ function askEmbedAliasName(currentHost, failure) {
   current.textContent = `Now ${currentHost.replace(/\.did\.md$/, "@did.md")}`;
   const label = document.createElement("label");
   label.textContent = "New address";
+  // The same address field as the sign-up's: the local part with "@did.md" joined to it, the same
+  // clean-up of what is typed or pasted, and the availability mark (checked a moment after typing).
+  const row = document.createElement("div");
+  row.className = "embed-alias-row";
   const alias = document.createElement("input");
-  alias.type = "text"; alias.name = "new-address"; alias.autocomplete = "off"; alias.required = true; alias.placeholder = "name"; alias.spellcheck = false;
-  alias.addEventListener("input", () => { const clean = alias.value.toLowerCase().split(/[@.]/)[0].replace(/[^a-z0-9-]/g, ""); if (clean !== alias.value) alias.value = clean; });
-  label.append(alias);
+  alias.type = "text"; alias.name = "new-address"; alias.autocomplete = "off"; alias.required = true; alias.placeholder = "alias"; alias.spellcheck = false;
+  alias.setAttribute("autocapitalize", "off"); alias.setAttribute("autocorrect", "off");
+  const suffix = document.createElement("span");
+  suffix.className = "embed-mail-suffix"; suffix.textContent = `@${DOMAIN}`; suffix.setAttribute("aria-hidden", "true");
+  const status = document.createElement("span");
+  status.className = "alias-status-icon hidden"; status.setAttribute("role", "status"); status.setAttribute("aria-label", "Alias availability unknown");
+  row.append(alias, suffix, status);
+  label.append(row);
   const message = document.createElement("p");
   message.className = "embed-approve-error"; message.textContent = failure;
   const next = document.createElement("button");
@@ -6477,6 +6486,33 @@ function askEmbedAliasName(currentHost, failure) {
   panel.append(heading, current, label, message, next, cancel);
   document.body.append(panel);
   alias.focus();
+  const fit = () => { alias.style.width = `calc(${Math.max(alias.value.length, alias.value ? 0 : alias.placeholder.length)}ch + 2px)`; };
+  fit();
+  let timer = null;
+  let token = 0;
+  alias.addEventListener("input", () => {
+    const clean = alias.value.toLowerCase().replace(/@.*$/, "").replace(/[^a-z0-9-]/g, "");
+    if (clean !== alias.value) alias.value = clean;
+    fit();
+    clearTimeout(timer);
+    const mine = ++token;
+    setAliasStatusIcon(status, "idle");
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(clean)) return;
+    setAliasStatusIcon(status, "checking", "Checking alias availability");
+    timer = setTimeout(async () => {
+      try {
+        const free = `${clean}.${DOMAIN}` !== currentHost && (await new WebvhHostingClient().probe(`${clean}.${DOMAIN}`, { capabilities: false })).available === true;
+        if (mine === token) setAliasStatusIcon(status, free ? "available" : "unavailable", free ? "Alias available" : "Alias unavailable");
+      } catch { if (mine === token) setAliasStatusIcon(status, "checking", "Alias availability unknown"); }
+    }, 350);
+  });
+  // The "x" shown when the address is taken clears the field, so the next one can be typed at once.
+  status.addEventListener("click", () => {
+    if (status.dataset.state !== "unavailable") return;
+    alias.value = "";
+    alias.dispatchEvent(new Event("input", { bubbles: true }));
+    alias.focus();
+  });
   return new Promise((resolve, reject) => {
     panel.addEventListener("submit", event => { event.preventDefault(); next.disabled = true; resolve(alias.value.trim()); });
     cancel.addEventListener("click", () => reject(new Error("Cancelled.")));

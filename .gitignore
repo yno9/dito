@@ -18,6 +18,8 @@
 !/vitest.config.ts
 !/tsconfig.json
 !/build.ts
+# what v2 admin is told about this host's settings (no secret in it: the ranges, the defaults, the words on the screen)
+!/admin.manifest.json
 
 # source
 !/client/

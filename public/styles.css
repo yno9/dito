@@ -3628,3 +3628,4 @@ html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0
 #embed-approve .embed-alias-row { display: flex; align-items: center; margin-top: 6px; padding: 0 12px; border: 1px solid #ccc; border-radius: 8px; }
 #embed-approve .embed-alias-row input[type="text"] { display: block; width: auto; margin: 0; padding: 12px 0; border: 0; outline: 0; background: transparent; color: inherit; font: 14px ui-monospace, monospace; }
 #embed-approve .embed-alias-row .alias-status-icon { margin-left: auto; }
+#embed-approve .embed-alias-row .embed-mail-suffix { font: 14px ui-monospace, monospace; }

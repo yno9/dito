@@ -6767,7 +6767,11 @@ function readEmbedSave() {
 
 function goToSavePage() {
   if (EMBED) embedNotify({ event: "save-page" });
-  else location.assign(`/?embed=save&return=${encodeURIComponent(`${location.origin}/`)}`);
+  else {
+    // The landing goes straight to the last page (the Passphrase and Yes); coming back is to itself.
+    try { sessionStorage.setItem(EMBED_RETURN_STORE, `${location.origin}/`); } catch { /* Yes then has nowhere to return to */ }
+    location.assign("/?embed=save-done");
+  }
 }
 
 function startEmbedSave(did) {
@@ -6969,12 +6973,7 @@ if (EMBED_SAVE) {
   } else {
     // All the person sees is "creating ." with its dots moving (CSS, in the HTML).
     const stage = panel.querySelector(".embed-save-stage");
-    let landingBack = null;
-    try { landingBack = validEmbedReturn(sessionStorage.getItem(EMBED_RETURN_STORE)); } catch { /* ignore */ }
-    if (data && landingBack && new URL(landingBack).origin === location.origin) {
-      // The landing: "creating ." is only the look; the save itself is the person's click on the last page.
-      setTimeout(() => location.replace("/?embed=save-done"), 900);
-    } else if (!data) {
+    if (!data) {
       panel.replaceChildren(confirmRow());
     } else {
       // The password input and the submit button are kept at full size and full opacity

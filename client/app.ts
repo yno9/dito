@@ -6434,7 +6434,12 @@ function askEmbedAlias(currentHost, failure) {
   const aliasLabel = document.createElement("label");
   aliasLabel.textContent = "New address";
   const alias = document.createElement("input");
-  alias.type = "text"; alias.autocomplete = "off"; alias.required = true; alias.placeholder = "name"; alias.spellcheck = false;
+  // Not a login field: a password manager takes a text field before a password field for the username and
+  // fills the saved one in. The account name it should use is the hidden one below.
+  alias.type = "text"; alias.name = "new-address"; alias.autocomplete = "off"; alias.required = true; alias.placeholder = "name"; alias.spellcheck = false;
+  for (const ignore of ["data-1p-ignore", "data-lpignore", "data-bwignore", "data-form-type"]) alias.setAttribute(ignore, ignore === "data-form-type" ? "other" : "true");
+  const account = document.createElement("input");
+  account.type = "hidden"; account.name = "username"; account.autocomplete = "username"; account.value = currentHost.replace(/\.did\.md$/, "@did.md");
   alias.addEventListener("input", () => { const clean = alias.value.toLowerCase().split(/[@.]/)[0].replace(/[^a-z0-9-]/g, ""); if (clean !== alias.value) alias.value = clean; });
   aliasLabel.append(alias);
   const label = document.createElement("label");
@@ -6448,7 +6453,7 @@ function askEmbedAlias(currentHost, failure) {
   change.type = "submit"; change.textContent = "Change";
   const cancel = document.createElement("button");
   cancel.type = "button"; cancel.className = "embed-approve-cancel"; cancel.textContent = "Cancel";
-  panel.append(heading, current, aliasLabel, label, message, change, cancel);
+  panel.append(account, heading, current, aliasLabel, label, message, change, cancel);
   document.body.append(panel);
   alias.focus();
   return new Promise((resolve, reject) => {

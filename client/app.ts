@@ -6316,7 +6316,12 @@ async function embedMoveAlias(currentHost, alias, passphrase) {
   if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
   await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
   await connectHostedData(target, { keepPrevious: true });
-  return { did: loaded.entries.at(-1).state.id, host: target };
+  const movedDid = loaded.entries.at(-1).state.id;
+  // A password manager offers to update the saved account only from a top-level page (never from this
+  // frame): the embedding page goes on to the save page (?embed=save), which reads these.
+  try { sessionStorage.setItem(EMBED_SAVE_STORE, JSON.stringify({ did: movedDid, mail: target.replace(/\.did\.md$/, "@did.md"), passphrase, at: Date.now() })); }
+  catch { /* storage blocked: the person is not asked to update the saved account */ }
+  return { did: movedDid, host: target };
 }
 
 // The signed request comes from the embedding page; the Passphrase never leaves this frame. What

@@ -6408,6 +6408,8 @@ function askEmbedPassphrase(changes, failure) {
   field.focus();
   return new Promise((resolve, reject) => {
     panel.addEventListener("submit", event => { event.preventDefault(); approve.disabled = true; resolve(field.value.trim()); });
+    // The 24th word completes the Passphrase: approve without a click on the button.
+    field.addEventListener("input", () => { if (!approve.disabled && field.value.trim().split(/\s+/).length === 24) panel.requestSubmit(approve); });
     cancel.addEventListener("click", () => reject(new Error("Cancelled.")));
   });
 }

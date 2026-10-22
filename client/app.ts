@@ -5390,6 +5390,7 @@ query("#creation-load-file").addEventListener("change", (event) => {
 // a form submit. Only #creation-confirm-saved below is a real submit button:
 // see its own comment for why that split exists.
 query("#publish-create").addEventListener("click", async () => {
+  if (EMBED) debugFormInventory("create click");
   if (EMBED && document.documentElement.dataset.embedMode === "login") { embedLoginStart?.(); return; }
   // After Create the embedded frame's button asks again to go to the save page.
   if (EMBED && embedSave) { embedNotify({ event: "save-page" }); return; }
@@ -6662,6 +6663,27 @@ const EMBED_SAVE_MAX_AGE_MS = 10 * 60_000;
 // shortest value on a machine without a rebuild, set in the wallet origin's console:
 //   localStorage.setItem("dito.saveDelayMs", "800")      (remove the key to go back)
 const EMBED_SAVE_AUTO_SUBMIT_MS = 1500;
+
+// What a password manager can see: every <form> and <input> of this document, as the console lists it.
+// Off unless localStorage "dito.debugForms" is "1" (set it in the wallet origin's console), for the
+// five minutes of finding out why a manager is silent (ARC.md 9.6).
+function debugFormInventory(label) {
+  try {
+    if (localStorage.getItem("dito.debugForms") !== "1") return;
+    const describe = element => {
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        tag: element.tagName.toLowerCase(), type: element.type, id: element.id, name: element.name,
+        value: element.type === "password" ? `<${element.value.length} chars>` : String(element.value ?? "").slice(0, 60),
+        w: Math.round(box.width), h: Math.round(box.height), display: style.display, visibility: style.visibility, opacity: style.opacity,
+        readOnly: element.readOnly === true, disabled: element.disabled === true, form: element.form?.id || (element.form ? "(form)" : ""),
+      };
+    };
+    console.info(`[dito-forms] ${label} ${location.pathname}${location.search.slice(0, 40)} t=${Math.round(performance.now())}ms`,
+      { forms: [...document.forms].map(form => ({ id: form.id, action: form.getAttribute("action"), method: form.method })), inputs: [...document.querySelectorAll("input,textarea")].map(describe) });
+  } catch (error) { console.info("[dito-forms] failed", error); }
+}
 const embedSaveDelayMs = () => {
   try { const value = Number(localStorage.getItem("dito.saveDelayMs")); return value >= 0 && value <= 10000 && localStorage.getItem("dito.saveDelayMs") !== null ? value : EMBED_SAVE_AUTO_SUBMIT_MS; }
   catch { return EMBED_SAVE_AUTO_SUBMIT_MS; }
@@ -6748,6 +6770,7 @@ function validEmbedLogin(value) {
 // the page that opened this tab.
 if (EMBED_SAVE) {
   document.documentElement.dataset.embed = "save";
+  for (const delay of [300, 1000, 2000]) setTimeout(() => debugFormInventory(`${EMBED_SAVE} +${delay}`), delay);
   let loginAction = null;
   if (EMBED_SAVE === "save") {
     const back = validEmbedReturn(EMBED_RETURN_PARAM);

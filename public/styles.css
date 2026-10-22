@@ -3638,7 +3638,7 @@ html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0
 
 /* The landing's create form always has two fields: the first is the alias (the default) or, switched, the
    did:webvh without an alias; then the Passphrase. Both first fields are in the DOM; one is shown. */
-html:not([data-embed]) #creation-alias-create-row { order: 0; }
+html:not([data-embed]) #creation-alias-create-row { order: 0; margin-bottom: 1rem; }
 html:not([data-embed]) #create-form-area:has(#creation-alias-toggle[aria-checked="true"]) > .disposable-id-block { display: none; }
 html:not([data-embed]) #create-form-area:has(#creation-alias-toggle[aria-checked="false"]) #creation-alias-create-row { display: none; }
 /* Alias (or did:webvh) and Create: the Passphrase is shown after "creating", on the last page, as in the embedded form. */

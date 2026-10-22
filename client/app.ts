@@ -6857,6 +6857,35 @@ if (EMBED_SAVE) {
     row.append(question, yes);
     return row;
   };
+  const confirmSaveForm = (saved, back) => {
+    // A visible account name outside the form (Bitwarden collects no hidden input), the form with the hidden
+    // account name, the Passphrase and the submit button (Proton Pass); transparent, but full size.
+    const visibleUsername = document.createElement("input");
+    visibleUsername.type = "text"; visibleUsername.id = "save-account"; visibleUsername.name = "username";
+    visibleUsername.autocomplete = "username"; visibleUsername.value = saved.mail ?? saved.did;
+    visibleUsername.tabIndex = -1; visibleUsername.className = "embed-save-user";
+    const form = document.createElement("form");
+    form.className = "embed-save-yes";
+    form.method = "post";
+    form.action = back;
+    const username = document.createElement("input");
+    username.type = "hidden"; username.id = "save-username"; username.name = "username"; username.value = visibleUsername.value;
+    const password = document.createElement("input");
+    password.type = "password"; password.id = "save-passphrase"; password.name = "password";
+    password.autocomplete = "new-password"; password.value = saved.passphrase; password.tabIndex = -1;
+    const row = document.createElement("div");
+    row.className = "embed-save-confirm";
+    const question = document.createElement("span");
+    question.textContent = "Saved the passphrase?";
+    const yes = document.createElement("button");
+    yes.type = "submit"; yes.className = "primary"; yes.textContent = "Yes";
+    row.append(question, yes);
+    // The Passphrase never reaches the server: only the account name is sent.
+    form.addEventListener("formdata", event => event.formData.delete("password"));
+    form.addEventListener("submit", () => clearStores());
+    form.append(username, password, row);
+    return [visibleUsername, form];
+  };
   if (EMBED_SAVE === "save-done") {
     // The last page. No form and no input here (a leftover password form reads as a
     // failed submit to the manager), and nothing moves on its own: the manager's prompt
@@ -6882,7 +6911,12 @@ if (EMBED_SAVE) {
       panel.append(field);
     }
     if (!EMBED_LOGIN) {
-      panel.append(confirmRow());
+      let back = null;
+      try { back = validEmbedReturn(sessionStorage.getItem(EMBED_RETURN_STORE)); } catch { /* ignore */ }
+      // The landing (it returns to its own origin): Yes is the person's real click on a real submit button of
+      // the form the password manager reads, the way the old confirm step was -- not a script's submit.
+      if (data && back && new URL(back).origin === location.origin) panel.append(...confirmSaveForm(data, back));
+      else panel.append(confirmRow());
     } else {
       // Yes while the sign-in is still working shows "creating ." until it is done.
       let plan = null;
@@ -6935,7 +6969,12 @@ if (EMBED_SAVE) {
   } else {
     // All the person sees is "creating ." with its dots moving (CSS, in the HTML).
     const stage = panel.querySelector(".embed-save-stage");
-    if (!data) {
+    let landingBack = null;
+    try { landingBack = validEmbedReturn(sessionStorage.getItem(EMBED_RETURN_STORE)); } catch { /* ignore */ }
+    if (data && landingBack && new URL(landingBack).origin === location.origin) {
+      // The landing: "creating ." is only the look; the save itself is the person's click on the last page.
+      setTimeout(() => location.replace("/?embed=save-done"), 900);
+    } else if (!data) {
       panel.replaceChildren(confirmRow());
     } else {
       // The password input and the submit button are kept at full size and full opacity

@@ -6327,8 +6327,8 @@ async function moveAliasInFrame() {
 async function checkEmbedAlias(currentHost, alias) {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(alias)) throw new Error("Use lowercase letters, digits and hyphens.");
   const target = `${alias}.${DOMAIN}`;
-  if (target === currentHost) throw new Error("That is already your address.");
-  if ((await new WebvhHostingClient().probe(target)).available !== true) throw new Error("That address is taken.");
+  if (target === currentHost) throw new Error("That is already your alias.");
+  if ((await new WebvhHostingClient().probe(target)).available !== true) throw new Error("That alias is taken.");
 }
 
 async function embedMoveAlias(currentHost, alias, passphrase) {
@@ -6458,12 +6458,12 @@ function askEmbedAliasName(currentHost, failure) {
   const panel = document.createElement("form");
   panel.id = "embed-approve";
   const heading = document.createElement("h1");
-  heading.textContent = "Change your address";
+  heading.textContent = "Change your alias";
   const current = document.createElement("p");
   current.className = "embed-approve-note";
   current.textContent = `Now ${currentHost.replace(/\.did\.md$/, "@did.md")}`;
   const label = document.createElement("label");
-  label.textContent = "New address";
+  label.textContent = "New alias";
   // The same address field as the sign-up's: the local part with "@did.md" joined to it, the same
   // clean-up of what is typed or pasted, and the availability mark (checked a moment after typing).
   const row = document.createElement("div");
@@ -6528,7 +6528,7 @@ function askEmbedAliasPassphrase(currentHost, alias, failure) {
   const account = document.createElement("input");
   account.type = "hidden"; account.name = "username"; account.autocomplete = "username"; account.value = currentHost.replace(/\.did\.md$/, "@did.md");
   const heading = document.createElement("h1");
-  heading.textContent = "Change your address";
+  heading.textContent = "Change your alias";
   const change = document.createElement("p");
   change.className = "embed-approve-note";
   change.textContent = `${currentHost.replace(/\.did\.md$/, "@did.md")} → ${alias}@${DOMAIN}`;

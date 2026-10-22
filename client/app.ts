@@ -5426,7 +5426,7 @@ query("#creation-load-file").addEventListener("change", (event) => {
 // see its own comment for why that split exists.
 query("#publish-create").addEventListener("click", async () => {
   if (EMBED) debugFormInventory("create click");
-  if (EMBED && document.documentElement.dataset.embedMode === "login") { embedLoginStart?.(); return; }
+  if (document.documentElement.dataset.embedMode === "login") { embedLoginStart?.(); return; }
   // After Create the embedded frame's button asks again to go to the save page.
   if (embedSave) { goToSavePage(); return; }
   if (!draft) return;
@@ -6172,6 +6172,65 @@ function packMasonry(container) {
 }
 
 
+// The create form's behaviour shared by the landing and the embedded frame: the Mail address already has an
+// identity (its did.jsonl exists): the same form logs in. The Passphrase field is then typed into instead of
+// filled, the button says Log in, and a complete Passphrase logs in without a click.
+function setupMailCreateForm() {
+  const root = document.documentElement;
+  const button = query("#publish-create");
+  const createLabel = button.textContent.trim() || "Create";
+  const setLoginMode = on => {
+    if (on === (root.dataset.embedMode === "login")) return;
+    const field = query("#master-mnemonic");
+    if (on) {
+      root.dataset.embedMode = "login";
+      field.value = "";
+      field.autocomplete = "current-password";
+      field.readOnly = false;
+      button.textContent = "Log in";
+    } else {
+      delete root.dataset.embedMode;
+      field.autocomplete = "new-password";
+      button.textContent = createLabel;
+      showDraftPhrase();
+    }
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  new MutationObserver(() => setLoginMode(query("#creation-alias-status").dataset.state === "unavailable"))
+    .observe(query("#creation-alias-status"), { attributes: true, attributeFilter: ["data-state"] });
+  query("#master-mnemonic").addEventListener("input", () => {
+    if (root.dataset.embedMode !== "login" || button.disabled) return;
+    try { seedFromMnemonic(query("#master-mnemonic").value); } catch { return; }
+    button.click();
+  });
+}
+
+// The landing logs in itself: the identity at the typed alias is read from its published log and unlocked
+// with the Passphrase, which loads it into this browser.
+async function landingLogin() {
+  const button = query("#publish-create");
+  const passphrase = query("#master-mnemonic").value.trim();
+  if (!passphrase) { output("#create-result", "Enter the Passphrase.", true); return; }
+  setButtonBusy(button, true);
+  try {
+    const host = selectedCreationAliasHost();
+    const logUrl = `https://${host}/.well-known/did.jsonl`;
+    const logResponse = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
+    if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
+    const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
+    if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+    await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
+  } catch (error) {
+    output("#create-result", errorMessage(error), true);
+    setButtonBusy(button, false);
+  }
+}
+
+if (!EMBED && !EMBED_SAVE && !EMBED_LOGIN && !EMBED_APPROVE && !EMBED_ALIAS) {
+  setupMailCreateForm();
+  embedLoginStart = landingLogin;
+}
+
 // ── Embedded create (biset landing) ─────────────────────────────────────────
 // Rendered inside an iframe on a page we trust to frame us (the server sends
 // frame-ancestors; this is the second check). The whole form is ours -- the
@@ -6223,35 +6282,7 @@ if (EMBED) {
     }
     embedNotify({ event: "existing", did: storedIdentityRecord.did });
   });
-  // The Mail address already has an identity (its did.jsonl exists): the same form logs in. The
-  // Passphrase field is then typed into instead of filled, and the button says Log in.
-  const setLoginMode = on => {
-    if (on === (root.dataset.embedMode === "login")) return;
-    const field = query("#master-mnemonic");
-    const button = query("#publish-create");
-    if (on) {
-      root.dataset.embedMode = "login";
-      field.value = "";
-      field.autocomplete = "current-password";
-      field.readOnly = false;
-      button.textContent = "Log in";
-    } else {
-      delete root.dataset.embedMode;
-      field.autocomplete = "new-password";
-      button.textContent = "Create";
-      showDraftPhrase();
-    }
-    field.dispatchEvent(new Event("input", { bubbles: true }));
-  };
-  new MutationObserver(() => setLoginMode(query("#creation-alias-status").dataset.state === "unavailable"))
-    .observe(query("#creation-alias-status"), { attributes: true, attributeFilter: ["data-state"] });
-  // Logging in: a complete Passphrase (a valid mnemonic, not a half-typed last word) logs in without a click.
-  query("#master-mnemonic").addEventListener("input", () => {
-    const button = query("#publish-create");
-    if (root.dataset.embedMode !== "login" || button.disabled) return;
-    try { seedFromMnemonic(query("#master-mnemonic").value); } catch { return; }
-    button.click();
-  });
+  setupMailCreateForm();
   embedLoginStart = () => {
     const passphrase = query("#master-mnemonic").value.trim();
     if (!passphrase) { embedNotify({ event: "error", message: "Enter the Passphrase." }); return; }

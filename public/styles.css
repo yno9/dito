@@ -3642,4 +3642,11 @@ html:not([data-embed]) #creation-alias-create-row { order: 0; }
 html:not([data-embed]) #create-form-area:has(#creation-alias-toggle[aria-checked="true"]) > .disposable-id-block { display: none; }
 html:not([data-embed]) #create-form-area:has(#creation-alias-toggle[aria-checked="false"]) #creation-alias-create-row { display: none; }
 /* Alias (or did:webvh) and Create: the Passphrase is shown after "creating", on the last page, as in the embedded form. */
-html:not([data-embed]) #create-load-form:not(.creation-load-mode) #creation-passphrase-row { display: none; }
+html:not([data-embed]):not([data-embed-mode="login"]) #create-load-form:not(.creation-load-mode) #creation-passphrase-row { display: none; }
+/* The landing's alias field: the same grey box holding the local part, the fixed "@did.md" and the availability mark. */
+html:not([data-embed]) #creation-alias-create-row > .field-value-row { background: #f6f6f6; border-radius: 0.5rem; padding: 0 2.5rem 0 1rem; }
+html:not([data-embed]) #creation-alias { flex: 0 1 auto; min-width: 0; max-width: 100%; margin: 0; padding: 1rem 0; background: transparent; }
+html:not([data-embed]) .embed-mail-suffix { flex: none; font: 200 0.9rem / 1.5rem ui-monospace, monospace; color: var(--muted, #777); user-select: none; pointer-events: none; }
+html:not([data-embed]) #creation-alias:focus { outline: none; }
+html:not([data-embed]) #creation-alias-status { top: 0; }
+html:not([data-embed]) #creation-alias-create-row > .field-value-row:focus-within { box-shadow: inset 0 0 0 1px #b8b8b8; }

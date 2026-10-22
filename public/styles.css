@@ -774,7 +774,6 @@ button.primary:not(#publish-create) {
 #creation-create-actions {
   display: flex;
   width: 100%;
-  margin-top: 2rem;
 }
 
 /* Import: hyperlink look, centered under the Create pill. */

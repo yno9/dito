@@ -6277,7 +6277,7 @@ if (EMBED_APPROVE) {
       }
     } finally { walletAuthorization = null; document.getElementById("embed-approve")?.remove(); }
   };
-  serveEmbedPort({ "wallet.approve": approve });
+  serveEmbedPort({ "wallet.approve": approve, "wallet.moveAlias": moveAliasInFrame });
 }
 
 // ?embed=alias: the frame asks for the new address and the Passphrase itself (a portability move
@@ -6285,20 +6285,23 @@ if (EMBED_APPROVE) {
 // location keeps serving its log, so the old DID still resolves for whoever has it.
 if (EMBED_ALIAS) {
   document.documentElement.dataset.embed = "approve";
-  const move = async () => {
-    await identityRestored;
-    if (!storedIdentityRecord) throw new Error("This browser holds no identity to change.");
-    const currentHost = decodeURIComponent(storedIdentityRecord.did.split(":").at(-1) ?? "");
-    let failure = "";
-    try {
-      for (;;) {
-        const { alias, passphrase } = await askEmbedAlias(currentHost, failure);
-        try { return await embedMoveAlias(currentHost, alias, passphrase); }
-        catch (error) { failure = errorMessage(error); }
-      }
-    } finally { document.getElementById("embed-approve")?.remove(); }
-  };
-  serveEmbedPort({ "wallet.moveAlias": move });
+  serveEmbedPort({ "wallet.moveAlias": moveAliasInFrame });
+}
+
+// Also answered by the approve frame (?embed=approve), which the embedding page keeps loaded and
+// waiting: the address screen then opens at once instead of after a cold start of this page.
+async function moveAliasInFrame() {
+  await identityRestored;
+  if (!storedIdentityRecord) throw new Error("This browser holds no identity to change.");
+  const currentHost = decodeURIComponent(storedIdentityRecord.did.split(":").at(-1) ?? "");
+  let failure = "";
+  try {
+    for (;;) {
+      const { alias, passphrase } = await askEmbedAlias(currentHost, failure);
+      try { return await embedMoveAlias(currentHost, alias, passphrase); }
+      catch (error) { failure = errorMessage(error); }
+    }
+  } finally { document.getElementById("embed-approve")?.remove(); }
 }
 
 async function embedMoveAlias(currentHost, alias, passphrase) {

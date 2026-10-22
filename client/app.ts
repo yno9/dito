@@ -314,6 +314,11 @@ const EMBED = (() => {
 const EMBED_APPROVE = (() => {
   try { return window.top !== window && new URLSearchParams(location.search).get("embed") === "approve"; } catch { return false; }
 })();
+// Embedded in biset's account page (?embed=alias): changes the address (the DID's host) of the
+// identity this browser holds; the new DID comes back over the MessageChannel.
+const EMBED_ALIAS = (() => {
+  try { return window.top !== window && new URLSearchParams(location.search).get("embed") === "alias"; } catch { return false; }
+})();
 // The top-level pages the embedded create form sends the tab to, to save the
 // Passphrase (see "Embedded create" at the end of this file): ?embed=save shows
 // the form, ?embed=save-done is the page its POST lands on. Both read their query
@@ -3422,7 +3427,7 @@ function closeConnectForm() {
 // entry that moves it (see preparePortableImport) -- the existing entries
 // are otherwise sent untouched, since PUT requires the prior log as a
 // byte-for-byte prefix.
-async function connectHostedData(targetHost) {
+async function connectHostedData(targetHost, { keepPrevious = false } = {}) {
   const parsed = splitHostedTarget(targetHost);
   if (!parsed) throw new Error("Enter a full host, e.g. myname.did.md.");
   const currentDid = loaded.entries.at(-1).state.id;
@@ -3475,7 +3480,7 @@ async function connectHostedData(targetHost) {
   // ordering it this way means a failure here never leaves the identity
   // unhosted, only an old, still-verifiable copy sitting on the previous
   // host until this is retried (via Disconnect) or it's cleaned up by hand.
-  if (previousDid && previousSign) {
+  if (previousDid && previousSign && !keepPrevious) {
     try { await disconnectHostedDataAt(previousDid, previousSign); }
     catch (error) {
       output("#loaded-identity-message", `Connected as ${targetHost}, but the previous alias could not be removed: ${errorMessage(error)}`, true);
@@ -6275,6 +6280,42 @@ if (EMBED_APPROVE) {
   serveEmbedPort({ "wallet.approve": approve });
 }
 
+// ?embed=alias: the frame asks for the new address and the Passphrase itself (a portability move
+// needs the Master seed), moves the DID there and answers `wallet.moveAlias` with the new DID. The old
+// location keeps serving its log, so the old DID still resolves for whoever has it.
+if (EMBED_ALIAS) {
+  document.documentElement.dataset.embed = "approve";
+  const move = async () => {
+    await identityRestored;
+    if (!storedIdentityRecord) throw new Error("This browser holds no identity to change.");
+    const currentHost = decodeURIComponent(storedIdentityRecord.did.split(":").at(-1) ?? "");
+    let failure = "";
+    try {
+      for (;;) {
+        const { alias, passphrase } = await askEmbedAlias(currentHost, failure);
+        try { return await embedMoveAlias(currentHost, alias, passphrase); }
+        catch (error) { failure = errorMessage(error); }
+      }
+    } finally { document.getElementById("embed-approve")?.remove(); }
+  };
+  serveEmbedPort({ "wallet.moveAlias": move });
+}
+
+async function embedMoveAlias(currentHost, alias, passphrase) {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(alias)) throw new Error("Use lowercase letters, digits and hyphens.");
+  const target = `${alias}.${DOMAIN}`;
+  if (target === currentHost) throw new Error("That is already your address.");
+  if ((await new WebvhHostingClient().probe(target)).available !== true) throw new Error("That address is taken.");
+  const logUrl = `https://${currentHost}/.well-known/did.jsonl`;
+  const logResponse = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
+  if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
+  const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
+  if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+  await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
+  await connectHostedData(target, { keepPrevious: true });
+  return { did: loaded.entries.at(-1).state.id, host: target };
+}
+
 // The signed request comes from the embedding page; the Passphrase never leaves this frame. What
 // goes back is the relying party's response, which is public by design (fragment payload).
 async function embedApprovalFor(request, host) {
@@ -6367,6 +6408,41 @@ function askEmbedPassphrase(changes, failure) {
   field.focus();
   return new Promise((resolve, reject) => {
     panel.addEventListener("submit", event => { event.preventDefault(); approve.disabled = true; resolve(field.value.trim()); });
+    cancel.addEventListener("click", () => reject(new Error("Cancelled.")));
+  });
+}
+
+function askEmbedAlias(currentHost, failure) {
+  document.getElementById("embed-approve")?.remove();
+  const panel = document.createElement("form");
+  panel.id = "embed-approve";
+  const heading = document.createElement("h1");
+  heading.textContent = "Change your address";
+  const current = document.createElement("p");
+  current.className = "embed-approve-note";
+  current.textContent = `Now ${currentHost.replace(/\.did\.md$/, "@did.md")}`;
+  const aliasLabel = document.createElement("label");
+  aliasLabel.textContent = "New address";
+  const alias = document.createElement("input");
+  alias.type = "text"; alias.autocomplete = "off"; alias.required = true; alias.placeholder = "name"; alias.spellcheck = false;
+  alias.addEventListener("input", () => { const clean = alias.value.toLowerCase().split(/[@.]/)[0].replace(/[^a-z0-9-]/g, ""); if (clean !== alias.value) alias.value = clean; });
+  aliasLabel.append(alias);
+  const label = document.createElement("label");
+  label.textContent = "Passphrase";
+  const field = document.createElement("input");
+  field.type = "password"; field.autocomplete = "current-password"; field.required = true;
+  label.append(field);
+  const message = document.createElement("p");
+  message.className = "embed-approve-error"; message.textContent = failure;
+  const change = document.createElement("button");
+  change.type = "submit"; change.textContent = "Change";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.className = "embed-approve-cancel"; cancel.textContent = "Cancel";
+  panel.append(heading, current, aliasLabel, label, message, change, cancel);
+  document.body.append(panel);
+  alias.focus();
+  return new Promise((resolve, reject) => {
+    panel.addEventListener("submit", event => { event.preventDefault(); change.disabled = true; resolve({ alias: alias.value.trim(), passphrase: field.value.trim() }); });
     cancel.addEventListener("click", () => reject(new Error("Cancelled.")));
   });
 }

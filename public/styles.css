@@ -3616,8 +3616,9 @@ html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0
 #embed-approve { padding: 20px; font: 15px/1.5 system-ui, sans-serif; color: inherit; }
 #embed-approve h1 { margin: 0 0 12px; font-size: 18px; }
 #embed-approve ul { margin: 0 0 16px; padding-left: 20px; font-size: 13px; overflow-wrap: anywhere; }
-#embed-approve label { display: block; font-size: 13px; opacity: .7; }
-#embed-approve input[type="password"] { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font: 14px ui-monospace, monospace; }
+#embed-approve .embed-approve-note { margin: 0 0 12px; font-size: 13px; opacity: .7; }
+#embed-approve label { display: block; margin-top: 10px; font-size: 13px; opacity: .7; }
+#embed-approve input[type="password"], #embed-approve input[type="text"] { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font: 14px ui-monospace, monospace; }
 #embed-approve .embed-approve-error { min-height: 1.5em; margin: 8px 0 0; color: #d33; font-size: 13px; }
 #embed-approve button { margin: 8px 8px 0 0; padding: 10px 24px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font: inherit; cursor: pointer; }
 #embed-approve button:disabled { opacity: .5; }

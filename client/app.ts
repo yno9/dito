@@ -6287,6 +6287,8 @@ if (EMBED) {
     }
     embedNotify({ event: "existing", did: storedIdentityRecord.did });
   });
+  // biset's frame says just "Create" (the landing keeps "Create your did:webvh").
+  query("#publish-create").textContent = "Create";
   setupMailCreateForm();
   embedLoginStart = () => {
     const passphrase = query("#master-mnemonic").value.trim();

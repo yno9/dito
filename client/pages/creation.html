@@ -20,7 +20,8 @@
           aria-label="Generate a new identity"
         >
           <span class="field-heading-label">
-            did:web ID
+            did:webvh
+            <span class="alias-hint">(without alias)</span>
             <span
               id="create-regenerate-feedback"
               class="copy-feedback hidden"
@@ -48,6 +49,14 @@
             ></path>
           </svg>
         </button>
+        <button
+          id="creation-did-toggle"
+          class="creation-alias-toggle"
+          type="button"
+          role="switch"
+          aria-checked="false"
+          aria-label="Use alias"
+        ></button>
       </h2>
       <div id="create-identity-did" class="field-value did-value"></div>
     </div>

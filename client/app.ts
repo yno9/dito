@@ -5140,9 +5140,39 @@ function setCreationAliasEnabled(enabled) {
   else resetCreationAliasStatus();
 }
 
+// The address field as the embedded form has it, and now the landing's too: the local part, "@did.md" joined to
+// it (the DID's host is <local>.did.md, which selectedCreationAliasHost() builds from the value), whatever is
+// typed or pasted (including "name@did.md") cleaned to a valid local part. Once per page.
+function prepareMailAliasField() {
+  const alias = query("#creation-alias");
+  if (alias.dataset.mailReady) return;
+  alias.dataset.mailReady = "1";
+  alias.value = alias.value.replace(/\.did\.md$/, "");
+  alias.placeholder = "alias";
+  const suffix = document.createElement("span");
+  suffix.className = "embed-mail-suffix";
+  suffix.textContent = "@did.md";
+  suffix.setAttribute("aria-hidden", "true");
+  alias.after(suffix);
+  // Runs before the form's own input handler (capture): whatever is typed or pasted leaves a valid local part.
+  // The field is exactly as wide as what is typed (the font is monospace, so a character is one "ch"), so
+  // "@did.md" is joined to the text: x@did.md, xx@did.md, xxx@did.md. The empty field is as wide as its
+  // placeholder; 2px keep the caret visible at the end.
+  const fit = () => { alias.style.width = `calc(${Math.max(alias.value.length, alias.value ? 0 : alias.placeholder.length)}ch + 2px)`; };
+  alias.addEventListener("input", () => {
+    const clean = alias.value.toLowerCase().replace(/@.*$/, "").replace(/[^a-z0-9-]/g, "");
+    if (clean !== alias.value) alias.value = clean;
+    fit();
+  }, { capture: true });
+  fit();
+}
+
 function resetCreationAlias() {
-  query("#creation-alias").value = randomAlias();
-  setCreationAliasEnabled(false);
+  // The address is the local part ("@did.md" is drawn beside it); the landing starts with an alias (two fields:
+  // alias and Passphrase), the did:webvh without one is the other choice.
+  query("#creation-alias").value = randomAlias().replace(/\.did\.md$/, "");
+  prepareMailAliasField();
+  setCreationAliasEnabled(!EMBED);
 }
 
 function resetCreationAliasStatus() {
@@ -5186,6 +5216,8 @@ query("#creation-alias-toggle").addEventListener("click", () => {
   const enabled = query("#creation-alias-toggle").getAttribute("aria-checked") !== "true";
   setCreationAliasEnabled(enabled);
 });
+// The same switch, in the did:webvh heading: back to the alias.
+query("#creation-did-toggle").addEventListener("click", () => setCreationAliasEnabled(true));
 
 // The "x" shown when the Alias is taken (an identity already exists there) clears the field, so the next
 // address can be typed at once.
@@ -5396,7 +5428,7 @@ query("#publish-create").addEventListener("click", async () => {
   if (EMBED) debugFormInventory("create click");
   if (EMBED && document.documentElement.dataset.embedMode === "login") { embedLoginStart?.(); return; }
   // After Create the embedded frame's button asks again to go to the save page.
-  if (EMBED && embedSave) { embedNotify({ event: "save-page" }); return; }
+  if (embedSave) { goToSavePage(); return; }
   if (!draft) return;
   const button = query("#publish-create");
   setButtonBusy(button, true);
@@ -5479,14 +5511,10 @@ query("#publish-create").addEventListener("click", async () => {
         const usernameField = query("#create-username");
         if (usernameField) usernameField.value = "";
       } else {
-        if (EMBED) {
-          // A frame never gets the save prompt: hand the Passphrase to a popup.
-          startEmbedSave(finalEntry.state.id);
-        } else {
-          // The Alias changed the DID's host part: save the final one.
-          setHiddenUsername(finalEntry.state.id);
-          setCreationConfirmStep(true);
-        }
+        // A frame never gets the save prompt (the tab goes to the Wallet's save page, ARC.md 9.4), and the
+        // landing makes an identity the same way: alias (or did:webvh) and Create, then "creating .", then
+        // the Passphrase to save.
+        startEmbedSave(finalEntry.state.id);
         embedNotify({ event: "created", did: finalEntry.state.id });
       }
     } else {
@@ -5500,7 +5528,7 @@ query("#publish-create").addEventListener("click", async () => {
   } finally {
     // After a successful embedded create the page is about to move: the button keeps
     // its look (see startEmbedSave) instead of flashing back to enabled.
-    if (!(EMBED && embedSave)) setButtonBusy(button, false);
+    if (!embedSave) setButtonBusy(button, false);
   }
 });
 
@@ -6163,29 +6191,7 @@ if (EMBED) {
   const MAIL_DOMAIN = "@did.md";
   const prepare = () => {
     if ((!draft && !storedIdentityRecord) || !aliasLabel()) return false;
-    const alias = query("#creation-alias");
-    if (!alias.dataset.mailReady) {
-      alias.dataset.mailReady = "1";
-      alias.value = alias.value.replace(/\.did\.md$/, "");
-      alias.placeholder = "alias";
-      const suffix = document.createElement("span");
-      suffix.className = "embed-mail-suffix";
-      suffix.textContent = MAIL_DOMAIN;
-      suffix.setAttribute("aria-hidden", "true");
-      alias.after(suffix);
-      // Runs before the form's own input handler (capture): whatever is typed or pasted,
-      // including "name@did.md", leaves only a valid local part.
-      // The field is exactly as wide as what is typed (the font is monospace, so a character is
-      // one "ch"), so "@did.md" is joined to the text: x@did.md, xx@did.md, xxx@did.md.
-      // The empty field is as wide as its placeholder; 2px keep the caret visible at the end.
-      const fit = () => { alias.style.width = `calc(${Math.max(alias.value.length, alias.value ? 0 : alias.placeholder.length)}ch + 2px)`; };
-      alias.addEventListener("input", () => {
-        const clean = alias.value.toLowerCase().replace(/@.*$/, "").replace(/[^a-z0-9-]/g, "");
-        if (clean !== alias.value) alias.value = clean;
-        fit();
-      }, { capture: true });
-      fit();
-    }
+    prepareMailAliasField();
     // The embedded form always asks for an Alias (the toggle is hidden).
     if (query("#creation-alias-toggle").getAttribute("aria-checked") !== "true") setCreationAliasEnabled(true);
     else { updateCreationDidSuffix(); checkCreationAlias(); }
@@ -6697,7 +6703,8 @@ function validEmbedReturn(value) {
   try {
     const url = new URL(value);
     const dev = location.hostname.endsWith(".localhost");
-    const ok = dev ? /^http:\/\/mail\.did\.localhost(:\d+)?$/.test(url.origin) : url.origin === "https://mail.did.md";
+    // Own origin too: the landing sends its own tab to the save pages and back (no other site is reachable).
+    const ok = url.origin === location.origin || (dev ? /^http:\/\/mail\.did\.localhost(:\d+)?$/.test(url.origin) : url.origin === "https://mail.did.md");
     return ok ? url.href : null;
   } catch { return null; }
 }
@@ -6722,17 +6729,24 @@ function readEmbedSave() {
   return null;
 }
 
+function goToSavePage() {
+  if (EMBED) embedNotify({ event: "save-page" });
+  else location.assign(`/?embed=save&return=${encodeURIComponent(`${location.origin}/`)}`);
+}
+
 function startEmbedSave(did) {
   const passphrase = query("#master-mnemonic").value;
   maskPassphraseField();
-  // The password manager's account name is the mail address (name@did.md), not the DID.
-  const mail = selectedCreationAliasHost().replace(/\.did\.md$/, "@did.md");
+  // The password manager's account name is the mail address (name@did.md), not the DID -- or the DID itself
+  // for an identity made without an alias.
+  const aliasUsed = query("#creation-alias-toggle").getAttribute("aria-checked") === "true";
+  const mail = aliasUsed ? selectedCreationAliasHost().replace(/\.did\.md$/, "@did.md") : undefined;
   try { sessionStorage.setItem(EMBED_SAVE_STORE, JSON.stringify({ did, mail, passphrase, at: Date.now() })); }
   catch { output("#create-result", "This browser blocks the storage the save step needs.", true); return; }
   embedSave = { did };
-  // Nothing changes on screen: the embedding page goes straight to "creating .".
-  // Only if it has not moved after a while does the button come back, to ask again.
-  embedNotify({ event: "save-page" });
+  // Nothing changes on screen: the embedding page goes straight to "creating ." (and the landing goes
+  // there itself, to the same pages). Only if it has not moved after a while does the button come back.
+  goToSavePage();
   setTimeout(() => {
     const button = query("#publish-create");
     setButtonBusy(button, false);

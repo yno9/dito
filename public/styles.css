@@ -1111,6 +1111,7 @@ button#creation-confirm-saved.primary {
 
 /* Action sits at the far right of the heading row */
 .field-heading > #creation-alias-toggle,
+.field-heading > #creation-did-toggle,
 .field-heading > .reload-icon,
 .field-heading > svg,
 .field-heading > .passphrase-copy-btn {
@@ -1406,7 +1407,8 @@ button#creation-confirm-saved.primary {
   stroke: currentColor;
 }
 
-#creation-alias-toggle {
+#creation-alias-toggle,
+#creation-did-toggle {
   position: relative;
   appearance: none;
   flex-shrink: 0;
@@ -1426,7 +1428,8 @@ button#creation-confirm-saved.primary {
   cursor: pointer;
 }
 
-#creation-alias-toggle::before {
+#creation-alias-toggle::before,
+#creation-did-toggle::before {
   content: "";
   position: absolute;
   top: 0.125rem;
@@ -3632,3 +3635,11 @@ html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0
 #embed-approve .embed-approve-wide { display: block; width: 100%; margin: 8px 0 0; }
 #embed-approve .embed-approve-heading { display: flex; align-items: center; justify-content: space-between; }
 #embed-approve .embed-approve-back { margin: 0; padding: 2px 10px; background: transparent; color: inherit; border: 0; font-size: 20px; line-height: 1; }
+
+/* The landing's create form always has two fields: the first is the alias (the default) or, switched, the
+   did:webvh without an alias; then the Passphrase. Both first fields are in the DOM; one is shown. */
+html:not([data-embed]) #creation-alias-create-row { order: 0; }
+html:not([data-embed]) #create-form-area:has(#creation-alias-toggle[aria-checked="true"]) > .disposable-id-block { display: none; }
+html:not([data-embed]) #create-form-area:has(#creation-alias-toggle[aria-checked="false"]) #creation-alias-create-row { display: none; }
+/* Alias (or did:webvh) and Create: the Passphrase is shown after "creating", on the last page, as in the embedded form. */
+html:not([data-embed]) #create-load-form:not(.creation-load-mode) #creation-passphrase-row { display: none; }

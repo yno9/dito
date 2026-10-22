@@ -322,6 +322,49 @@ When the page moves on, biset passes the request's query string to the save page
    `utils/exclusion.js`, `features/v1/field.username*.js`) and `applications/pass-extension/src/app/content/services/form/form.tracker.ts`.
 
 
+### 9.7 How Proton Pass decides (read from its source, 2026-10-22)
+
+Files in `ProtonMail/WebClients`, `applications/pass-extension/src`: `app/content/services/form/form.tracker.ts`
+(`processForm`, `onFormSubmit`, `detach`), `app/content/services/autosave/autosave.service.ts` (`reconciliate`),
+`autosave.relay.ts` (the sub-frame version), `app/worker/services/form.tracker.ts` (`stage`, `commit`, `stash`,
+`onTabLoaded`, the XHR tracker), `lib/utils/form-entry.ts` (`validateFormCredentials`). Only three lines reach the
+exported log: `Stage`, `Commit`, `Stash`. **A `Stage` with neither a `Commit` nor a `Stash` after it is a silent
+branch**, not a missing log.
+
+- **Stage** (`FORM_TRACKER[submit=true]`): the form's `submit` event or a click on a submit button inside it. Both set
+  `interactionAt` themselves, so a scripted `button.click()` stages too (but a scripted submit is the weakest signal:
+  the old confirm step, a real click, is the one that has always worked). It needs a tracked form that can autosave
+  and, for login/register forms, a non-empty password or username (partial).
+- **Commit** happens in `autosave.service.ts#reconciliate`, in the **main frame only**: `autosave.relay.ts` makes
+  `reconciliate` a no-op in every sub-frame ("full reconciliation requires cross-frame clustering"). It runs when
+  the main frame's detector has nothing to predict on a page (`detectionCount === 0`) or garbage-collects forms.
+  `shouldCommit = STAGING && domainmatch && !submissionTypeMatch && valid`:
+  - `domainmatch`: this page's URL equals the staged entry's domain, protocol and port.
+  - `!submissionTypeMatch`: **no tracked form of the same type is on the page** (a visible one; a login/register form
+    still present means "failed login": stash `FORM_TYPE_PRESENT`, logged). So the page after the submit must hold
+    no password form the detector counts.
+  - `valid`: `submittedAt` is set and the entry holds a non-empty password (non-partial). `submittedAt` is cleared if
+    a tracked XHR fails: any `fetch`/XHR **with a body** started within 500 ms of the Stage (or while one is
+    loading) whose response is 4xx/5xx marks the submission failed (`onFailed`), with no log line.
+  - While a form on the page is `processing` (the 1 s after a submit) `reconciliate` returns without doing anything.
+- Entries live per tab. A top-level navigation to another domain stashes `DOMAIN_SWITCH`; closing the tab
+  `TAB_DELETED`; a request for an entry that does not match the page, `REQUEST`. **`Stash {TAB_DELETED}` after a
+  `Stage` means the entry was still staged when the tab closed: nothing committed it.**
+- A sub-frame can stage (it did, for the embedded create) but only the main frame of a later page can commit it.
+  So an iframe flow depends on the next top-level page having no password form at the moment of its first
+  detection. Everything about the save pages follows from that.
+
+What each manager reads, for the same page: Proton Pass uses the form (hidden `username`, the password, the submit);
+Bitwarden ignores hidden inputs and wants a visible username (hence `#save-account`, outside the form). On direct
+dito (no iframe) the old flow fired for Proton Pass and not for Bitwarden for exactly this reason.
+
+**The rule we ended up with (the landing, 2026-10-22):** the save is the person's own click on a real submit button of
+a real form (visible-size, transparent password field; hidden `username`; a visible username outside the form for
+Bitwarden), and the page it navigates to has no password form. No scripted submit, no create draft on the save pages
+(`maybeBeginCreateDraft` returns on `EMBED_SAVE`/`EMBED_LOGIN`: the draft was a hidden second Passphrase form), and no
+request with a body that can fail in the first 500 ms. For a diagnosis, `localStorage.setItem("dito.debugForms", "1")` in
+this origin lists every form and input the page holds (create click, save pages) in the console as one JSON line.
+
 ## ID ホストの上限と v2 admin（2026-10-22）
 
 ID を誰でも作れる入口（`PUT {name}.did.md/.well-known/did.jsonl`）には、上限がなかった。いまは次を持つ（`server/host/limits.ts`）。値は **v2 admin から、再起動なしで**変えられる（`admin.manifest.json` が項目を v2 admin に伝え、`v2-admin-settings.ts` が管理側のスナップショットを読む。管理側が止まっても、最後の値か既定値で動く）。

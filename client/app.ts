@@ -356,7 +356,9 @@ let embedLoginStart = null;
 let embedSave = null;
 const embedNotify = message => embedPort?.postMessage(message);
 // Esc inside a frame never reaches the page that holds it, so biset's dialog could not close on it: tell the page.
-if (EMBED_APPROVE || EMBED_ALIAS) document.addEventListener("keydown", event => { if (event.key === "Escape") embedNotify({ event: "escape" }); });
+// On the window, in the capture phase: before the page's own handlers and before a password manager's (an inline menu closing
+// on Esc, a field stopping the key from bubbling), either of which would otherwise swallow it.
+if (EMBED_APPROVE || EMBED_ALIAS) window.addEventListener("keydown", event => { if (event.key === "Escape") embedNotify({ event: "escape" }); }, true);
 let draft = null;
 let draftBeingCreated = false;
 let creationLoadUrlTimer = null;

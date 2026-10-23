@@ -6360,10 +6360,12 @@ async function moveAliasInFrame() {
   // takes the text field before a password field for the username and fills the saved one into it.
   let alias = null;
   let failure = "";
+  let lastTyped;
   try {
     for (;;) {
       while (!alias) {
-        const chosen = await askEmbedAliasName(currentHost, failure);
+        const chosen = await askEmbedAliasName(currentHost, failure, lastTyped);
+        lastTyped = chosen;
         try { await checkEmbedAlias(currentHost, chosen); alias = chosen; failure = ""; }
         catch (error) { failure = errorMessage(error); }
       }
@@ -6506,7 +6508,7 @@ function askEmbedPassphrase(changes, failure) {
 }
 
 // Screen one: the new name only (no password field on it).
-function askEmbedAliasName(currentHost, failure) {
+function askEmbedAliasName(currentHost, failure, initial) {
   document.getElementById("embed-approve")?.remove();
   const panel = document.createElement("form");
   panel.id = "embed-approve";
@@ -6557,6 +6559,10 @@ function askEmbedAliasName(currentHost, failure) {
       } catch { if (mine === token) setAliasStatusIcon(status, "checking", "Alias availability unknown"); }
     }, 350);
   });
+  // The field opens with a new random alias (what was typed before, if this is the screen again), checked at once.
+  alias.value = initial ?? randomAlias().replace(/\.did\.md$/, "");
+  alias.dispatchEvent(new Event("input", { bubbles: true }));
+  alias.select();
   // The "x" shown when the address is taken clears the field, so the next one can be typed at once.
   status.addEventListener("click", () => {
     if (status.dataset.state !== "unavailable") return;

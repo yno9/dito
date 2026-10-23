@@ -137,7 +137,7 @@ biset speaks SIOPv2/OpenID4VP and nothing else, and the server is never asked an
   `response_mode=fragment`, `scope=openid`, `nonce`, `state`, `dcql_query` (one credential, `id: "capability"`, its type in
   `meta.type_values`), `transaction_data` (§8.4, base64url JSON items, each naming `credential_ids: ["capability"]`) and
   `client_metadata`. Transaction data types: `device_capability` (`device_jkt`, `scope[]`) and `did_document_edit` (`detail` =
-  the document-edit object). **An unknown type is refused** (§5.1). `https:` callbacks only (the `.onion` exception comes with Tor).
+  the document-edit object). **An unknown type is refused** (§5.1). `https:` callbacks only, except a Tor hidden service (`http://<56 chars>.onion/…`).
 - **Who is asking**: the callback host, always. `client_metadata.rp_did` is believed only when that DID's own document lists the
   callback as a `SIOPRedirectTarget` service endpoint; then the app's name is shown and approvals are grouped by that DID
   (the card list for "applications"). Otherwise it is ignored.

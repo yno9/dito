@@ -1776,7 +1776,7 @@ function legacyContainerPath(username, name) {
 }
 
 async function fetchCompleteDidLog(record) {
-  const response = await fetch(uncachedUrl(hostLogUrl(record.did)), { cache: "no-store" });
+  const response = await fetchLog(hostLogUrl(record.did));
   if (!response.ok) throw new Error(`Could not read the complete DID log for ${record.did}.`);
   const didJsonl = await response.text();
   if (didJsonl.length > 16 * 1024 * 1024) throw new Error(`The DID log for ${record.did} exceeds the container limit.`);
@@ -2279,7 +2279,7 @@ async function fetchIdentityLog(storageKey, did, logUrl) {
     if (!text) throw new Error("This identity has no locally loaded log.");
   } else {
     try {
-      const response = await fetch(uncachedUrl(logUrl ?? hostLogUrl(did)), { cache: "no-store" });
+      const response = await fetchLog(logUrl ?? hostLogUrl(did));
       if (!response.ok) throw new Error(await response.text());
       text = await response.text();
     } catch (error) {
@@ -4124,6 +4124,22 @@ async function oauthAuthorizationParameters(search = null, { embedded = false } 
   };
 }
 
+// A DID log read, tried again when the connection or the host's edge fails: through Tor, Cloudflare answers 522/525 at random for a
+// host that is up, and one such answer must not stop an approval. A 404 or other answer below 500 is an answer.
+async function fetchLog(logUrl) {
+  let last;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt) await new Promise(resolve => setTimeout(resolve, 800 * 2 ** (attempt - 1)));
+    try {
+      const response = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
+      if (response.status < 500) return response;
+      last = response;
+    } catch (error) { last = error; }
+  }
+  if (last instanceof Response) return last;
+  throw last;
+}
+
 function hostOf(url) {
   try { return new URL(url ?? "").host; } catch { return null; }
 }
@@ -5483,7 +5499,7 @@ onClick("#creation-load-submit", "#wallet-result", async () => {
     // check the Passphrase against it (loadMasterIdentity verifies the whole
     // log). The password-protected record is saved only after that succeeds.
     const logUrl = creationLoadLogUrl(sourceText);
-    const response = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
+    const response = await fetchLog(logUrl);
     if (!response.ok) throw new Error(`DID document returned ${response.status}`);
     const did = parseLog(await response.text()).at(-1)?.state?.id;
     if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
@@ -6311,7 +6327,7 @@ async function landingLogin() {
   try {
     const host = selectedCreationAliasHost();
     const logUrl = `https://${host}/.well-known/did.jsonl`;
-    const logResponse = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
+    const logResponse = await fetchLog(logUrl);
     if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
     const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
     if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
@@ -6476,7 +6492,7 @@ async function embedMoveAlias(currentHost, alias, passphrase) {
   await checkEmbedAlias(currentHost, alias);
   const target = `${alias}.${DOMAIN}`;
   const logUrl = `https://${currentHost}/.well-known/did.jsonl`;
-  const logResponse = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
+  const logResponse = await fetchLog(logUrl);
   if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
   const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
   if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
@@ -6505,7 +6521,7 @@ async function embedApprovalFor(request, host) {
     changes: edit ? describeDidDocumentEdit(edit) : [],
     async run(passphrase) {
       const logUrl = `https://${host}/.well-known/did.jsonl`;
-      const logResponse = await fetch(uncachedUrl(logUrl), { cache: "no-store" });
+      const logResponse = await fetchLog(logUrl);
       if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
       const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
       if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");

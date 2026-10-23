@@ -127,6 +127,27 @@ a backend of their own; the core never imports it.
 - **OIDC bridge**: turns a wallet's self-issued `id_token` into standard OIDC claims for RPs that cannot verify
   DIDs (Forgejo, Outline, …). `sub` is the stable SCID.
 
+### 7.1 SIOPv2 / OpenID4VP direct sign-in (a relying party with no key of its own)
+
+The wallet is a plain SIOPv2 wallet; the OAuth layer above exists only for RPs that want OAuth (the OIDC bridge). An app such as
+biset speaks SIOPv2/OpenID4VP and nothing else, and the server is never asked anything.
+
+- **Request** (`/authorize`, parsed by `siopAuthorizationParameters` in `client/app.ts`, unsigned, strict key list):
+  `client_id=redirect_uri:<callback>` (OID4VP 1.0 §5.9.3: the RP *is* its redirect URL), `response_type=vp_token id_token`,
+  `response_mode=fragment`, `scope=openid`, `nonce`, `state`, `dcql_query` (one credential, `id: "capability"`, its type in
+  `meta.type_values`), `transaction_data` (§8.4, base64url JSON items, each naming `credential_ids: ["capability"]`) and
+  `client_metadata`. Transaction data types: `device_capability` (`device_jkt`, `scope[]`) and `did_document_edit` (`detail` =
+  the document-edit object). **An unknown type is refused** (§5.1). `https:` callbacks only (the `.onion` exception comes with Tor).
+- **Who is asking**: the callback host, always. `client_metadata.rp_did` is believed only when that DID's own document lists the
+  callback as a `SIOPRedirectTarget` service endpoint; then the app's name is shown and approvals are grouped by that DID
+  (the card list for "applications"). Otherwise it is ignored.
+- **Response** (fragment): `vp_token={"capability":[<VP>]}` and `id_token`, plus `state`; no `iss` (that is OAuth, RFC 9207). The VP
+  holds the capability VC and is signed by the Root key with `challenge = nonce`, `domain = client_id` (so it cannot be replayed to
+  another verifier); the `id_token` is self-issued (`iss = sub =` the DID, `aud = client_id`, the `nonce`).
+- **Wallet discovery**: an identity's DID document lists `{ id: "#wallet", type: "SelfIssuedOPAuthorizationEndpoint",
+  serviceEndpoint: <its authorize URL> }` (written at creation). An app finds the wallet from the DID document alone.
+- The embedded frame and the create flow accept the same request (`validEmbedLogin`, `embedApprovalFor`).
+
 ## 8. Known gaps
 
 - Logs that use witnesses resolve in the CLI, `Identity.fromDid` and `resolveDidWebvh`; the dashboard's own log
@@ -280,17 +301,16 @@ anywhere. No new tab or window: nothing for a popup blocker to stop, and no `win
 ### 9.5 The embedded create also signs in (the last page is `/authorize`)
 
 Everything the person sees stays the same; the sign-in rides along in the background. biset starts preparing the
-sign-in request the moment Create is pressed (the frame sends `creating` with the host `name.did.md`; biset has its
-rp-signer sign a JAR with `login_hint` pinned to that host, and saves its pending authorization as for any login).
+sign-in request the moment Create is pressed (the frame sends `creating` with the host `name.did.md`; biset prepares
+a `redirect_uri:` SIOPv2 sign-in (§7.1) with `login_hint` pinned to that host, and saves its pending authorization as for any login).
 When the page moves on, biset passes the request's query string to the save page as `login=`.
 
-- The save page accepts it only in the shape a JAR relying party sends (`client_id` of a did:webvh, `request`,
-  `response_type`), only on this origin's `/authorize`, and marks the tab (`dito.embed-login`). Its form then POSTs to
+- The save page accepts it only in the shape a relying party sends (`client_id` of `redirect_uri:…`, or a did:webvh JAR with
+  `request`, `response_type`), only on this origin's `/authorize`, and marks the tab (`dito.embed-login`). Its form then POSTs to
   `/authorize?...`; **that page is the last page** (`EMBED_LOGIN`, `app.ts`; `public/index.html` hides the wallet
   from the first paint for it too).
 - On the last page, while the password manager's prompt is answered, the wallet runs the ordinary approval with the
-  parked Passphrase: `beginOAuthAuthorization` (the JAR's signature checked against the relying party's own DID,
-  its redirect against that DID's document), `unlockIdentity`, `approveAuthorization` (the DID document edit is
+  parked Passphrase: `beginOAuthAuthorization` (the request parsed as §7.1; a JAR's signature checked against the relying party's own DID), `unlockIdentity`, `approveAuthorization` (the DID document edit is
   published, the capability VC and `id_token` signed). Only the delivery is held (`embedLoginDeliver`): "Yes" hands
   the prepared response to the relying party (`/wallet/callback#vp_token=...`), and biset finishes as for any login.
   Yes before it is ready shows "creating ." until it is. A failure shows a short line and Yes returns to `return`.
@@ -298,9 +318,8 @@ When the page moves on, biset passes the request's query string to the save page
   opened the tab: the request's redirect origin must equal the return URL's origin (`embedSignInTargetsPage`;
   on a developer machine `mail.did.localhost` stands in for `https://mail.did.md`).
 - **Deployment prerequisites (not code):** the relying-party identity is per origin. For `mail.did.md` biset needs
-  its own RP DID whose document lists `https://mail.did.md/wallet/callback`, and an rp-signer for it with that
-  redirect and `RP_SIGNER_ALLOWED_ORIGIN=https://mail.did.md`; biset then names them in its config (`rpDid`,
-  `rpSignerUrl`, falling back to the built-in `t.biset.md` pair). Caddy for `dito.did.md` must also answer a POST to
+  its own RP DID whose document lists `https://mail.did.md/wallet/callback` as a `SIOPRedirectTarget` service; biset names the DID
+  in its config (`rpDid`, sent as `client_metadata.rp_did`). There is no signer. Caddy for `dito.did.md` must also answer a POST to
   `/authorize` (`method @post GET`, as for the app) and `mail.did.md` must serve `/wallet/callback`.
 - Checked locally with a test RP DID (`scripts/create-rp-did.ts`), biset's real rp-signer, and a stand-in for the
   did.md host: Create, the last page, the DID document edit (`#didcomm`, the device key, `#didcomm-rotation`)

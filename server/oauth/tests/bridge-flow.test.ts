@@ -260,7 +260,7 @@ test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", asy
 }
 
 // PLAN10: did.md's own oauth-server.ts
-// (api.did.md's DCR/code+token layer -- biset's device-refresh, any future
+// (api.did.md's DCR/code+token layer -- any
 // DCR client) now runs merged into this same process, not did-md-server's.
 // These tests exercise it reached THROUGH the shared bridge instance
 // spawned at the top of this file, proving both route sets coexist without
@@ -301,12 +301,12 @@ test("PLAN10: /.well-known/oauth-authorization-server and /v1/oauth/register are
 // try/catch (server/server.ts's `fail()`) let a thrown Invalid from an
 // oauth-server.ts route function escape as an uncaught exception -- Node's
 // generic error page instead of a proper 400 JSON body. A browser caller
-// (biset's device-refresh) would see an uncatchable "Failed to fetch"
+// (a relying party's token request) would see an uncatchable "Failed to fetch"
 // instead of a readable error, exactly the bug server/server.ts's own `fail`
 // comment already documents having fixed once, on the other process.
-test("PLAN10 regression: a malformed /v1/oauth/device-refresh request gets a proper CORS'd 400, not an uncaught exception", async () => {
+test("PLAN10 regression: a malformed /v1/oauth/token request gets a proper CORS'd 400, not an uncaught exception", async () => {
   await ready();
-  const response = await fetch(`${bridgeBase}/v1/oauth/device-refresh`, {
+  const response = await fetch(`${bridgeBase}/v1/oauth/token`, {
     method: "POST", headers: { "content-type": "application/json", origin: "https://t.biset.md" }, body: JSON.stringify({}),
   });
   expect(response.status).toBe(400);

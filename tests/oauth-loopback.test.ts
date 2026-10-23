@@ -80,16 +80,16 @@ test("OAuth allows loopback and local file clients, but not arbitrary HTTP", asy
 
 // Regression (found live, 2026-09-21, t.biset.md): an OAuth endpoint's
 // ERROR response used the restrictive DID-document cors() instead of the
-// permissive oauthCors() -- a real biset user's stale device-refresh got a
+// permissive oauthCors() -- a relying party's stale token request got a
 // same 400 Bad Request the server always intended, but the browser reported
 // it as an opaque CORS failure instead, and biset's own catch handling
 // (which reads the response body) never even ran, so it could not recover.
 test("an OAuth endpoint's error response still carries access-control-allow-origin for the caller's origin", async () => {
   await ready();
   const origin = "https://t.biset.md";
-  const response = await fetch(`${base}/v1/oauth/device-refresh`, {
+  const response = await fetch(`${base}/v1/oauth/token`, {
     method: "POST", headers: { origin, "content-type": "application/json" },
-    body: JSON.stringify({ client_id: "client_notregistered00000000000000000000", vp_token: { capability: [{}] } }),
+    body: JSON.stringify({ client_id: "client_notregistered00000000000000000000" }),
   });
   expect(response.status).toBe(400);
   expect(response.headers.get("access-control-allow-origin")).toBe(origin);

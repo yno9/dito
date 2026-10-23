@@ -3,7 +3,7 @@ import { pkceChallenge, DitoClient, randomBase64url } from "./dito-client.ts";
 import { BridgeKeys } from "./keys.ts";
 import { SessionStore, type BridgeSession } from "./session-store.ts";
 // PLAN10: did.md's own optional
-// OAuth/OID4VP convenience layer (DCR, code/token, biset's device-refresh),
+// OAuth/OID4VP convenience layer (DCR, code/token),
 // merged into this process rather than did-md-server's -- see server/ARD.md
 // for why. oauthFetch is a self-contained route dispatcher (its own
 // `/v1/oauth/*` + `/.well-known/oauth-authorization-server` paths, disjoint

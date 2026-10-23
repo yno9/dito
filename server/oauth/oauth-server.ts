@@ -157,7 +157,6 @@ const oauthTokens = new Map<string, OAuthToken>();
 // A file:// client cannot always retain window.opener (notably Safari).  Its
 // high-entropy OAuth state is therefore a short-lived delivery handle.  The
 // delivered code remains bound to both PKCE and the client's DPoP key.
-const oauthFileCallbacks = new Map<string, { clientId: string; code: string; expiresAt: string }>();
 
 function oauthPath() { return join(DATA_DIR, "oauth", "state.json"); }
 
@@ -226,7 +225,6 @@ function saveOauthState(value: OAuthState) { atomicWrite(oauthPath(), JSON.strin
 function cleanupOauthTokens(now = Date.now()) {
   for (const [key, code] of oauthCodes) if (Date.parse(code.expiresAt) <= now) oauthCodes.delete(key);
   for (const [key, token] of oauthTokens) if (Date.parse(token.expiresAt) <= now) oauthTokens.delete(key);
-  for (const [key, callback] of oauthFileCallbacks) if (Date.parse(callback.expiresAt) <= now) oauthFileCallbacks.delete(key);
 }
 
 // PLAN6: a relying party may authenticate as a did:webvh DID (JAR,
@@ -533,21 +531,7 @@ async function oauthAuthorizeComplete(request: Request) {
     const code = `code_${randomB64url(32)}`; const codeHash = await sha256B64url(code);
     const expiresAt = isoAt(Date.now() + OAUTH_CODE_MS);
     oauthCodes.set(codeHash, { clientId, redirectUri, did: capability.issuer, capability: capability.signed, capabilityId: capability.id, deviceJkt: capability.deviceJkt, scope: capability.scope, codeChallenge: body.code_challenge, expiresAt, ...(typeof body.id_token === "string" ? { idToken: body.id_token } : {}), ...(typeof body.did_log === "string" ? { didLog: body.did_log } : {}) });
-    if (isLocalFileRedirect(new URL(redirectUri))) oauthFileCallbacks.set(body.state, { clientId, code, expiresAt });
     return oauthJson(request, { code, state: body.state, redirect_uri: redirectUri, iss: OAUTH_ISSUER });
-  });
-}
-async function oauthFileCallback(request: Request, url: URL) {
-  const clientId = oauthClientId(url.searchParams.get("client_id"));
-  const state = url.searchParams.get("state");
-  if (typeof state !== "string" || !/^[A-Za-z0-9._~-]{16,512}$/.test(state)) throw new Invalid("state is invalid");
-  return exclusive("oauth", async () => {
-    const client = oauthState().clients[clientId];
-    if (!client || !client.redirectUris.some(uri => isLocalFileRedirect(new URL(uri)))) throw new Invalid("local file client registration was not found");
-    cleanupOauthTokens();
-    const callback = oauthFileCallbacks.get(state);
-    if (!callback || callback.clientId !== clientId) return new Response(null, { status: 204, headers: { ...oauthCors(request), "cache-control": "no-store" } });
-    return oauthJson(request, { code: callback.code, state, iss: OAUTH_ISSUER });
   });
 }
 async function oauthIssueToken(request: Request, capability: { id: string; issuer: string; clientId: string; deviceJkt?: string; scope: string[]; expiresAt: string; signed: OAuthCapability }, dpop: { jkt: string } | undefined, idToken?: string) {
@@ -604,15 +588,6 @@ async function oauthToken(request: Request) {
     const capability = await verifiedOauthCapability(stored.capability as unknown as Json, state, suppliedAuthority);
     if (capability.id !== stored.capabilityId || capability.issuer !== stored.did || capability.deviceJkt !== stored.deviceJkt) throw new Invalid("authorization code capability is invalid");
     return oauthIssueToken(request, capability, dpop, stored.idToken);
-  });
-}
-async function oauthRefresh(request: Request) {
-  const body = asObj(JSON.parse(await requestBody(request, 1 << 16)), "device refresh request"); strictObjectKeys(body, ["vp_token", "client_id"], "device refresh request"); const clientId = oauthClientId(body.client_id);
-  const dpop = await verifyP256Dpop(request.headers.get("dpop") ?? "", request, `${OAUTH_ISSUER}/v1/oauth/device-refresh`);
-  return exclusive("oauth", async () => {
-    const state = oauthState(); const vc = oauthVcFromVpToken(body.vp_token); const capability = await verifiedOauthCapability(vc, state);
-    if (capability.clientId !== clientId) throw new Invalid("device capability client does not match the request");
-    return oauthIssueToken(request, capability, dpop);
   });
 }
 async function oauthResource(request: Request) {
@@ -690,9 +665,7 @@ export async function oauthFetch(request: Request, url: URL): Promise<Response |
   const publicClient = /^\/v1\/oauth\/clients\/(client_[A-Za-z0-9_-]{32,128})$/.exec(url.pathname);
   if (publicClient && request.method === "GET") return await oauthPublicClient(request, publicClient[1]!);
   if (url.pathname === "/v1/oauth/authorize/complete" && request.method === "POST") return await oauthAuthorizeComplete(request);
-  if (url.pathname === "/v1/oauth/file-callback" && request.method === "GET") return await oauthFileCallback(request, url);
   if (url.pathname === "/v1/oauth/token" && request.method === "POST") return await oauthToken(request);
-  if (url.pathname === "/v1/oauth/device-refresh" && request.method === "POST") return await oauthRefresh(request);
   if (url.pathname === "/v1/oauth/resource" && request.method === "GET") return await oauthResource(request);
   if (url.pathname === "/v1/oauth/userinfo" && request.method === "GET") return await oauthUserinfo(request);
   if (url.pathname === "/v1/oauth/outcome" && request.method === "POST") return await oauthOutcomeReport(request);

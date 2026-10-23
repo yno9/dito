@@ -3616,19 +3616,19 @@ html[data-embed="approve"] #site-footer,
 html[data-embed="approve"] #app { display: none; }
 html[data-embed="approve"],
 html[data-embed="approve"] body { background: transparent; margin: 0; padding: 0; min-height: 0; overflow: hidden; }
-#embed-approve { padding: 20px; font: 15px/1.5 system-ui, sans-serif; color: inherit; }
-#embed-approve h1 { margin: 0 0 12px; font-size: 18px; }
+#embed-approve { padding: var(--ec-pad); font: 15px/1.5 system-ui, sans-serif; color: inherit; }
+#embed-approve h1 { margin: 0 0 12px; font-size: var(--ec-title-size); font-weight: 600; }
 #embed-approve ul { margin: 0 0 16px; padding-left: 20px; font-size: 13px; overflow-wrap: anywhere; }
 #embed-approve .embed-approve-note { margin: 0 0 12px; font-size: 13px; opacity: .7; }
-#embed-approve label { display: block; margin-top: 10px; font-size: 13px; opacity: .7; }
-#embed-approve input[type="password"], #embed-approve input[type="text"] { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font: 14px ui-monospace, monospace; }
-#embed-approve .embed-approve-error { min-height: 1.5em; margin: 8px 0 0; color: #d33; font-size: 13px; }
-#embed-approve button { margin: 8px 8px 0 0; padding: 10px 24px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font: inherit; cursor: pointer; }
+#embed-approve label { display: block; margin-top: 10px; font-size: var(--ec-label-size); opacity: .7; }
+#embed-approve input[type="password"], #embed-approve input[type="text"] { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: var(--ec-input-pad); border: 0; border-radius: var(--ec-radius); background: var(--ec-input-bg); color: inherit; outline: none; font: 14px ui-monospace, monospace; }
+#embed-approve .embed-approve-error { min-height: 1.5em; margin: 8px 0 0; color: var(--ec-error); font-size: var(--ec-label-size); }
+#embed-approve button { margin: 8px 8px 0 0; padding: var(--ec-button-pad); border: 0; border-radius: var(--ec-button-radius); background: var(--ec-button-bg); color: var(--ec-button-fg); font: inherit; cursor: pointer; }
 #embed-approve button:disabled { opacity: .5; }
 #embed-approve .embed-approve-cancel { background: transparent; color: inherit; border: 1px solid #ccc; }
 
 /* The address field of the embedded alias screen: the local part, "@did.md" joined to it, the availability mark. */
-#embed-approve .embed-alias-row { display: flex; align-items: center; margin-top: 6px; padding: 0 12px; border: 1px solid #ccc; border-radius: 8px; }
+#embed-approve .embed-alias-row { display: flex; align-items: center; margin-top: 6px; padding: 0 16px; border: 0; border-radius: var(--ec-radius); background: var(--ec-input-bg); }
 #embed-approve .embed-alias-row input[type="text"] { display: block; width: auto; margin: 0; padding: 12px 0; border: 0; outline: 0; background: transparent; color: inherit; font: 14px ui-monospace, monospace; }
 #embed-approve .embed-alias-row .alias-status-icon { margin-left: auto; }
 #embed-approve .embed-alias-row .embed-mail-suffix { font: 14px ui-monospace, monospace; }

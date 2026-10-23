@@ -26,7 +26,8 @@ const result = await build({
 // legitimately contain the literal `</script>` inside a JavaScript string; escape
 // it so it cannot terminate the HTML script element while the browser parses it.
 const bundle = result.outputFiles[0]!.text.replace(/<\/script/gi, "<\\/script");
-const css = readFileSync(`${PUBLIC}/styles.css`, "utf8");
+// embed-card.css is the look of the cards over a page, shared with biset (see that file): inlined with the rest.
+const css = `${readFileSync(`${PUBLIC}/styles.css`, "utf8")}\n${readFileSync(`${PUBLIC}/embed-card.css`, "utf8")}`;
 let html = readFileSync(`${PUBLIC}/index.html`, "utf8");
 
 html = html.replace(

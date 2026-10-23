@@ -3984,6 +3984,12 @@ async function jarAuthorizationParameters(clientId, jwt) {
 
 // `embedded` is kept for callers that pass it; no request shape depends on it any more (a relying party with no key of
 // its own uses `client_id=redirect_uri:...`, see siopAuthorizationParameters, in the frame and in a tab alike).
+// What an identity's DID document publishes as its wallet. The document is public: a wallet opened at an onion address
+// still names the clearnet one (the onion address is a way to reach it, not its name).
+function walletAuthorizeUrl() {
+  return location.hostname.endsWith(".onion") ? "https://dito.did.md/authorize" : `${location.origin}/authorize`;
+}
+
 // SIOPv2 / OpenID4VP, from a relying party with no key of its own (OID4VP 1.0 §5.9.3, the `redirect_uri` Client Identifier
 // Prefix): `client_id=redirect_uri:<its redirect URL>`, the request not signed. The relying party is the redirect URL: the
 // response goes to it and nowhere else, and the authorize sheet names its host. Everything else rides in the OID4VP parameters:
@@ -4006,7 +4012,9 @@ async function siopAuthorizationParameters(params) {
   const callback = clientId.slice("redirect_uri:".length);
   let redirect;
   try { redirect = new URL(callback); } catch { throw new Error("The redirect URI is invalid."); }
-  if (redirect.protocol !== "https:" || redirect.username || redirect.password || redirect.hash || redirect.toString() !== callback) throw new Error("The redirect URI is invalid.");
+  // Tor hidden services carry no TLS (the onion address is the key); https everywhere else.
+  const onion = redirect.protocol === "http:" && /^[a-z2-7]{56}\.onion$/.test(redirect.hostname);
+  if ((redirect.protocol !== "https:" && !onion) || redirect.username || redirect.password || redirect.hash || redirect.toString() !== callback) throw new Error("The redirect URI is invalid.");
   if (params.has("redirect_uri") && params.get("redirect_uri") !== callback) throw new Error("The authorization request is invalid.");
   if (params.get("response_type") !== "vp_token id_token" || (params.has("response_mode") && params.get("response_mode") !== "fragment") || params.get("scope") !== "openid") throw new Error("The authorization request is invalid.");
   const nonce = params.get("nonce"); const state = params.get("state");
@@ -5537,7 +5545,7 @@ query("#publish-create").addEventListener("click", async () => {
         // that address (no provisional `ex.alias` DID, no move entry).
         entries = [await buildGenesis({
           username: target.username, domain: target.domain, root: currentDraft.material.root, sign: currentDraft.material.sign,
-          nextSpare: currentDraft.material.nextSpare, api: `${location.origin}/authorize`,
+          nextSpare: currentDraft.material.nextSpare, api: walletAuthorizeUrl(),
         })];
       } else {
         // dito itself: the Alias is optional, so the identity starts from the
@@ -5698,7 +5706,7 @@ async function provisionalGenesisEntry() {
   if (!draft.entry) {
     draft.entry = await buildGenesis({
       username: "ex", root: draft.material.root, sign: draft.material.sign,
-      nextSpare: draft.material.nextSpare, domain: "alias", api: `${location.origin}/authorize`,
+      nextSpare: draft.material.nextSpare, domain: "alias", api: walletAuthorizeUrl(),
     });
   }
   return draft.entry;

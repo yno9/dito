@@ -355,6 +355,8 @@ let embedLoginStart = null;
 // Set once an embedded create has persisted the identity: what the save page asks for.
 let embedSave = null;
 const embedNotify = message => embedPort?.postMessage(message);
+// Esc inside a frame never reaches the page that holds it, so biset's dialog could not close on it: tell the page.
+if (EMBED_APPROVE || EMBED_ALIAS) document.addEventListener("keydown", event => { if (event.key === "Escape") embedNotify({ event: "escape" }); });
 let draft = null;
 let draftBeingCreated = false;
 let creationLoadUrlTimer = null;

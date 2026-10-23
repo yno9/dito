@@ -298,13 +298,12 @@ export async function buildGenesis(args: {
       publicKeyMultibase: args.root.multikey,
     }],
     authentication: ["#pass-1"],
-    // "UDIWalletIssuer" lets a relying party discover, from this identity's
-    // own DID document alone, which wallet backend issues OAuth/OID4VP
-    // tokens on its behalf -- the same pattern atproto uses for PDS
+    // "SelfIssuedOPAuthorizationEndpoint" (SIOPv2) lets a relying party discover, from this
+    // identity's own DID document alone, where its wallet's authorization screen is -- the same pattern atproto uses for PDS
     // discovery (its DID document's "#atproto_pds" / AtprotoPersonalDataServer
     // entry), applied to wallet discovery instead of data hosting.
     service: [
-      ...(args.api ? [{ id: "#udi-wallet-issuer", type: "UDIWalletIssuer", serviceEndpoint: args.api }] : []),
+      ...(args.api ? [{ id: "#wallet", type: "SelfIssuedOPAuthorizationEndpoint", serviceEndpoint: args.api }] : []),
       ...(args.service ?? []),
     ],
     ...(args.displayName ? { name: args.displayName } : {}),

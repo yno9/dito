@@ -55,7 +55,7 @@ import { parseLoginHost, didIsHostedAt } from "../packages/wallet/src/login-hint
 import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
 import { applyOutcome, grantDisplayState, shouldPoll } from "../packages/wallet/src/grant-outcome.ts";
 import { assertEditSparesMethods, assertEndpointRemovals, assertServiceEndpointMode, assertVerificationMethodEdit, VERIFICATION_RELATIONSHIPS, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
-import { ROOT_KEY_FRAGMENT, WebvhHostingClient, currentParameters, parseLog as parseWebvhLog, resolveLog, uncachedUrl } from "../packages/webvh/src/index.ts";
+import { ROOT_KEY_FRAGMENT, WebvhHostingClient, resolveDidWebvh, currentParameters, parseLog as parseWebvhLog, resolveLog, uncachedUrl } from "../packages/webvh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
 import dashboardHeaderTemplate from "./pages/dashboard-header.html";
 import footerTemplate from "./pages/footer.html";
@@ -3982,17 +3982,87 @@ async function jarAuthorizationParameters(clientId, jwt) {
   };
 }
 
-// `embedded`: only the embedded sign-in (the frame, or the last page of an embedded create) passes it.
-// There a did:webvh relying party sends its parameters plainly, without a signed request: the request
-// is only ever approved for the page that opened the frame or the tab (its redirect origin must be
-// that page's origin, embedSignInTargetsPage), and the redirect must be on the host its DID names, so
-// no signature is needed to know who is asking.
+// `embedded` is kept for callers that pass it; no request shape depends on it any more (a relying party with no key of
+// its own uses `client_id=redirect_uri:...`, see siopAuthorizationParameters, in the frame and in a tab alike).
+// SIOPv2 / OpenID4VP, from a relying party with no key of its own (OID4VP 1.0 §5.9.3, the `redirect_uri` Client Identifier
+// Prefix): `client_id=redirect_uri:<its redirect URL>`, the request not signed. The relying party is the redirect URL: the
+// response goes to it and nowhere else, and the authorize sheet names its host. Everything else rides in the OID4VP parameters:
+//   - `dcql_query` names the credential asked for (its type);
+//   - `transaction_data` (§8.4) carries what is to be approved: `device_capability` (the device key's thumbprint and the
+//     scopes the capability is for) and, when the identity's DID document is to change, `did_document_edit`;
+//   - `client_metadata` says what the application calls itself and, as `rp_did`, which DID it speaks for: believed only when that
+//     DID's own document publishes this very redirect URL as a `SIOPRedirectTarget`, else ignored (the host stands alone).
+// The wallet MUST refuse a request with a transaction data type it does not know (§5.1).
+const SIOP_REQUEST_KEYS = ["client_id", "response_type", "redirect_uri", "response_mode", "scope", "nonce", "state", "dcql_query", "transaction_data", "client_metadata", "login_hint"];
+const SIOP_REDIRECT_TARGET = "SIOPRedirectTarget";
+function siopJson(value, label) {
+  try { const parsed = JSON.parse(value ?? ""); if (parsed !== null && typeof parsed === "object") return parsed; } catch { /* below */ }
+  throw new Error(`The authorization request's ${label} is invalid.`);
+}
+async function siopAuthorizationParameters(params) {
+  const keys = [...params.keys()];
+  if (new Set(keys).size !== keys.length || keys.some(key => !SIOP_REQUEST_KEYS.includes(key))) throw new Error("The authorization request is invalid.");
+  const clientId = params.get("client_id") ?? "";
+  const callback = clientId.slice("redirect_uri:".length);
+  let redirect;
+  try { redirect = new URL(callback); } catch { throw new Error("The redirect URI is invalid."); }
+  if (redirect.protocol !== "https:" || redirect.username || redirect.password || redirect.hash || redirect.toString() !== callback) throw new Error("The redirect URI is invalid.");
+  if (params.has("redirect_uri") && params.get("redirect_uri") !== callback) throw new Error("The authorization request is invalid.");
+  if (params.get("response_type") !== "vp_token id_token" || (params.has("response_mode") && params.get("response_mode") !== "fragment") || params.get("scope") !== "openid") throw new Error("The authorization request is invalid.");
+  const nonce = params.get("nonce"); const state = params.get("state");
+  if (!/^[A-Za-z0-9._~-]{16,512}$/.test(nonce ?? "") || !/^[A-Za-z0-9._~-]{16,512}$/.test(state ?? "")) throw new Error("The authorization request is invalid.");
+  const dcql = siopJson(params.get("dcql_query"), "dcql_query");
+  const typeValues = dcql?.credentials?.[0]?.meta?.type_values?.[0];
+  if (dcql?.credentials?.length !== 1 || dcql.credentials[0].id !== "capability" || !Array.isArray(typeValues) || typeValues[0] !== "VerifiableCredential" || typeof typeValues[1] !== "string" || !/^[A-Za-z][A-Za-z0-9:._/-]{0,127}$/.test(typeValues[1])) throw new Error("The requested capability type is invalid.");
+  const transaction = siopJson(params.get("transaction_data"), "transaction_data");
+  if (!Array.isArray(transaction) || !transaction.length || transaction.length > 8) throw new Error("The authorization request's transaction_data is invalid.");
+  let device; let edit;
+  for (const encoded of transaction) {
+    let item;
+    try { item = JSON.parse(new TextDecoder().decode(base64urlBytes(encoded, "transaction data"))); } catch { throw new Error("The authorization request's transaction_data is invalid."); }
+    if (!item || typeof item !== "object" || !Array.isArray(item.credential_ids) || item.credential_ids.length !== 1 || item.credential_ids[0] !== "capability") throw new Error("The authorization request's transaction_data is invalid.");
+    if (item.type === "device_capability" && device === undefined) device = item;
+    else if (item.type === "did_document_edit" && edit === undefined) edit = item;
+    else throw new Error("The authorization request asks for something this wallet does not support.");
+  }
+  if (!device || !/^[A-Za-z0-9_-]{43}$/.test(device.device_jkt ?? "")) throw new Error("The authorization request's transaction_data is invalid.");
+  const deviceScope = Array.isArray(device.scope) ? [...new Set(device.scope)] : [];
+  if (!deviceScope.length || deviceScope.length > 15 || deviceScope.some(item => typeof item !== "string" || !/^[A-Za-z][A-Za-z0-9:._/-]{0,95}$/.test(item))) throw new Error("The requested scope is invalid.");
+  const authorizationDetails = edit === undefined ? [] : oauthAuthorizationDetails(JSON.stringify([edit.detail]));
+  let loginHost;
+  if (params.has("login_hint")) {
+    loginHost = parseLoginHost(params.get("login_hint")) ?? undefined;
+    if (!loginHost) throw new Error("The login hint must be the hostname an identity is published at.");
+  }
+  const metadata = params.has("client_metadata") ? siopJson(params.get("client_metadata"), "client_metadata") : {};
+  // Believed only when the DID itself says so; any trouble reading its document leaves the host alone as the identity.
+  let rpDid;
+  if (typeof metadata.rp_did === "string" && metadata.rp_did.startsWith("did:webvh:")) {
+    try {
+      const document = (await resolveDidWebvh(metadata.rp_did)).doc;
+      const published = Array.isArray(document.service) && document.service.some(entry => entry && typeof entry === "object" && entry.type === SIOP_REDIRECT_TARGET && entry.serviceEndpoint === callback);
+      if (published) rpDid = metadata.rp_did;
+    } catch { /* unverified: the redirect URL is the only identity */ }
+  }
+  const rawName = metadata.client_name;
+  const clientDisplayName = rpDid && typeof rawName === "string" && rawName.trim() && rawName.length <= 160 ? rawName.trim() : undefined;
+  return {
+    clientDisplayName, clientDisplayHost: redirect.host, rpDid,
+    clientId, responseType: "vp_token id_token", responseMode: undefined, codeChallenge: undefined,
+    deviceJkt: device.device_jkt, loginHint: params.get("login_hint") ?? undefined, loginHost,
+    redirectUri: callback, responseUri: undefined, state, nonce,
+    scope: ["openid", ...deviceScope], authorizationDetails,
+    capabilityType: typeValues[1],
+  };
+}
+
 async function oauthAuthorizationParameters(search = null, { embedded = false } = {}) {
   if (search === null && location.pathname !== "/authorize") return null;
   const params = new URLSearchParams(search ?? location.search);
   const keys = [...params.keys()];
-  const plainRp = embedded && params.get("client_id")?.startsWith("did:webvh:") && !params.has("request");
-  if (params.get("client_id")?.startsWith("did:webvh:") && !plainRp) {
+  // SIOPv2 / OpenID4VP, the way a relying party that has no key of its own asks: `client_id=redirect_uri:<its redirect URL>`.
+  if (params.get("client_id")?.startsWith("redirect_uri:")) return await siopAuthorizationParameters(params);
+  if (params.get("client_id")?.startsWith("did:webvh:")) {
     const jarKeys = ["client_id", "request", "response_type"];
     if (keys.length !== jarKeys.length || keys.some(key => !jarKeys.includes(key)) || !validResponseType(params.get("response_type"))) throw new Error("The authorization request is invalid.");
     return jarAuthorizationParameters(params.get("client_id"), params.get("request"));
@@ -4002,8 +4072,7 @@ async function oauthAuthorizationParameters(search = null, { embedded = false } 
   const optional = ["alias", "authorization_details", "capability_type", "dpop_jkt", "login_hint", "nonce"];
   if (keys.length < required.length || new Set(keys).size !== keys.length || keys.some(key => !required.includes(key) && !optional.includes(key))) throw new Error("The authorization request is invalid.");
   const value = Object.fromEntries([...required, ...optional].map(key => [key, params.get(key)]));
-  if (plainRp && (value.response_type !== "vp_token id_token" || didHost(value.client_id) !== hostOf(value.redirect_uri))) throw new Error("The authorization request is invalid.");
-  if (!(plainRp || /^client_[A-Za-z0-9_-]{32,128}$/.test(value.client_id ?? "")) || !validResponseType(value.response_type) || !/^[A-Za-z0-9._~-]{16,512}$/.test(value.state ?? "")) throw new Error("The authorization request is invalid.");
+  if (!/^client_[A-Za-z0-9_-]{32,128}$/.test(value.client_id ?? "") || !validResponseType(value.response_type) || !/^[A-Za-z0-9._~-]{16,512}$/.test(value.state ?? "")) throw new Error("The authorization request is invalid.");
   if (usesCode && (value.code_challenge_method !== "S256" || !/^[A-Za-z0-9_-]{43}$/.test(value.code_challenge ?? ""))) throw new Error("The authorization request is invalid.");
   let redirect;
   try { redirect = new URL(value.redirect_uri ?? ""); } catch { throw new Error("The redirect URI is invalid."); }
@@ -4044,7 +4113,6 @@ async function oauthAuthorizationParameters(search = null, { embedded = false } 
     deviceJkt: value.dpop_jkt ?? undefined, loginHint: value.login_hint ?? undefined, loginHost,
     redirectUri: value.redirect_uri, state: value.state, nonce: value.nonce ?? undefined,
     scope, authorizationDetails, capabilityType,
-    ...(plainRp ? { clientDisplayHost: redirect.host } : {}),
   };
 }
 
@@ -4073,7 +4141,9 @@ async function beginOAuthAuthorization() {
     let clientName;
     // Only a registered client can opt in to outcome reporting; JAR / did:webvh RPs have no metadata.
     let outcomeReporting = false;
-    if (request.clientId.startsWith("did:webvh:")) {
+    if (request.clientId.startsWith("redirect_uri:")) {
+      clientName = request.clientDisplayName ?? request.clientDisplayHost;
+    } else if (request.clientId.startsWith("did:webvh:")) {
       clientName = request.clientId;
     } else {
       const response = await fetch(`${API}/v1/oauth/clients/${encodeURIComponent(request.clientId)}`, { cache: "no-store" });
@@ -4134,7 +4204,8 @@ function oauthRedirect(request, values) {
  * can fail -- a direct_post the RP may refuse -- runs now; the returned `go()` navigates away and
  * must run last, after the caller has recorded the approval locally (see commitAuthorization). */
 async function oauthDeliveryPlan(request, values) {
-  const payload = { ...values, iss: OAUTH_ISSUER };
+  // SIOPv2 / OID4VP responses carry no `iss` (that is an OAuth authorization response parameter, RFC 9207).
+  const payload = request.clientId.startsWith("redirect_uri:") ? { ...values } : { ...values, iss: OAUTH_ISSUER };
   // PLAN8: a real backend RP
   // (oidc-bridge) receives the response via its own POST endpoint instead
   // of a browser-only channel -- this Wallet POSTs directly to
@@ -4260,6 +4331,14 @@ async function approveAuthorization() {
   };
   const vcProof = await createDataIntegrityProof(unsignedVc, { privateKey: loaded.root.privateKey, verificationMethod: `${did}#pass-1`, proofPurpose: "authentication", created: issuedAt });
   const vc = { ...unsignedVc, proof: vcProof };
+  // A relying party that speaks SIOPv2 gets the credential in a presentation bound to this very request
+  // (OID4VP §8.6: `challenge` is the nonce, `domain` the Client Identifier), so it cannot be replayed to another verifier.
+  const presentation = walletAuthorization.clientId.startsWith("redirect_uri:")
+    ? await (async () => {
+      const unsignedVp = { "@context": ["https://www.w3.org/ns/credentials/v2"], type: ["VerifiablePresentation"], holder: did, verifiableCredential: [vc] };
+      return { ...unsignedVp, proof: await createDataIntegrityProof(unsignedVp, { privateKey: loaded.root.privateKey, verificationMethod: `${did}#pass-1`, proofPurpose: "authentication", created: issuedAt, challenge: walletAuthorization.nonce, domain: walletAuthorization.clientId }) };
+    })()
+    : vc;
   const capability = { id: capabilityId, audience: walletAuthorization.clientId, deviceJkt: walletAuthorization.deviceJkt, scope: walletAuthorization.scope, issuedAt, expiresAt: capabilityExpiresAt };
   // "openid" gets the relying party a self-issued id_token -- signed here,
   // directly with the identity's own Root key, never by dito's server (see
@@ -4282,7 +4361,7 @@ async function approveAuthorization() {
   const persistAuthorization = async () => {
     await saveWalletOAuthGrant({ id: capability.id, did, clientId: capability.audience, clientName: walletAuthorization.clientName, label: requestedDeviceLabel(authorizeDefaultName()), ...(walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ? { appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName } : {}), ...(capability.deviceJkt ? { deviceJkt: capability.deviceJkt } : {}), scope: capability.scope, issuedAt: capability.issuedAt, expiresAt: capability.expiresAt, ...(walletAuthorization.outcomeReporting === true && walletAuthorization.responseType !== "vp_token id_token" ? { outcome: "pending" } : {}) });
     if (capability.deviceJkt) await saveAuthorizedDeviceBinding({ did, deviceJkt: capability.deviceJkt, clientName: walletAuthorization.clientName, didCommKeyId: edit?.verificationMethods[0]?.id });
-    await saveApplicationAuthorizationMetadata({ capability, edit, appKey: walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ?? undefined });
+    await saveApplicationAuthorizationMetadata({ capability, edit, appKey: walletAuthorization.rpDid ?? walletAuthorization.clientDisplayHost ?? walletAuthorization.clientDisplayName ?? undefined });
   };
   // PLAN7: "vp_token id_token" delivers straight to the RP -- no
   // api.did.md call, no `code` -- see oauthDeliver's own comment. "code"
@@ -4291,7 +4370,7 @@ async function approveAuthorization() {
   // before.
   if (walletAuthorization.responseType === "vp_token id_token") {
     await commitAuthorization({
-      accept: () => oauthDeliveryPlan(walletAuthorization, { vp_token: JSON.stringify({ capability: [vc] }), ...(idToken ? { id_token: idToken } : {}), state: walletAuthorization.state }),
+      accept: () => oauthDeliveryPlan(walletAuthorization, { vp_token: JSON.stringify({ capability: [presentation] }), ...(idToken ? { id_token: idToken } : {}), state: walletAuthorization.state }),
       persist: persistAuthorization,
       navigate: plan => (embedLoginDeliver ? embedLoginDeliver(plan) : plan.go()),
     });
@@ -5458,7 +5537,7 @@ query("#publish-create").addEventListener("click", async () => {
         // that address (no provisional `ex.alias` DID, no move entry).
         entries = [await buildGenesis({
           username: target.username, domain: target.domain, root: currentDraft.material.root, sign: currentDraft.material.sign,
-          nextSpare: currentDraft.material.nextSpare, api: API,
+          nextSpare: currentDraft.material.nextSpare, api: `${location.origin}/authorize`,
         })];
       } else {
         // dito itself: the Alias is optional, so the identity starts from the
@@ -5619,7 +5698,7 @@ async function provisionalGenesisEntry() {
   if (!draft.entry) {
     draft.entry = await buildGenesis({
       username: "ex", root: draft.material.root, sign: draft.material.sign,
-      nextSpare: draft.material.nextSpare, domain: "alias", api: API,
+      nextSpare: draft.material.nextSpare, domain: "alias", api: `${location.origin}/authorize`,
     });
   }
   return draft.entry;
@@ -6410,9 +6489,9 @@ async function embedApprovalFor(request, host) {
   const search = validEmbedLogin(request)?.replace(/^\/authorize/, "");
   if (!search) throw new Error("The sign-in request is invalid.");
   const parameters = await oauthAuthorizationParameters(search, { embedded: true });
-  if (!parameters || !parameters.clientId.startsWith("did:webvh:")) throw new Error("The sign-in request is invalid.");
+  if (!parameters || !(parameters.clientId.startsWith("did:webvh:") || parameters.clientId.startsWith("redirect_uri:"))) throw new Error("The sign-in request is invalid.");
   if (!embedSignInTargetsPage(parameters.redirectUri, embedParentOrigin)) throw new Error("This sign-in is not for the page that asked for it.");
-  walletAuthorization = { ...parameters, clientName: parameters.clientId, outcomeReporting: false };
+  walletAuthorization = { ...parameters, clientName: parameters.clientDisplayName ?? parameters.clientDisplayHost ?? parameters.clientId, outcomeReporting: false };
   const edit = didDocumentEditDetail(parameters.authorizationDetails, "");
   return {
     changes: edit ? describeDidDocumentEdit(edit) : [],
@@ -6830,7 +6909,8 @@ function validEmbedLogin(value) {
     // A did:webvh relying party sends a signed request (client_id, request, response_type) or its
     // parameters plainly (oauthAuthorizationParameters checks them strictly, and the redirect against
     // the page that asked).
-    const shaped = clientId.startsWith("did:webvh:") && new Set(keys).size === keys.length
+    const shaped = clientId.startsWith("redirect_uri:") ? new Set(keys).size === keys.length
+      : clientId.startsWith("did:webvh:") && new Set(keys).size === keys.length
       && (keys.includes("request") ? keys.length === 3 && ["client_id", "request", "response_type"].every(key => keys.includes(key)) : true);
     return url.origin === location.origin && url.pathname === "/authorize" && shaped ? `${url.pathname}${url.search}` : null;
   } catch { return null; }

@@ -34,7 +34,7 @@ test("create -> open round-trips through the log text and mnemonic alone", async
   expect(mnemonic.split(" ")).toHaveLength(24);
   const reopened = await Identity.open({ mnemonic, log: identity.logText() });
   expect(reopened.did).toBe(identity.did);
-  expect(reopened.state.service[0].type).toBe("UDIWalletIssuer");
+  expect(reopened.state.service[0].type).toBe("SelfIssuedOPAuthorizationEndpoint");
 });
 
 test("open rejects a wrong mnemonic and a tampered log", async () => {

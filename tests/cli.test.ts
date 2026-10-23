@@ -53,7 +53,7 @@ test("failure modes: refuses to overwrite, wrong mnemonic, tampered log, missing
   expect(await run(["rotate", "--log", log], wrong.io)).toBe(1);
   expect(wrong.err).toMatch(/Root Key/);
 
-  const tampered = readFileSync(log, "utf8").replace("UDIWalletIssuer", "Evil");
+  const tampered = readFileSync(log, "utf8").replace("SelfIssuedOPAuthorizationEndpoint", "Evil");
   writeFileSync(log, tampered.replace("\"service\":[]", "\"service\":[{\"id\":\"#x\",\"type\":\"X\",\"serviceEndpoint\":\"https://evil\"}]"));
   writeFileSync(log, readFileSync(log, "utf8").replace("\"authentication\"", "\"name\":\"tampered\",\"authentication\""));
   expect(await run(["verify", "--log", log], harness().io)).toBe(1);

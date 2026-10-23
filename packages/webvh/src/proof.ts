@@ -10,21 +10,25 @@ import { multikeyFromPublicKey } from "./signer.ts";
 
 export type Proof = {
   type: string; cryptosuite: string; proofPurpose: string; verificationMethod: string; proofValue: string; created?: string;
+  /** Data Integrity proof options: what a presentation is bound to (the verifier's nonce and its identifier). */
+  challenge?: string; domain?: string;
 };
 
-function templateFor(args: { verificationMethod: string; proofPurpose: string; created?: string }) {
+function templateFor(args: { verificationMethod: string; proofPurpose: string; created?: string; challenge?: string; domain?: string }) {
   return {
     type: "DataIntegrityProof" as const,
     cryptosuite: "eddsa-jcs-2022" as const,
     proofPurpose: args.proofPurpose,
     verificationMethod: args.verificationMethod,
     ...(args.created ? { created: args.created } : {}),
+    ...(args.challenge ? { challenge: args.challenge } : {}),
+    ...(args.domain ? { domain: args.domain } : {}),
   };
 }
 
 /** Sign `document` with a raw 32-byte Ed25519 private key. */
 export async function createDataIntegrityProof(document: object, args: {
-  privateKey: Uint8Array; verificationMethod: string; proofPurpose: string; created?: string;
+  privateKey: Uint8Array; verificationMethod: string; proofPurpose: string; created?: string; challenge?: string; domain?: string;
 }): Promise<Proof> {
   if (args.privateKey.length !== 32) throw new Error("An Ed25519 private key must be 32 bytes.");
   if (!args.verificationMethod || !args.proofPurpose) throw new Error("A verification method and proof purpose are required.");

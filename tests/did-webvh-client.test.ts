@@ -90,17 +90,17 @@ test("a provisional did.invalid genesis is created entirely in the browser", asy
 // DID document to find which backend issues that identity's OAuth tokens,
 // the same pattern atproto uses for #atproto_pds/AtprotoPersonalDataServer
 // PDS discovery). `api` was an unused buildGenesis parameter before this;
-// supplying it now publishes the issuer as a "#udi-wallet-issuer" service.
-test("buildGenesis publishes a UDIWalletIssuer service entry when api is supplied", async () => {
+// supplying it now publishes the issuer as a "#wallet" service.
+test("buildGenesis publishes a SelfIssuedOPAuthorizationEndpoint service entry when api is supplied", async () => {
   const identity = await createIdentityMaterial();
   const genesis = await buildGenesis({
     username: "alice", domain: "did.md", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare,
     api: "https://api.did.md",
   });
-  expect(genesis.state.service).toEqual([{ id: "#udi-wallet-issuer", type: "UDIWalletIssuer", serviceEndpoint: "https://api.did.md" }]);
+  expect(genesis.state.service).toEqual([{ id: "#wallet", type: "SelfIssuedOPAuthorizationEndpoint", serviceEndpoint: "https://api.did.md" }]);
 });
 
-test("buildGenesis omits the UDIWalletIssuer entry when api is not supplied (existing callers unaffected)", async () => {
+test("buildGenesis omits the SelfIssuedOPAuthorizationEndpoint entry when api is not supplied (existing callers unaffected)", async () => {
   const identity = await createIdentityMaterial();
   const genesis = await buildGenesis({
     username: "bob", domain: "did.md", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare,
@@ -108,7 +108,7 @@ test("buildGenesis omits the UDIWalletIssuer entry when api is not supplied (exi
   expect(genesis.state.service).toEqual([]);
 });
 
-test("buildGenesis orders the UDIWalletIssuer entry before any caller-supplied service entries", async () => {
+test("buildGenesis orders the SelfIssuedOPAuthorizationEndpoint entry before any caller-supplied service entries", async () => {
   const identity = await createIdentityMaterial();
   const genesis = await buildGenesis({
     username: "carol", domain: "did.md", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare,
@@ -116,7 +116,7 @@ test("buildGenesis orders the UDIWalletIssuer entry before any caller-supplied s
     service: [{ id: "#oauth-redirect", type: "OAuthRedirectTarget", serviceEndpoint: "https://t.biset.md/wallet/callback" }],
   });
   expect(genesis.state.service).toEqual([
-    { id: "#udi-wallet-issuer", type: "UDIWalletIssuer", serviceEndpoint: "https://api.did.md" },
+    { id: "#wallet", type: "SelfIssuedOPAuthorizationEndpoint", serviceEndpoint: "https://api.did.md" },
     { id: "#oauth-redirect", type: "OAuthRedirectTarget", serviceEndpoint: "https://t.biset.md/wallet/callback" },
   ]);
 });

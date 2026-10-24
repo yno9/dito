@@ -335,6 +335,7 @@ async function handleRoute(request: Request): Promise<Response> {
     const c = entry.claims as Record<string, unknown>;
     const body = {
       sub: c.sub,
+      ...(c.did ? { did: c.did } : {}),
       ...(c.email ? { email: c.email } : {}),
       ...(c.email_verified !== undefined ? { email_verified: c.email_verified } : {}),
       ...(c.name ? { name: c.name } : {}),

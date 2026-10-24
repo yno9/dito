@@ -125,7 +125,8 @@ a backend of their own; the core never imports it.
   document. The wallet and the server both verify independently, and the server accepts RP DIDs only from an allow-listed
   set of domains (fail-closed; SSRF).
 - **OIDC bridge**: turns a wallet's self-issued `id_token` into standard OIDC claims for RPs that cannot verify
-  DIDs (Forgejo, Outline, …). `sub` is the stable SCID.
+  DIDs (Forgejo, Outline, …). `sub` is the identity, not the DID string: `did:webvh:<SCID>` (`stableSubject` in `packages/did-verify`), so an
+  account survives a move to another host; the DID as it is now travels in the `did` claim. A key-only token keeps its JWK thumbprint.
 
 ### 7.1 SIOPv2 / OpenID4VP direct sign-in (a relying party with no key of its own)
 

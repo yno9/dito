@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { verifyIdTokenSignature } from "../../../packages/did-verify/index.ts";
+import { stableSubject, verifyIdTokenSignature } from "../../../packages/did-verify/index.ts";
 import { createSelfIssuedIdToken } from "../../../packages/wallet/src/did-webvh.ts";
 
 export type DitoRegistration = { client_id: string; registration_access_token?: string };
@@ -119,7 +119,7 @@ export class DitoClient {
     if (!tokens.id_token) throw new Error("dito did not return an id_token");
     const signer = await verifyIdTokenSignature(tokens.id_token, this.walletIdentityDomain); const claims = JSON.parse(Buffer.from(tokens.id_token.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
     if (claims.aud !== this.registration.client_id) throw new Error("dito id_token audience mismatch");
-    return { claims: { ...claims, sub: signer.sub }, signer, idToken: tokens.id_token };
+    return { claims: bridgeClaims(claims, signer), signer, idToken: tokens.id_token };
   }
   // PLAN8: verifies an id_token delivered directly via direct_post -- no
   // token-endpoint round trip. Mirrors exchange()'s checks (signature,
@@ -133,6 +133,13 @@ export class DitoClient {
     const claims = JSON.parse(Buffer.from(idToken.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
     if (claims.aud !== this.rpDidKey.did) throw new Error("dito id_token audience mismatch");
     if (claims.nonce !== expectedNonce) throw new Error("dito id_token nonce mismatch");
-    return { claims: { ...claims, sub: signer.sub }, signer, idToken };
+    return { claims: bridgeClaims(claims, signer), signer, idToken };
   }
+}
+
+// The claims the bridge hands to a relying party. `sub` is the identity (the SCID),
+// not the DID string, so an account survives a move to another host; the DID as it
+// is now travels in `did`.
+function bridgeClaims(claims: Record<string, unknown>, signer: { sub: string; method: string }): Record<string, unknown> {
+  return { ...claims, sub: stableSubject(signer.sub), ...(signer.method === "did-webvh" ? { did: signer.sub } : {}) };
 }

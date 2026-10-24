@@ -136,6 +136,19 @@ export async function verifyViaDidWebvh(jwt: string, kid: string, allowedDomainS
   return { sub: did, method: "did-webvh", publicKeyJwk: jwk };
 }
 
+/**
+ * The subject an OIDC relying party should key an account on. A did:webvh DID
+ * names its current location (`did:webvh:<scid>:<host>`), and the string changes
+ * when the identity moves; only the SCID is the identity (the SCID is derived
+ * from the genesis entry, never from where the log is served). So a did:webvh
+ * DID becomes `did:webvh:<scid>`, with the method kept in the value so that a
+ * SCID of another method can never collide with it. Anything else (a JWK
+ * thumbprint) is already stable and is returned as is.
+ */
+export function stableSubject(sub: string): string {
+  try { return `did:webvh:${parseDid(sub).scid}`; } catch { return sub; }
+}
+
 export async function verifyIdTokenSignature(jwt: string, allowedDomainSuffix?: string): Promise<VerifiedSigner> {
   const header = parseHeader(jwt);
   if (header.jwk && typeof header.jwk === "object" && !Array.isArray(header.jwk)) return verifyViaEmbeddedJwk(jwt, header.jwk as JsonWebKey);

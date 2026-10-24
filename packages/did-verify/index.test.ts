@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { jwkThumbprint, verifyIdTokenSignature } from "./index.ts";
+import { jwkThumbprint, stableSubject, verifyIdTokenSignature } from "./index.ts";
 import { Ed25519Signer, createLog, keyFromPrivateKey, serializeLog } from "../webvh/src/index.ts";
 
 function token(privateKey: Uint8Array, includeJwk = true, header: Record<string, unknown> = {}) {
@@ -90,4 +90,18 @@ test("RFC 7638 section 3.1 RSA example", async () => {
   const jwk = JSON.parse(canonical) as JsonWebKey;
   const expected = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical))).toString("base64url");
   expect(await jwkThumbprint(jwk)).toBe(expected);
+});
+
+test("stableSubject keys a did:webvh identity on its SCID, whatever host serves it", async () => {
+  const created = await realLog(ed25519.utils.randomSecretKey());
+  const scid = created.did.split(":")[2]!;
+  expect(stableSubject(created.did)).toBe(`did:webvh:${scid}`);
+  expect(stableSubject(created.did.replace("alice.did.md", "alice.example.org"))).toBe(`did:webvh:${scid}`);
+  expect(stableSubject(created.did.replace("alice.did.md", "example.org:users:alice"))).toBe(`did:webvh:${scid}`);
+});
+
+test("stableSubject leaves a JWK thumbprint, and anything that is not a did:webvh DID, unchanged", () => {
+  expect(stableSubject("5Kz1u3Vq0fMw9y2m4a7mQ0aVJ3d1x8Z6bq0wq2c3XyA")).toBe("5Kz1u3Vq0fMw9y2m4a7mQ0aVJ3d1x8Z6bq0wq2c3XyA");
+  expect(stableSubject("did:web:example.com")).toBe("did:web:example.com");
+  expect(stableSubject("did:webvh:not-a-scid:example.com")).toBe("did:webvh:not-a-scid:example.com");
 });

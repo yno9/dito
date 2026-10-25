@@ -29,8 +29,11 @@
 !/server/
 !/tests/
 !/scripts/
+!/watcher/
 
 # ...but not these, wherever they are
+.void/
+.void-wrangler.jsonc
 node_modules/
 dist/
 build/
@@ -52,5 +55,7 @@ test/logs/
 
 # operational scripts (only the local dev server is public)
 /scripts/*
-!/scripts/dev-static-server.ts
-!/scripts/pm-probe.ts
+!/scripts/
+!/watcher/dev-static-server.ts
+!/scripts/
+!/watcher/pm-probe.ts

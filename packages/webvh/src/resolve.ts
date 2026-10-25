@@ -1,15 +1,19 @@
-import { didToLogUrl } from "./url.ts";
+import { didToLogUrl, parseDid } from "./url.ts";
+import { checkAndRemember } from "./freshness.ts";
+import type { VersionMemory } from "./freshness.ts";
 import { parseLog, resolveLog } from "./log.ts";
 import { publicKeyFromMultikey } from "./proof.ts";
 import type { DIDLog } from "./log.ts";
 
+export type FetchedLog = { log: DIDLog; logUrl: string; witnessProofs?: Awaited<ReturnType<typeof fetchWitnessProofs>> };
+
 /**
- * Resolve a did:webvh DID over HTTPS: fetch its `did.jsonl`, validate the WHOLE
- * log with didwebvh-ts, and return the latest DID Document. Callers apply
- * their own policy (allowed domains, caching) before calling; the URL comes
- * from the strict parser in url.ts.
+ * Fetch (without trusting) the published log of a did:webvh DID over HTTPS, and
+ * its `did-witness.json` when any entry configures witnesses. The URL comes from
+ * the strict parser in url.ts, which is also the SSRF guard. Callers apply their
+ * own policy (allowed domains, caching) before calling.
  */
-export async function resolveDidWebvh(did: string, options: { fetch?: typeof fetch } = {}) {
+export async function fetchDidLog(did: string, options: { fetch?: typeof fetch } = {}): Promise<FetchedLog> {
   const doFetch = options.fetch ?? fetch;
   const logUrl = didToLogUrl(did);
   const response = await doFetch(logUrl);
@@ -17,9 +21,30 @@ export async function resolveDidWebvh(did: string, options: { fetch?: typeof fet
   const text = await response.text();
   const log = parseLog(text.endsWith("\n") ? text : `${text}\n`);
   const witnessProofs = usesWitnesses(log) ? await fetchWitnessProofs(logUrl, doFetch) : undefined;
-  const resolved = await resolveLog(log, witnessProofs ? { witnessProofs } : {});
+  return { log, logUrl, ...(witnessProofs ? { witnessProofs } : {}) };
+}
+
+/**
+ * Verify a log that was obtained from anywhere (a host, a cache, a mirror, a
+ * peer): the whole log with didwebvh-ts, that it describes `did`, and, when a
+ * `memory` is given, that it neither is older than nor forks a version already
+ * accepted for this SCID (StaleLogError, ForkedLogError). Returns the latest
+ * DID Document.
+ */
+export async function verifyDidLog(did: string, fetched: { log: DIDLog; witnessProofs?: FetchedLog["witnessProofs"] }, options: { memory?: VersionMemory } = {}) {
+  const resolved = await resolveLog(fetched.log, fetched.witnessProofs ? { witnessProofs: fetched.witnessProofs } : {});
   if (resolved.doc.id !== did) throw new Error("did:webvh log does not describe the expected DID");
+  if (options.memory) await checkAndRemember(options.memory, `did:webvh:${parseDid(did).scid}`, fetched.log);
   return resolved;
+}
+
+/**
+ * Resolve a did:webvh DID over HTTPS: fetch its `did.jsonl`, validate the WHOLE
+ * log with didwebvh-ts, and return the latest DID Document. `memory` makes it
+ * refuse a copy older than, or forking, one accepted before.
+ */
+export async function resolveDidWebvh(did: string, options: { fetch?: typeof fetch; memory?: VersionMemory } = {}) {
+  return verifyDidLog(did, await fetchDidLog(did, options), options);
 }
 
 /** True if any entry configures witnesses (then `did-witness.json` is needed to validate). */

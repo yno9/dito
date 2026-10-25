@@ -37,6 +37,7 @@ manager; there is no other runtime.
 pnpm dito new                                   # creates ./did.jsonl, prints the mnemonic once
 pnpm dito show                                  # DID, host, document (no secret needed)
 pnpm dito verify <did:webvh:…>                  # fetch and validate a published log
+pnpm dito forget <did:webvh:…>                  # forget the newest version verify/fetch remember (see `dito --help`)
 DITO_MNEMONIC="…" pnpm dito connect alice       # host it at https://alice.did.md (or --domain)
 GITHUB_TOKEN=… DITO_MNEMONIC="…" pnpm dito github   # host it on <login>.github.io
 DITO_MNEMONIC="…" pnpm dito rotate

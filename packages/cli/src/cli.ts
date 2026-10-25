@@ -14,7 +14,8 @@ import { parseArgs } from "node:util";
 import { buildDidJson } from "../../wallet/src/github-host.ts";
 import { hostForDid } from "../../wallet/src/host.ts";
 import { Identity } from "../../wallet/src/identity.ts";
-import { didToLogUrl, parseLog, resolveDidWebvh, resolveLog } from "../../webvh/src/index.ts";
+import { ForkedLogError, StaleLogError, didToLogUrl, parseLog, resolveDidWebvh, resolveLog } from "../../webvh/src/index.ts";
+import { FileVersionMemory, versionMemoryPath } from "./version-memory.ts";
 
 export type IO = {
   out: (text: string) => void;
@@ -32,6 +33,7 @@ Usage: dito <command> [options]
   show                      Print the DID, host and DID Document (no secret needed)
   verify [file|url|did]     Validate a log (default: --log); a did:webvh DID is fetched with its witness file
   fetch <did>               Download a published log to --log (public; no secret needed)
+  forget <did>              Forget the newest version of a DID that verify/fetch remember (see below)
   export                    Write .well-known/did.jsonl + did.json from the log (no secret needed)
   export --jwe              Write <scid>.jwe: log + keyring wrapped by the mnemonic (needs the mnemonic)
   publish                   PUT the whole log to the host its DID names (no secret; GitHub hosts need $GITHUB_TOKEN)
@@ -53,6 +55,14 @@ Options
   --out <dir>               domain/export: output directory (default .)
   --domain <domain>         connect: hosting domain (default did.md)
   --token-env <NAME>        github/rotate/...: env var holding the GitHub token
+  --no-memory               verify/fetch <did>: do not read or write the version memory
+
+Version memory
+  verify <did> and fetch <did> remember the newest version they have seen of each DID, in
+  $XDG_STATE_HOME/dito/versions.json (default ~/.local/state/dito/versions.json), and refuse a log that is
+  older than that, or that forks it: a host or cache serving a copy from before a key rotation verifies fine
+  on its own. The cost: a rollback you meant to make (a host restored from a backup, a log recovered from an
+  old copy) is refused too, until you run \`dito forget <did>\` (or check once with --no-memory).
 `;
 
 class UsageError extends Error {}
@@ -70,6 +80,7 @@ export async function run(argv: string[], io: IO): Promise<number> {
         domain: { type: "string" },
         out: { type: "string" },
         local: { type: "boolean" },
+        "no-memory": { type: "boolean" },
         jwe: { type: "boolean" },
         "token-env": { type: "string", default: "GITHUB_TOKEN" },
         help: { type: "boolean", short: "h", default: false },
@@ -97,6 +108,17 @@ export async function run(argv: string[], io: IO): Promise<number> {
     };
     const open = async () => Identity.open({ mnemonic: await mnemonic(), log: readLog() });
     const token = () => io.env[values["token-env"]!];
+    const memory = () => values["no-memory"] ? undefined : new FileVersionMemory(versionMemoryPath(io.env));
+    /** A refusal from the version memory, with the way out. */
+    const remembered = async <T>(did: string, task: (memory: FileVersionMemory | undefined) => Promise<T>): Promise<T> => {
+      try { return await task(memory()); }
+      catch (error) {
+        if (error instanceof StaleLogError || error instanceof ForkedLogError) {
+          throw new Error(`${error.message} ${error instanceof StaleLogError ? "This copy is older than one verified before." : "This log forks the one verified before."} If that is expected (a restored host, a recovered log), run \`dito forget ${did}\` or use --no-memory.`);
+        }
+        throw error;
+      }
+    };
     const save = (identity: Identity) => { mkdirSync(dirname(logFile), { recursive: true }); writeFileSync(logFile, identity.logText(), { mode: 0o644 }); };
     const summary = (identity: Identity) => ({ did: identity.did, provisional: identity.isProvisional, entries: identity.entries.length, host: identity.isProvisional ? null : identity.host.kind });
 
@@ -120,7 +142,7 @@ export async function run(argv: string[], io: IO): Promise<number> {
       case "fetch": {
         if (!rest[0]?.startsWith("did:webvh:")) throw new UsageError("Usage: dito fetch <did:webvh:…>");
         if (existsSync(logFile)) throw new UsageError(`${logFile} already exists; refusing to overwrite.`);
-        const resolved = await resolveDidWebvh(rest[0]);
+        const resolved = await remembered(rest[0], memory => resolveDidWebvh(rest[0]!, { memory }));
         const text = await (await fetch(didToLogUrl(rest[0]), { cache: "no-store" })).text();
         mkdirSync(dirname(logFile), { recursive: true });
         writeFileSync(logFile, text, { mode: 0o644 });
@@ -129,7 +151,7 @@ export async function run(argv: string[], io: IO): Promise<number> {
       }
       case "verify": {
         if (rest[0]?.startsWith("did:webvh:")) {
-          const resolved = await resolveDidWebvh(rest[0]);
+          const resolved = await remembered(rest[0], memory => resolveDidWebvh(rest[0]!, { memory }));
           emit({ ok: true, did: resolved.did, versionId: resolved.meta.versionId }, `OK  ${resolved.did}  (${resolved.meta.versionId})`);
           return 0;
         }
@@ -138,6 +160,14 @@ export async function run(argv: string[], io: IO): Promise<number> {
         const log = parseLog(text);
         const resolved = await resolveLog(log);
         emit({ ok: true, did: resolved.did, entries: log.length, versionId: resolved.meta.versionId }, `OK  ${resolved.did}  (${log.length} entries, ${resolved.meta.versionId})`);
+        return 0;
+      }
+      case "forget": {
+        if (!rest[0]?.startsWith("did:webvh:")) throw new UsageError("Usage: dito forget <did:webvh:…>");
+        const store = new FileVersionMemory(versionMemoryPath(io.env));
+        const scid = /^did:webvh:([^:]+)/.exec(rest[0])![1]!;
+        const forgotten = store.forget(`did:webvh:${scid}`);
+        emit({ did: rest[0], forgotten }, forgotten ? `Forgot ${rest[0]}. The next verify or fetch accepts any valid log.` : `Nothing remembered for ${rest[0]}.`);
         return 0;
       }
       case "connect": {

@@ -151,3 +151,89 @@ test("publish: PUTs the log to a third-party host at an apex domain, then re-pub
     expect(JSON.parse(second.out).versionId.startsWith("3-")).toBe(true);
   } finally { globalThis.fetch = realFetch; }
 });
+
+// ---- the version memory (verify/fetch <did>, forget) ----------------------------------------------------------------
+
+async function servedHistory() {
+  const { Ed25519Signer, createLog, keyFromPrivateKey, nextKeyHash, serializeLog, updateLog } = await import("../packages/webvh/src/index.ts");
+  const keys = [keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32))), keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32))), keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32))), keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)))];
+  const created = await createLog({ domain: "example.com", signer: new Ed25519Signer(keys[0]!), updateKeys: [keys[0]!.multikey], nextKeyHashes: [await nextKeyHash(keys[1]!.multikey)], verificationMethods: [{ id: "#k", type: "Multikey", publicKeyMultibase: keys[0]!.multikey }], authentication: ["#k"] });
+  const second = await updateLog({ log: created.log, signer: new Ed25519Signer(keys[1]!), updateKeys: [keys[1]!.multikey], nextKeyHashes: [await nextKeyHash(keys[2]!.multikey)] });
+  const forkOfSecond = await updateLog({ log: created.log, signer: new Ed25519Signer(keys[1]!), updateKeys: [keys[1]!.multikey], nextKeyHashes: [await nextKeyHash(keys[3]!.multikey)] });
+  return { did: created.did, one: serializeLog(created.log), two: serializeLog(second.log), fork: serializeLog(forkOfSecond.log) };
+}
+
+async function serving(body: () => string, task: () => Promise<void>) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => String(input).startsWith("https://example.com/.well-known/did.jsonl") ? new Response(body()) : new Response("", { status: 404 })) as typeof fetch;
+  try { await task(); } finally { globalThis.fetch = realFetch; }
+}
+
+test("verify <did> remembers the newest version it saw, refuses an older or forked copy, and forget / --no-memory are the ways out", async () => {
+  const h = await servedHistory();
+  const state = dir();
+  const env = { XDG_STATE_HOME: state };
+  let serve = h.two;
+  await serving(() => serve, async () => {
+    expect(await run(["verify", h.did], harness(env).io)).toBe(0);
+    expect(JSON.parse(readFileSync(join(state, "dito", "versions.json"), "utf8"))[`did:webvh:${h.did.split(":")[2]}`].versionId.startsWith("2-")).toBe(true);
+
+    // The host now serves the first version only: it verifies on its own, but this is older than what was seen.
+    serve = h.one;
+    const old = harness(env);
+    expect(await run(["verify", h.did], old.io)).toBe(1);
+    expect(old.err).toMatch(/older/);
+    expect(old.err).toContain(`dito forget ${h.did}`);
+    expect(await run(["verify", h.did, "--no-memory"], harness(env).io)).toBe(0);
+
+    // A different second version: the other half of a fork.
+    serve = h.fork;
+    const forked = harness(env);
+    expect(await run(["verify", h.did], forked.io)).toBe(1);
+    expect(forked.err).toMatch(/forks/);
+
+    // Forgetting lets any valid log through, and the memory starts again from it.
+    const forgot = harness(env);
+    expect(await run(["forget", h.did, "--json"], forgot.io)).toBe(0);
+    expect(JSON.parse(forgot.out).forgotten).toBe(true);
+    expect(await run(["verify", h.did], harness(env).io)).toBe(0);
+    expect(await run(["forget", h.did, "--json"], harness(env).io)).toBe(0);
+    const nothing = harness(env);
+    await run(["forget", h.did, "--json"], nothing.io);
+    expect(JSON.parse(nothing.out).forgotten).toBe(false);
+  });
+});
+
+test("fetch <did> uses the memory too, and --no-memory touches no file", async () => {
+  const h = await servedHistory();
+  const state = dir(), d = dir();
+  const env = { XDG_STATE_HOME: state };
+  await serving(() => h.one, async () => {
+    expect(await run(["fetch", h.did, "--log", join(d, "a.jsonl"), "--no-memory"], harness(env).io)).toBe(0);
+    expect(() => readFileSync(join(state, "dito", "versions.json"), "utf8")).toThrow();
+    expect(await run(["fetch", h.did, "--log", join(d, "b.jsonl")], harness(env).io)).toBe(0);
+    expect(readFileSync(join(state, "dito", "versions.json"), "utf8")).toContain("1-");
+  });
+  await serving(() => h.two, async () => { expect(await run(["verify", h.did], harness(env).io)).toBe(0); });
+  await serving(() => h.one, async () => { expect(await run(["fetch", h.did, "--log", join(d, "c.jsonl")], harness(env).io)).toBe(1); });
+});
+
+test("a damaged memory file is an error, not an empty memory", async () => {
+  const h = await servedHistory();
+  const state = dir();
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(join(state, "dito"));
+  for (const damaged of ["{not json", "[]", JSON.stringify({ x: { versionNumber: "1" } })]) {
+    writeFileSync(join(state, "dito", "versions.json"), damaged);
+    const failed = harness({ XDG_STATE_HOME: state });
+    await serving(() => h.two, async () => { expect(await run(["verify", h.did], failed.io)).toBe(1); });
+    expect(failed.err).toContain("--no-memory");
+    await serving(() => h.two, async () => { expect(await run(["verify", h.did, "--no-memory"], harness({ XDG_STATE_HOME: state }).io)).toBe(0); });
+  }
+});
+
+test("the state file follows $XDG_STATE_HOME, then $HOME/.local/state", async () => {
+  const { versionMemoryPath } = await import("../packages/cli/src/version-memory.ts");
+  expect(versionMemoryPath({ XDG_STATE_HOME: "/s", HOME: "/h" })).toBe("/s/dito/versions.json");
+  expect(versionMemoryPath({ HOME: "/h" })).toBe("/h/.local/state/dito/versions.json");
+});

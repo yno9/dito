@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatReport, runConformance, createLog, serializeLog, keyFromPrivateKey, Ed25519Signer, nextKeyHash } from "../packages/webvh/src/index.ts";
 import { setTimeout as sleep } from "node:timers/promises";
+import { advertisesVh, runVhConformance } from "../packages/vh/src/index.ts";
 import { spawn } from "./spawn.ts";
 
 // The VPS entry point (server/host/http-server.ts): conforms to the protocol
@@ -37,6 +38,18 @@ test("the VPS host passes the protocol conformance suite", async () => {
   const report = formatReport(await runConformance({ newLocation: () => `vps${Date.now().toString(36)}${n++}.did.md`, fetch: viaHost }));
   if (!report.ok) console.log(report.text);
   expect(report.ok).toBe(true);
+});
+
+test("the VPS host also passes the did:vh conformance checks it advertises, against the real file store", async () => {
+  await ready();
+  let n = 0;
+  const target = { newLocation: () => `vh${Date.now().toString(36)}${n++}.did.md`, fetch: viaHost };
+  expect(await advertisesVh(target)).toBe(true);
+  const results = await runVhConformance(target);
+  const report = formatReport(results);
+  if (!report.ok) console.log(report.text);
+  expect(report.ok).toBe(true);
+  expect(results.length).toBe(10);
 });
 
 test("public reads are CDN-cacheable (s-maxage), 404s and writes are not", async () => {

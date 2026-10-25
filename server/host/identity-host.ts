@@ -25,6 +25,7 @@ import { dirname, join } from "node:path";
 import { validateLogAt, MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, serialise, parseWitnessFile, mirrorDocument, type Json, type Obj, type Entry, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
 import { didToLogUrl as webvhDidToLogUrl, maySignIn, parseDid as webvhParseDid, verifyDataIntegrityProof as verifyProof, verifyProofSignature } from "../../packages/webvh/src/index.ts";
 import { multibaseDecode } from "didwebvh-ts";
+import { VhResolutionError, deriveDidWebDocument, isScid, validateVhLogAt } from "../../packages/vh/src/index.ts";
 import { fetchWithHost } from "../host-fetch.ts";
 import { isReservedName } from "./reserved-names.ts";
 import { counters, Gate, HourlyCount, hostLimits, Refusal } from "./limits.ts";
@@ -120,7 +121,18 @@ export function json(request: Request, body: Json, status = 200) { return new Re
 export function text(request: Request, body: string, status: number) { return new Response(`${body}\n`, { status, headers: { ...cors(request), "content-type": "text/plain; charset=utf-8" } }); }
 export function identityOrigin(username: string) { return `https://${username}.${IDENTITY_DOMAIN}`; }
 function sameLocation(did: string, username: string) { return didToLogUrl(did) === `${identityOrigin(username)}/.well-known/did.jsonl`; }
+/** The did:web DID of a hosted location: `alice.did.md` is `did:web:alice.did.md`. */
+export function didWebOf(username: string) { return `did:web:${username}.${IDENTITY_DOMAIN}`; }
+/** A did:vh log says so in the `method` of its first entry (a did:webvh log says `did:webvh:1.0`). */
+export function isVhLog(entries: Entry[]) { const method = entries[0]?.parameters?.method; return typeof method === "string" && method.startsWith("did:vh:"); }
 export async function validateLog(entries: Entry[], witnessFile: WitnessFile, username: string, enforcePublicationLocation = true) {
+  if (isVhLog(entries)) {
+    // A did:vh DID names no location, so the location is bound the other way round: the log's own current document
+    // must list this location's did:web DID (packages/vh/src/policy.ts).
+    if (witnessFile.length) throw new Invalid("witnesses are not supported for did:vh yet");
+    try { return await validateVhLogAt(entries as never, { webDid: enforcePublicationLocation ? didWebOf(username) : undefined }) as unknown as Awaited<ReturnType<typeof validateLogAt>>; }
+    catch (error) { if (error instanceof VhResolutionError) throw new Invalid(error.message); throw error; }
+  }
   return validateLogAt(entries, witnessFile, enforcePublicationLocation ? `${identityOrigin(username)}/.well-known/did.jsonl` : undefined);
 }
 
@@ -150,6 +162,16 @@ export interface IdentityStore {
   exclusive<T>(username: string, task: () => Promise<T>): Promise<T>;
   /** Every username that has anything stored (for the count and the numbers v2 admin shows); a backend that cannot says so by leaving it out. */
   list?(): Promise<string[]>;
+  /**
+   * Which name holds the log of a SCID. A did:vh DID has no host, so a log is found by its SCID (`GET /log?scid=`), and a SCID
+   * is published under one name only. A backend without it does not publish did:vh.
+   */
+  scids?: ScidIndex;
+}
+export interface ScidIndex {
+  get(scid: string): Promise<string | null>;
+  put(scid: string, username: string): Promise<void>;
+  remove(scid: string): Promise<void>;
 }
 // The VPS/Node default: identical behavior to what this module always did
 // (same file layout, same in-process lock map), just reached through the
@@ -160,7 +182,14 @@ class FsIdentityStore implements IdentityStore {
   async remove(username: string, slot: IdentitySlot): Promise<void> { removeIfExists(join(basePath(username), SLOT_FILENAME[slot])); }
   exclusive<T>(username: string, task: () => Promise<T>): Promise<T> { return exclusive(username, task); }
   async list(): Promise<string[]> { try { return readdirSync(join(DATA_DIR, "logs")); } catch { return []; } }
+  // One small file per SCID holding the name; the SCID is checked to be a SCID before it becomes a file name.
+  scids: ScidIndex = {
+    get: async scid => { const name = read(join(DATA_DIR, "scids", safeScid(scid))); return name === null ? null : name.trim(); },
+    put: async (scid, username) => { atomicWrite(join(DATA_DIR, "scids", safeScid(scid)), `${safeName(username, "username")}\n`); },
+    remove: async scid => { removeIfExists(join(DATA_DIR, "scids", safeScid(scid))); },
+  };
 }
+function safeScid(scid: string) { if (!isScid(scid)) throw new Invalid("invalid SCID"); return scid; }
 let identityStore: IdentityStore = new FsIdentityStore();
 /** Swaps the storage backend (e.g. a Durable-Object-backed store on a cloud
  * worker deployment). Not called anywhere yet -- the VPS/Node deployment
@@ -230,6 +259,20 @@ export async function setIdentityStopped(username: string, reason: string | null
   });
 }
 
+/** `GET /log?scid=<SCID>` and `GET /witness?scid=<SCID>`: the log (or witness file) of a did:vh identity this host publishes. */
+async function serveByScid(request: Request, url: URL) {
+  const notFound = () => new Response("not found\n", { status: 404, headers: { ...publicDocumentCors(), "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+  const scid = url.searchParams.get("scid") ?? "";
+  if (!isScid(scid)) return text(request, "scid must be a SCID", 400);
+  const username = await identityStore.scids?.get(scid) ?? null;
+  if (username === null) return notFound();
+  if ((await identityStore.read(username, "disabled")) !== null) return notFound();
+  const log = url.pathname === "/log";
+  const body = await identityStore.read(username, log ? "log" : "witness");
+  if (body === null) return notFound();
+  return new Response(body, { headers: { ...publicDocumentCors(), "content-type": log ? "text/jsonl; charset=utf-8" : "application/json; charset=utf-8", "cache-control": PUBLIC_READ_CACHE_CONTROL } });
+}
+
 async function serveLog(request: Request, username: string, resource: string) {
   // An identity an operator has stopped is gone to readers (as if never published) and closed to writers, until it is let back.
   const stopped = (await identityStore.read(username, "disabled")) !== null;
@@ -289,6 +332,7 @@ async function serveLog(request: Request, username: string, resource: string) {
       if (Number.isNaN(created) || Math.abs(Date.now() - created) > 5 * 60_000) throw new Invalid("disconnect proof is outside its accepted time window");
       if (!(await verifyProof(document, proof, checked.parameters.updateKeys))) throw new Invalid("disconnect request has no valid current update-key proof");
       for (const slot of ["log", "witness", "web", "routing"] as const) await identityStore.remove(username, slot);
+      if (isVhLog(parseJsonl(source))) await identityStore.scids?.remove(checked.parameters.scid!);
       return new Response(null, { status: 204, headers: cors(request) });
     });
   }
@@ -330,9 +374,28 @@ async function serveLog(request: Request, username: string, resource: string) {
     const full = serialise(combined); if (new TextEncoder().encode(full).byteLength > hostLimits().maxLogBytes) throw new Invalid(`log exceeds its ${hostLimits().maxLogBytes} byte limit`);
     const witnesses = await identityStore.read(username, "witness"); const witness = witnesses === null ? [] : parseWitnessFile(witnesses);
     const checked = await validated(() => validateLog(combined, witness, username));
-    await identityStore.write(username, "log", full);
-    if (!existing.length) { createdThisHour.add(); counters.created += 1; if (knownIdentities) knownIdentities.count += 1; }
-    await identityStore.write(username, "web", `${JSON.stringify(mirrorDocument(checked.latest.state, checked.latest.state.id as string))}\n`);
+    const vh = isVhLog(combined);
+    const write = async () => {
+      await identityStore.write(username, "log", full);
+      if (!existing.length) { createdThisHour.add(); counters.created += 1; if (knownIdentities) knownIdentities.count += 1; }
+      if (!vh) { await identityStore.write(username, "web", `${JSON.stringify(mirrorDocument(checked.latest.state, checked.latest.state.id as string))}\n`); return; }
+      // The did:web document of a did:vh identity is derived from its latest document (packages/vh/src/didweb.ts), never written
+      // by anyone; a deactivated DID has none.
+      if (checked.parameters.deactivated) await identityStore.remove(username, "web");
+      else await identityStore.write(username, "web", `${JSON.stringify(deriveDidWebDocument(checked.latest.state as never, didWebOf(username)))}\n`);
+    };
+    if (vh) {
+      const index = identityStore.scids;
+      if (!index) throw new Invalid("this host does not publish did:vh logs");
+      // A SCID is published under one name: `/log?scid=` has to find one log. Checked and claimed under the SCID's own lock.
+      const scid = checked.parameters.scid!;
+      await identityStore.exclusive(`scid:${scid}`, async () => {
+        const holder = await index.get(scid);
+        if (holder !== null && holder !== username) throw new Invalid("this DID is already published under another name on this host");
+        await write();
+        await index.put(scid, username);
+      });
+    } else await write();
     return new Response(null, { status: existing.length ? 204 : 201, headers: cors(request) });
   });
 }
@@ -528,7 +591,7 @@ export async function verifySelfIssuedIdToken(idToken: string, expectedIssuer: s
  * does not own, so the caller (server.ts) can fall through to oauth-server.ts. */
 export async function identityFetch(request: Request, url: URL): Promise<Response | undefined> {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: resourceRoute(url.pathname) ? publicDocumentCors() : cors(request) });
+    return new Response(null, { status: 204, headers: resourceRoute(url.pathname) || url.pathname === "/log" || url.pathname === "/witness" ? publicDocumentCors() : cors(request) });
   }
   if (url.pathname === "/v1/availability" && request.method === "GET") {
     const username = safeName(url.searchParams.get("username") ?? "", "username");
@@ -539,10 +602,12 @@ export async function identityFetch(request: Request, url: URL): Promise<Respons
   // did:webvh Hosting Protocol capability document (SPEC-webvh-hosting.md §5):
   // lets a client tell "this host speaks the protocol" from "unknown".
   if (url.pathname === "/.well-known/did-hosting.json" && request.method === "GET") {
-    return new Response(`${JSON.stringify({ protocol: "webvh-hosting/1", writes: true, delete: true, witness: true, maxLogBytes: hostLimits().maxLogBytes })}\n`, {
+    return new Response(`${JSON.stringify({ protocol: "webvh-hosting/1", writes: true, delete: true, witness: true, maxLogBytes: hostLimits().maxLogBytes, methods: identityStore.scids ? ["did:webvh", "did:vh"] : ["did:webvh"] })}\n`, {
       headers: { ...publicDocumentCors(), "content-type": "application/json; charset=utf-8", "cache-control": "no-cache" },
     });
   }
+  // The watcher read API of VH-Log: a log by its SCID, whatever name it is published under.
+  if ((url.pathname === "/log" || url.pathname === "/witness") && request.method === "GET") return serveByScid(request, url);
   const resource = resourceRoute(url.pathname);
   if (!resource) return undefined;
   // Protocol resources: authorization is the log's own validity, never the

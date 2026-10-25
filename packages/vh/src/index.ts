@@ -6,3 +6,5 @@ export * from "./verify.ts";
 export * from "./create.ts";
 export * from "./src.ts";
 export * from "./didweb.ts";
+export * from "./policy.ts";
+export * from "./conformance.ts";

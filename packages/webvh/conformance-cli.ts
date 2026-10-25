@@ -14,6 +14,7 @@
 import { fetchWithHost } from "../../server/host-fetch.ts";
 import { parseArgs } from "node:util";
 import { formatReport, runConformance } from "./src/conformance.ts";
+import { advertisesVh, runVhConformance } from "../vh/src/conformance.ts";
 
 const { values } = parseArgs({ options: { domain: { type: "string" }, base: { type: "string" } }, strict: true });
 if (!values.domain) {
@@ -23,7 +24,7 @@ if (!values.domain) {
 const domain = values.domain;
 const base = values.base?.replace(/\/$/, "");
 let counter = 0;
-const results = await runConformance({
+const target = {
   newLocation: () => `conf-${Date.now().toString(36)}${counter++}.${domain}`,
   fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
     if (!base) return fetch(input, init);
@@ -32,7 +33,10 @@ const results = await runConformance({
     headers.set("host", url.host);
     return fetchWithHost(`${base}${url.pathname}${url.search}`, { ...init, headers });
   }) as typeof fetch,
-});
+};
+const results = await runConformance(target);
+// A host that advertises did:vh (`methods` in its capability document) is also held to the did:vh checks.
+if (await advertisesVh(target)) results.push(...await runVhConformance(target));
 const report = formatReport(results);
 console.log(report.text);
 process.exit(report.ok ? 0 : 1);

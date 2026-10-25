@@ -138,11 +138,12 @@ preflight (`OPTIONS`) MUST allow methods `GET, POST, PUT, DELETE, OPTIONS` and h
   "writes": true,
   "delete": true,
   "witness": true,
-  "maxLogBytes": 16777216
+  "maxLogBytes": 16777216,
+  "methods": ["did:webvh", "did:vh"]
 }
 ```
 
-All members but `protocol` are OPTIONAL; a missing member means "not stated". Clients use it to
+All members but `protocol` are OPTIONAL; a missing member means "not stated" (`methods` missing: `did:webvh` only). Clients use it to
 tell "this host speaks the protocol" from "unknown" before attempting a write, and to explain a failure.
 A host that serves it MUST NOT lie: `writes: true` means `PUT did.jsonl` for a fresh valid log may succeed.
 
@@ -180,7 +181,9 @@ the protocol; a server MAY offer one as an extension.
 
 `packages/webvh/src/conformance.ts` exports `runConformance(target)`; `pnpm conformance` runs it
 against a URL. It creates throwaway identities and checks sections 2-6. did.md's own server is in
-CI against it (`tests/hosting-conformance.test.ts`).
+CI against it (`tests/hosting-conformance.test.ts`). A host that lists `did:vh` in `methods` is also held to
+section 11: `packages/vh/src/conformance.ts` exports `runVhConformance(target)`, which `pnpm conformance` runs
+for such a host.
 
 ## 10. Relation to did.md
 
@@ -190,3 +193,31 @@ did.md's server is the reference implementation. Its extras are *not* part of th
 
 [did:webvh]: https://identity.foundation/didwebvh/v1.0/
 [Data Integrity EdDSA / eddsa-jcs-2022]: https://www.w3.org/TR/vc-di-eddsa/
+
+## 11. did:vh (optional, advertised in `methods`)
+
+A `did:vh:<SCID>` DID (see didvh-spec.md; a pre-draft) names no location. The resources are the same,
+at the same URLs (`https://alice.did.md` is served at `/.well-known/did.jsonl`, `src=https://alice.did.md`),
+and a host tells the two kinds of log apart by `parameters.method` in the first entry (`did:vh:1.0`). What differs:
+
+* **The location rule (replaces "`state.id` designates this location").** A did:vh log has no host in its DID, so the
+  binding is made the other way round: the log's *current* document MUST list the did:web DID of the location
+  (`did:web:alice.did.md` for `https://alice.did.md`; `did:web:example.com:dids:issuer` for
+  `https://example.com/dids/issuer`) in `alsoKnownAs`. A `PUT` or `POST` whose result does not is refused (`400`). A
+  deactivated DID need not. Without the rule any valid log could be put at any free name.
+* **`did.json` is derived, never written.** Whenever the log changes, the host regenerates it from the latest
+  document: every `did:vh:<SCID>` becomes the location's did:web DID, and `alsoKnownAs` becomes `["did:vh:<SCID>"]` and
+  nothing else. A deactivated DID has no `did.json` (`404`). A verifier takes the did:vh document as the truth and
+  accepts a `did.json` only if it equals that derivation (`checkDidWebShadow`): a link in both directions.
+* **One SCID, one location.** A host MUST NOT publish the same SCID at two locations (`400`), so that a log can be
+  found by its SCID.
+* **`GET /log?scid=<SCID>`** (VH-Log's watcher read API) returns the log, and **`GET /witness?scid=<SCID>`** the witness
+  file, of a SCID published on this host, whatever name it is under, with the same CORS as the other reads. `404`
+  when unknown or taken down; `400` when `scid` is not a SCID.
+* **Witnesses are not supported yet**: a log that configures any, and a `PUT did-witness.json` for it, are refused
+  (`400`) rather than accepted without the approvals the log needs.
+* **`DELETE`** takes the log, `did.json` and the SCID down, as for did:webvh, but it is **not** a deactivation: copies
+  may be held elsewhere (peers, watchers). To retire a DID, publish an entry with `deactivated: true`.
+
+For a host, "a log is only as new as the newest one accepted" is the rule §3.1 already gives: a `PUT` must keep the
+published log as a byte-for-byte prefix, so the host never goes back or forks.

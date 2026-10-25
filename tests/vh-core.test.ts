@@ -259,3 +259,28 @@ test("an error from the resolver carries a code", async () => {
   expect(error).toBeInstanceOf(VhResolutionError);
   expect(error.code).toBe("invalidDid");
 });
+
+// ---- what a host checks before it stores a log ---------------------------------------------------------------------
+
+test("validateVhLogAt: a valid log, the parameters in force, and the location rule", async () => {
+  const { validateVhLogAt } = await import("../packages/vh/src/index.ts");
+  const k0 = key(), k1 = key();
+  const web = "did:web:alice.did.md";
+  const { did, log } = await createVhLog({ signer: k0, updateKeys: [k0.multikey], nextKeyHashes: [keyHash(k1.multikey)], document: d => ({ id: d, alsoKnownAs: [web] }) });
+  const checked = await validateVhLogAt(log, { webDid: web });
+  expect(checked.did).toBe(did);
+  expect(checked.latest).toBe(log[0]);
+  expect(checked.parameters).toMatchObject({ scid: did.slice(7), updateKeys: [k0.multikey], nextKeyHashes: [keyHash(k1.multikey)], portable: false, deactivated: false });
+  await validateVhLogAt(log);
+  // The location rule: the current document must name this location's did:web DID.
+  await expect(validateVhLogAt(log, { webDid: "did:web:bob.did.md" })).rejects.toThrow(/must name did:web:bob\.did\.md/);
+  const renamed = await updateVhLog({ log, signer: k1, document: { id: did, alsoKnownAs: ["did:web:bob.did.md"] }, parameters: { updateKeys: [k1.multikey], nextKeyHashes: [] }, now: Date.now() + 2000 });
+  await expect(validateVhLogAt(renamed.log, { webDid: web })).rejects.toThrow(/must name/);
+  await validateVhLogAt(renamed.log, { webDid: "did:web:bob.did.md" });
+  // A deactivated DID no longer has to name anything.
+  const done = await deactivateVhLog({ log: renamed.log, signer: k1, now: Date.now() + 4000 });
+  expect((await validateVhLogAt(done.log, { webDid: web })).parameters.deactivated).toBe(true);
+  // Bad logs are the resolver's errors.
+  await expect(validateVhLogAt([])).rejects.toThrow(/number of log entries/);
+  await expect(validateVhLogAt([{ ...log[0]!, parameters: { ...log[0]!.parameters, scid: "x" } }])).rejects.toThrow(/valid SCID/);
+});

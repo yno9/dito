@@ -35,6 +35,7 @@ manager; there is no other runtime.
 
 ```sh
 pnpm dito new                                   # creates ./did.jsonl, prints the mnemonic once
+pnpm dito new --method vh                        # a did:vh identity (no host in the DID); `connect` then gives it a place
 pnpm dito show                                  # DID, host, document (no secret needed)
 pnpm dito verify <did:webvh:…>                  # fetch and validate a published log
 pnpm dito forget <did:webvh:…>                  # forget the newest version verify/fetch remember (see `dito --help`)

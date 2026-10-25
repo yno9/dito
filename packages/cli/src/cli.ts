@@ -16,6 +16,7 @@ import { hostForDid } from "../../wallet/src/host.ts";
 import { Identity } from "../../wallet/src/identity.ts";
 import { ForkedLogError, StaleLogError, didToLogUrl, parseLog, resolveDidWebvh, resolveLog } from "../../webvh/src/index.ts";
 import { FileVersionMemory, versionMemoryPath } from "./version-memory.ts";
+import { VhUsageError, vhCommand } from "./vh.ts";
 
 export type IO = {
   out: (text: string) => void;
@@ -29,7 +30,7 @@ const HELP = `dito -- did:webvh identities from the command line
 
 Usage: dito <command> [options]
 
-  new                       Create an identity (provisional DID) and write the log
+  new                       Create an identity (provisional DID) and write the log   (--method vh: a did:vh identity, no host yet)
   show                      Print the DID, host and DID Document (no secret needed)
   verify [file|url|did]     Validate a log (default: --log); a did:webvh DID is fetched with its witness file
   fetch <did>               Download a published log to --log (public; no secret needed)
@@ -56,6 +57,14 @@ Options
   --domain <domain>         connect: hosting domain (default did.md)
   --token-env <NAME>        github/rotate/...: env var holding the GitHub token
   --no-memory               verify/fetch <did>: do not read or write the version memory
+  --method <vh|webvh>       new: the DID method (default webvh; vh = did:vh, see "did:vh" below)
+  --watcher <origin>        did:vh verify/fetch <did>: a host serving GET /log?scid= (a did:vh DID names no location)
+  --src <location>          did:vh verify/fetch <did>: the web location of the log (https://alice.did.md)
+
+did:vh
+  A log whose first entry says did:vh:1.0 gets the same commands (show, verify, connect, publish, rotate, service, unpublish,
+  export, import, fetch, forget). \`connect <username>\` is one update entry that makes the document name its place; the DID does
+  not change. There is no \`domain\`/\`github\`. unpublish takes the log down; it does not deactivate the DID.
 
 Version memory
   verify <did> and fetch <did> remember the newest version they have seen of each DID, in
@@ -81,6 +90,9 @@ export async function run(argv: string[], io: IO): Promise<number> {
         out: { type: "string" },
         local: { type: "boolean" },
         "no-memory": { type: "boolean" },
+        method: { type: "string" },
+        src: { type: "string" },
+        watcher: { type: "string" },
         jwe: { type: "boolean" },
         "token-env": { type: "string", default: "GITHUB_TOKEN" },
         help: { type: "boolean", short: "h", default: false },
@@ -121,6 +133,11 @@ export async function run(argv: string[], io: IO): Promise<number> {
     };
     const save = (identity: Identity) => { mkdirSync(dirname(logFile), { recursive: true }); writeFileSync(logFile, identity.logText(), { mode: 0o644 }); };
     const summary = (identity: Identity) => ({ did: identity.did, provisional: identity.isProvisional, entries: identity.entries.length, host: identity.isProvisional ? null : identity.host.kind });
+
+    // A did:vh identity (a log whose first entry says so, or `new --method vh`) has its own commands; they hand back what is not theirs.
+    if (values.method !== undefined && values.method !== "vh" && values.method !== "webvh") throw new UsageError(`--method is vh or webvh, not "${values.method}".`);
+    const handled = await vhCommand(command, { values, rest, emit, mnemonic, memory, logFile }).catch(error => { throw error instanceof VhUsageError ? new UsageError(error.message) : error; });
+    if (handled !== undefined) return handled;
 
     switch (command) {
       case "new": {

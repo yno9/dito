@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { jwkThumbprint, stableSubject, verifyIdTokenSignature } from "./index.ts";
-import { Ed25519Signer, createLog, keyFromPrivateKey, serializeLog } from "../webvh/src/index.ts";
+import { createVhLog, keyFromPrivateKey, serializeVhLog, withLocation } from "../vh/src/index.ts";
 
 function token(privateKey: Uint8Array, includeJwk = true, header: Record<string, unknown> = {}) {
   const jwk: JsonWebKey = { kty: "OKP", crv: "Ed25519", x: Buffer.from(ed25519.getPublicKey(privateKey)).toString("base64url") };
@@ -11,12 +11,15 @@ function token(privateKey: Uint8Array, includeJwk = true, header: Record<string,
   return `${encodedHeader}.${payload}.${Buffer.from(signature).toString("base64url")}`;
 }
 
-// A real, signed did:webvh log whose #pass-1 key is `privateKey`.
-async function realLog(privateKey: Uint8Array, domain = "alice.did.md") {
+// A real, signed did:vh log whose #pass-1 key is `privateKey`, published at `host`.
+async function realLog(privateKey: Uint8Array, host = "alice.did.md") {
   const key = keyFromPrivateKey(privateKey);
-  return createLog({
-    domain, signer: new Ed25519Signer(key), updateKeys: [key.multikey],
-    verificationMethods: [{ id: "#pass-1", type: "Multikey", publicKeyMultibase: key.multikey }], authentication: ["#pass-1"],
+  return createVhLog({
+    signer: key, updateKeys: [key.multikey],
+    document: did => withLocation({
+      "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"], id: did,
+      verificationMethod: [{ id: "#pass-1", type: "Multikey", controller: did, publicKeyMultibase: key.multikey }], authentication: ["#pass-1"],
+    }, did, `https://${host}`),
   });
 }
 
@@ -39,49 +42,47 @@ test("rejects tampering and a missing JWK", async () => {
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
-test("resolves and verifies a did:webvh kid-only token (dito's real shape, no embedded jwk)", async () => {
+const sources = (log: string, seen: string[] = []) => ({
+  watchers: ["https://did.md"],
+  fetch: (async (url: string | URL) => { seen.push(String(url)); return new Response(log, { status: 200 }); }) as typeof fetch,
+});
+
+test("resolves and verifies a did:vh kid-only token from the verifier's watchers (dito's real shape, no embedded jwk)", async () => {
   const privateKey = ed25519.utils.randomSecretKey();
   const created = await realLog(privateKey);
   const did = created.did;
   const jwt = token(privateKey, false, { kid: `${did}#pass-1` });
-  globalThis.fetch = (async (url: string | URL) => {
-    expect(String(url)).toBe("https://alice.did.md/.well-known/did.jsonl");
-    return new Response(serializeLog(created.log), { status: 200 });
-  }) as typeof fetch;
-  const verified = await verifyIdTokenSignature(jwt, "did.md");
-  expect(verified.method).toBe("did-webvh");
+  const seen: string[] = [];
+  const verified = await verifyIdTokenSignature(jwt, "did.md", sources(serializeVhLog(created.log), seen));
+  expect(seen).toEqual([expect.stringContaining(`https://did.md/log?scid=${did.slice("did:vh:".length)}`)]);
+  expect(verified.method).toBe("did-vh");
   expect(verified.sub).toBe(did);
 });
 
-test("rejects a did:webvh whose published log does not validate (tampered document)", async () => {
+test("rejects a did:vh whose published log does not validate (tampered document)", async () => {
   const privateKey = ed25519.utils.randomSecretKey();
   const created = await realLog(privateKey);
   const forged = JSON.parse(JSON.stringify(created.log));
   forged[0].state.verificationMethod[0].publicKeyMultibase = keyFromPrivateKey(ed25519.utils.randomSecretKey()).multikey;
   const jwt = token(privateKey, false, { kid: `${created.did}#pass-1` });
-  globalThis.fetch = (async () => new Response(serializeLog(forged), { status: 200 })) as typeof fetch;
-  await expect(verifyIdTokenSignature(jwt, "did.md")).rejects.toThrow();
+  await expect(verifyIdTokenSignature(jwt, "did.md", sources(serializeVhLog(forged)))).rejects.toThrow();
 });
 
-test("rejects a did:webvh token whose kid domain is outside the allowed identity domain", async () => {
+test("rejects a did:vh token whose document names no place under the allowed identity domain", async () => {
   const privateKey = ed25519.utils.randomSecretKey();
-  const scid = (await realLog(privateKey)).did.split(":")[2];
-  const kid = `did:webvh:${scid}:evil.example#pass-1`;
-  const jwt = token(privateKey, false, { kid });
-  globalThis.fetch = (async () => { throw new Error("must not fetch an out-of-domain DID"); }) as typeof fetch;
-  await expect(verifyIdTokenSignature(jwt, "did.md")).rejects.toThrow("accepted issuer domain");
+  const created = await realLog(privateKey, "evil.example");
+  const jwt = token(privateKey, false, { kid: `${created.did}#pass-1` });
+  await expect(verifyIdTokenSignature(jwt, "did.md", sources(serializeVhLog(created.log)))).rejects.toThrow("accepted issuer domain");
 });
 
-test("rejects a percent-encoded domain that would smuggle a URL fragment past the allowlist", async () => {
+test("a did:vh token needs a verifier with watchers: the token cannot choose where its log is", async () => {
   const privateKey = ed25519.utils.randomSecretKey();
-  // Decodes to "evil.com#.did.md": passes a naive `.endsWith(".did.md")`
-  // string check, but "https://evil.com#.did.md/.well-known/did.jsonl"
-  // fetches only "evil.com" (the rest becomes a URL fragment).
-  const scid = (await realLog(privateKey)).did.split(":")[2];
-  const kid = `did:webvh:${scid}:evil.com%23.did.md#pass-1`;
-  const jwt = token(privateKey, false, { kid });
-  globalThis.fetch = (async () => { throw new Error("must not fetch an out-of-domain DID"); }) as typeof fetch;
-  await expect(verifyIdTokenSignature(jwt, "did.md")).rejects.toThrow("fully qualified DNS name");
+  const created = await realLog(privateKey);
+  const jwt = token(privateKey, false, { kid: `${created.did}?src=https://evil.example#pass-1` });
+  globalThis.fetch = (async () => { throw new Error("must not fetch"); }) as typeof fetch;
+  await expect(verifyIdTokenSignature(jwt, "did.md")).rejects.toThrow(/watchers/);
+  const kid = `did:web:alice.did.md#pass-1`;
+  await expect(verifyIdTokenSignature(token(privateKey, false, { kid }), "did.md", sources(""))).rejects.toThrow();
 });
 
 test("RFC 7638 section 3.1 RSA example", async () => {
@@ -92,16 +93,12 @@ test("RFC 7638 section 3.1 RSA example", async () => {
   expect(await jwkThumbprint(jwk)).toBe(expected);
 });
 
-test("stableSubject keys a did:webvh identity on its SCID, whatever host serves it", async () => {
+test("stableSubject: a did:vh DID is its SCID already (nothing in it moves)", async () => {
   const created = await realLog(ed25519.utils.randomSecretKey());
-  const scid = created.did.split(":")[2]!;
-  expect(stableSubject(created.did)).toBe(`did:webvh:${scid}`);
-  expect(stableSubject(created.did.replace("alice.did.md", "alice.example.org"))).toBe(`did:webvh:${scid}`);
-  expect(stableSubject(created.did.replace("alice.did.md", "example.org:users:alice"))).toBe(`did:webvh:${scid}`);
+  expect(stableSubject(created.did)).toBe(created.did);
 });
 
-test("stableSubject leaves a JWK thumbprint, and anything that is not a did:webvh DID, unchanged", () => {
+test("stableSubject leaves a JWK thumbprint, and anything else, unchanged", () => {
   expect(stableSubject("5Kz1u3Vq0fMw9y2m4a7mQ0aVJ3d1x8Z6bq0wq2c3XyA")).toBe("5Kz1u3Vq0fMw9y2m4a7mQ0aVJ3d1x8Z6bq0wq2c3XyA");
   expect(stableSubject("did:web:example.com")).toBe("did:web:example.com");
-  expect(stableSubject("did:webvh:not-a-scid:example.com")).toBe("did:webvh:not-a-scid:example.com");
 });

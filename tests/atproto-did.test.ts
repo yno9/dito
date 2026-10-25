@@ -2,7 +2,8 @@ import { afterAll, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildGenesis, createIdentityMaterial } from "../packages/wallet/src/did-webvh.ts";
+import { createIdentityMaterial } from "../packages/wallet/src/keys.ts";
+import { buildGenesis } from "./helpers/genesis.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "./spawn.ts";
 

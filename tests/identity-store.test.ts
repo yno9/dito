@@ -10,7 +10,8 @@
 // created, so any inline fs fallback would fail loudly instead of silently
 // passing).
 import { afterEach, expect, test } from "vitest";
-import { buildGenesis, createIdentityMaterial } from "../packages/wallet/src/did-webvh.ts";
+import { createIdentityMaterial } from "../packages/wallet/src/keys.ts";
+import { buildGenesis } from "./helpers/genesis.ts";
 import { identityFetch, setIdentityStore, type IdentitySlot, type IdentityStore } from "../server/host/identity-host.ts";
 
 process.env.DATA_DIR = "/nonexistent/plan9-identity-store-test";
@@ -19,6 +20,12 @@ class MemoryIdentityStore implements IdentityStore {
   private files = new Map<string, string>();
   private locks = new Map<string, Promise<void>>();
   readCalls = 0; writeCalls = 0; exclusiveCalls = 0;
+  private index = new Map<string, string>();
+  scids = {
+    get: async (scid: string) => this.index.get(scid) ?? null,
+    put: async (scid: string, username: string) => { this.index.set(scid, username); },
+    remove: async (scid: string) => { this.index.delete(scid); },
+  };
   private key(username: string, slot: IdentitySlot) { return `${username}/${slot}`; }
   async read(username: string, slot: IdentitySlot): Promise<string | null> {
     this.readCalls += 1;
@@ -62,7 +69,7 @@ test("identityFetch publishes and resolves a genesis entry entirely through a sw
   const putResponse = await identityFetch(putRequest, new URL(putRequest.url));
   expect(putResponse?.status).toBe(201);
   expect(store.writeCalls).toBeGreaterThan(0);
-  expect(store.exclusiveCalls).toBe(1);
+  expect(store.exclusiveCalls).toBe(2); // the name, and the SCID (one SCID, one name)
 
   const getRequest = new Request(`https://${username}.did.md/.well-known/did.jsonl`, { headers: { host: `${username}.did.md` } });
   const getResponse = await identityFetch(getRequest, new URL(getRequest.url));
@@ -98,6 +105,6 @@ test("identityFetch's per-username exclusive() lock still serializes concurrent 
   const statuses = [first!.status, second!.status].sort();
   // One creates (201), the other sees the identical log already published
   // and is treated as a no-op republish (204) -- either way, exactly one
-  // did:webvh log resource exists afterward, never a corrupted merge.
+  // did:vh log resource exists afterward, never a corrupted merge.
   expect(statuses).toEqual([201, 204]);
 });

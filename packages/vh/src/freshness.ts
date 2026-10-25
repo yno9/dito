@@ -9,7 +9,7 @@
  * them is a comparison with what this party has already accepted.
  *
  * Method-neutral: it needs only `versionId` (`<number>-<hash>`), which the
- * did:webvh and did:vh logs share, so the same memory serves both.
+ * every did:vh log has, so one memory serves every identity.
  */
 export type KnownVersion = { versionNumber: number; versionId: string };
 
@@ -66,7 +66,7 @@ export function standingOf(entries: ReadonlyArray<{ versionId: string }>, known?
   return entries.length === known.versionNumber ? "same" : "newer";
 }
 
-/** Storage for the newest accepted version of each identity, keyed by e.g. `did:webvh:<SCID>`. */
+/** Storage for the newest accepted version of each identity, keyed by e.g. `did:vh:<SCID>`. */
 export interface VersionMemory {
   get(key: string): KnownVersion | undefined | Promise<KnownVersion | undefined>;
   set(key: string, version: KnownVersion): void | Promise<void>;

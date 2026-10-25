@@ -10,9 +10,9 @@
  *   cp packages/vh/vectors/vectors.json ../biset/test/fixtures/did-vh-vectors.json
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { MultibaseEncoding, multibaseEncode } from "didwebvh-ts";
-import { createDataIntegrityProof } from "../../webvh/src/proof.ts";
-import { keyFromPrivateKey } from "../../webvh/src/signer.ts";
+import { multibaseBase58 } from "../src/base58.ts";
+import { createDataIntegrityProof } from "../src/proof.ts";
+import { keyFromPrivateKey } from "../src/signer.ts";
 import { createVhLog, deactivateVhLog, deriveDidWebDocument, entryHash, keyHash, updateVhLog, type VhLogEntry } from "../src/index.ts";
 
 const key = (label: string) => keyFromPrivateKey(sha256(new TextEncoder().encode(`did:vh test vector key ${label}`)));
@@ -89,7 +89,7 @@ export async function vectors(): Promise<{ now: string; vectors: Vector[]; shado
   add("valid/single-entry", "A created log.", plain.did, plain.log, { ok: true, versionNumber: 1, deactivated: false });
 
   // A DIDComm-capable document: an X25519 key agreement key (multicodec 0xec01), a service. Its keys are fixed, so other implementations can check what they read from it.
-  const agreementKey = multibaseEncode(new Uint8Array([0xec, 0x01, ...sha256(new TextEncoder().encode("did:vh test vector key agreement"))]), MultibaseEncoding.BASE58_BTC);
+  const agreementKey = multibaseBase58(new Uint8Array([0xec, 0x01, ...sha256(new TextEncoder().encode("did:vh test vector key agreement"))]));
   const withAgreement = await createVhLog({
     signer: k0, updateKeys: [k0.multikey], document: did => document(did, {
       verificationMethod: [{ id: `${did}#k`, type: "Multikey", controller: did, publicKeyMultibase: k0.multikey }, { id: `${did}#ka`, type: "Multikey", controller: did, publicKeyMultibase: agreementKey }],
@@ -123,7 +123,7 @@ export async function vectors(): Promise<{ now: string; vectors: Vector[]; shado
   editedLater[1]!.state = { ...editedLater[1]!.state, alsoKnownAs: ["https://evil.example"] };
   bad("later-entry-edited", "The document of a later entry was changed: its entry hash no longer matches.", editedLater, "entry hash");
   bad("other-did", "A valid log, presented for a different SCID.", plain.log, "not the SCID of the DID", { did: `did:vh:${"1".repeat(46)}` });
-  bad("not-a-vh-did", "The DID is a did:webvh.", plain.log, "Not a did:vh", { code: "invalidDid", did: "did:webvh:Qm:example.com" });
+  bad("not-a-vh-did", "The DID is of another method.", plain.log, "Not a did:vh", { code: "invalidDid", did: "did:web:example.com" });
   bad("unsigned", "An entry with no proof.", [plain.log[0]!, { ...rotated.log[1]!, proof: [] }], "no proof");
   bad("signed-by-unauthorised-key", "Entry 2 is signed by k3, which no entry authorised.", await append(plain.log, k3, 10, {}), "authorised key");
   bad("signed-by-previous-keys-after-rotation", "Entry 3 is signed by k0 although entry 2 replaced k0 with k1.", await append(rotated.log, k0, 20, {}), "authorised key");
@@ -136,11 +136,11 @@ export async function vectors(): Promise<{ now: string; vectors: Vector[]; shado
   bad("time-with-fraction", "Entry 2's versionTime has fractional seconds.", await append(plain.log, k0, 10, {}, undefined, { before: unsigned => { unsigned.versionTime = unsigned.versionTime.replace("Z", ".500Z"); } }), "whole seconds");
   bad("document-id-is-the-did-with-src", "Entry 2's document id carries a ?src=.", await append(plain.log, k0, 10, {}, { ...plain.log[0]!.state, id: `${plain.did}?src=https://alice.did.md` }), "document id must be exactly");
   bad("document-id-is-another-did", "Entry 2's document id is another did:vh.", await append(plain.log, k0, 10, {}, { ...plain.log[0]!.state, id: `did:vh:${"1".repeat(46)}` }), "document id must be exactly");
-  bad("portable", "A did:webvh parameter.", await append(plain.log, k0, 10, { portable: true }), "portable");
+  bad("portable", "A parameter of another DID method, which did:vh does not define.", await append(plain.log, k0, 10, { portable: true }), "portable");
   bad("log-version", "VH-Log's own version parameter, which a specialisation that designates its own must not use.", await append(plain.log, k0, 10, { logVersion: "vh-log:1.0" }), "logVersion");
   bad("unknown-parameter", "A parameter did:vh does not define.", await append(plain.log, k0, 10, { color: "red" }), "not a did:vh parameter");
   bad("null-parameter", "null stands for nothing in a parameter.", await append(plain.log, k0, 10, { ttl: null }), "null");
-  bad("method-is-webvh", "The method of another DID method.", await append(plain.log, k0, 10, { method: "did:webvh:1.0" }), "Unsupported method");
+  bad("method-is-another", "The method of another DID method.", await append(plain.log, k0, 10, { method: "did:web:1.0" }), "Unsupported method");
   bad("scid-in-later-entry", "parameters.scid in a later entry.", await append(plain.log, k0, 10, { scid: plain.did.slice(7) }), "scid may only appear");
   bad("entry-after-deactivation", "An entry follows the deactivating entry.", await append(done.log, k0, 20, {}), "deactivated");
   bad("witness-not-supported", "A witness configuration is refused rather than ignored.", await append(plain.log, k0, 10, { witness: { threshold: 1, witnesses: [{ id: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK" }] } }), "witnesses", { code: "featureNotSupported" });

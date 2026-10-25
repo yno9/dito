@@ -2,7 +2,8 @@ import { afterAll, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildGenesis, createIdentityMaterial, preparePortableImport } from "../packages/wallet/src/did-webvh.ts";
+import { createIdentityMaterial } from "../packages/wallet/src/keys.ts";
+import { createGenesisEntry, prepareLocationEntry } from "../packages/wallet/src/vh-ops.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "./spawn.ts";
 
@@ -33,28 +34,23 @@ afterAll(async () => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-// Mirrors the app.js "Connect" flow: a provisional (did.invalid) genesis is
-// never PUT to a host directly -- preparePortableImport signs one additional
-// portability entry that gives it its first real, did:webvh-compatible home.
-test("connecting a provisional did.invalid identity publishes it at a real host", async () => {
+// Mirrors the app.js "Connect" flow: an identity with no host is never PUT to a host as it is --
+// prepareLocationEntry signs one additional update entry that makes its document name the place; the DID stays.
+test("connecting an identity with no host publishes it at a real host", async () => {
   await ready();
   const identity = await createIdentityMaterial();
-  const genesis = await buildGenesis({
-    username: "did", root: identity.root, sign: identity.sign,
-    nextSpare: identity.nextSpare, domain: "invalid",
-  });
-  expect(genesis.state.id.endsWith(":did.invalid")).toBe(true);
+  const genesis = await createGenesisEntry({ root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare });
+  expect(genesis.state.alsoKnownAs).toBeUndefined();
 
   const availability = await fetch(`${base}/v1/availability?username=frank`);
   expect(availability.ok).toBe(true);
   expect((await availability.json()).available).toBe(true);
 
-  // versionTime is truncated to whole seconds; preparePortableImport must
-  // still bump past genesis's versionTime even when called in the same
-  // second (a real Connect click right after Create can be this fast).
+  // versionTime is truncated to whole seconds; the location entry must still be later than genesis's even when
+  // made in the same second (a real Connect click right after Create can be this fast).
   const source = `${JSON.stringify(genesis)}\n`;
-  const prepared = await preparePortableImport({ entries: [genesis], username: "frank", domain: "did.md", masterSeed: identity.masterSeed });
-  expect(prepared.did.endsWith(":frank.did.md")).toBe(true);
+  const prepared = await prepareLocationEntry({ entries: [genesis], src: "https://frank.did.md", masterSeed: identity.masterSeed, currentSpareIndex: 0 });
+  expect(prepared.state.id).toBe(genesis.state.id);
 
   const published = await fetch(`${base}/.well-known/did.jsonl`, {
     method: "PUT", headers: { host: "frank.did.md", "content-type": "text/jsonl" },
@@ -66,7 +62,10 @@ test("connecting a provisional did.invalid identity publishes it at a real host"
   expect(resolved.status).toBe(200);
   const lines = (await resolved.text()).trim().split("\n");
   expect(lines).toHaveLength(2);
-  expect(JSON.parse(lines[1]!).state.id).toBe(prepared.did);
+  expect(JSON.parse(lines[1]!).state.id).toBe(genesis.state.id);
+
+  const byScid = await fetch(`${base}/log?scid=${genesis.state.id.slice("did:vh:".length)}`, { headers: { host: "anywhere.did.md" } });
+  expect(byScid.status).toBe(200);
 
   const takenNow = await fetch(`${base}/v1/availability?username=frank`);
   expect((await takenNow.json()).available).toBe(false);

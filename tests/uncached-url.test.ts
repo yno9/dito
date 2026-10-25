@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { uncachedUrl } from "../packages/webvh/src/index.ts";
+import { uncachedUrl } from "../packages/vh/src/index.ts";
 
 describe("uncachedUrl", () => {
   test("adds a query no cache has seen, and keeps the rest of the URL", () => {

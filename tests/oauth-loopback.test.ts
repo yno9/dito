@@ -2,7 +2,9 @@ import { afterAll, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildGenesis, createDataIntegrityProof, createIdentityMaterial, createSelfIssuedIdToken, preparePortableImport } from "../packages/wallet/src/did-webvh.ts";
+import { createIdentityMaterial, createSelfIssuedIdToken } from "../packages/wallet/src/keys.ts";
+import { createGenesisEntry, prepareLocationEntry } from "../packages/wallet/src/vh-ops.ts";
+import { buildGenesis } from "./helpers/genesis.ts";
 import { buildCapabilityCredential, vpToken } from "./helpers/capability-vc.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "./spawn.ts";
@@ -13,7 +15,7 @@ const dataDir = mkdtempSync(join(tmpdir(), "did-md-oauth-loopback-"));
 const server = spawn({
   cmd: [process.execPath, "server/server.ts"],
   cwd: new URL("..", import.meta.url).pathname,
-  env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, OAUTH_DID_RP_DOMAINS: "t.biset.md,t.example.invalid", IDENTITY_FETCH_BASE_URL: base },
+  env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, OAUTH_DID_RP_WATCHERS: "https://watcher.example.invalid", IDENTITY_FETCH_BASE_URL: base },
   stdout: "ignore",
   stderr: "ignore",
 });
@@ -223,7 +225,7 @@ test("a Forgejo-shaped client (dynamically registered) gets a self-issued id_tok
   const issuedAtMs = Date.now(); const issuedAt = new Date(issuedAtMs).toISOString();
   const verifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
   const challenge = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))).toString("base64url");
-  const scid = did.split(":")[2]!;
+  const scid = did.slice("did:vh:".length);
 
   const vc = await buildCapabilityCredential({ privateKey: identity.root.privateKey, did, verificationMethod: `${did}#pass-1`, capabilityType: "did.md/DeviceCapability", audience: client.client_id, scope: ["openid", "profile", "email"], issuedAt, expiresAt: new Date(issuedAtMs + 3600_000).toISOString() });
   const idToken = createSelfIssuedIdToken({ iss: did, sub: did, aud: client.client_id, iat: Math.floor(issuedAtMs / 1000), exp: Math.floor(issuedAtMs / 1000) + 3600, preferred_username: scid, nickname: scid, name: scid, email: `${scid}@users.did.invalid`, email_verified: false }, { privateKey: identity.root.privateKey, did });
@@ -243,7 +245,7 @@ test("a Forgejo-shaped client (dynamically registered) gets a self-issued id_tok
 test("an un-hatched genesis can still authorize, via its own supplied DID log", async () => {
   await ready();
   const identity = await createIdentityMaterial();
-  const genesis = await buildGenesis({ username: "un", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, api: base, domain: "hatched" });
+  const genesis = await createGenesisEntry({ root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, api: base });
   const did = genesis.state.id as string;
   const issuedAtMs = Date.now(); const issuedAt = new Date(issuedAtMs).toISOString();
   const redirectUri = "https://forgejo.example.com/user/oauth2/dito/callback";
@@ -267,19 +269,15 @@ test("an un-hatched genesis can still authorize, via its own supplied DID log", 
   expect(claims).toMatchObject({ sub: did, preferred_username: "un" });
 });
 
-test("a moved identity can still authorize with its ORIGINAL genesis as did_log", async () => {
-  // Regression: suppliedAuthorityFromDidLog used to derive the authority
-  // DID from the supplied log's OWN state.id (the genesis's original, pre-
-  // move domain) instead of the capability's actual (post-move) issuer --
-  // #pass-1 is recorded as a relative reference specifically so the same
-  // genesis authorizes the identity under ANY of its domains, but that only
-  // works if the check is by SCID, not by the genesis's own literal DID.
+test("an identity that has since been given a host can still authorize with its genesis as did_log (the DID never changed)", async () => {
+  // The genesis is the whole proof of the DID and its Root key; a later location entry does not change either, so the same
+  // genesis authorizes the identity before and after it is given a host.
   await ready();
   const identity = await createIdentityMaterial();
-  const genesis = await buildGenesis({ username: "premove", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, api: base, domain: "elsewhere.example" });
-  const moved = await preparePortableImport({ entries: [genesis], username: "postmove", domain: "did.md", masterSeed: identity.masterSeed });
-  const did = moved.did;
-  expect(did).not.toBe(genesis.state.id);
+  const genesis = await createGenesisEntry({ root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, api: base });
+  const moved = await prepareLocationEntry({ entries: [genesis], src: "https://postmove.did.md", masterSeed: identity.masterSeed, currentSpareIndex: 0 });
+  const did = genesis.state.id as string;
+  expect(moved.state.id).toBe(did);
 
   const redirectUri = "http://localhost:3335/callback";
   const registered = await fetch(`${base}/v1/oauth/register`, {
@@ -294,7 +292,7 @@ test("a moved identity can still authorize with its ORIGINAL genesis as did_log"
   const vc = await buildCapabilityCredential({ privateKey: identity.root.privateKey, did, verificationMethod: `${did}#pass-1`, capabilityType: "did.md/DeviceCapability", audience: client.client_id, scope: ["openid"], issuedAt, expiresAt: new Date(issuedAtMs + 3600_000).toISOString() });
   const idToken = createSelfIssuedIdToken({ iss: did, sub: did, aud: client.client_id, iat: Math.floor(issuedAtMs / 1000), exp: Math.floor(issuedAtMs / 1000) + 3600 }, { privateKey: identity.root.privateKey, did });
 
-  // did_log is the ORIGINAL (pre-move) genesis -- not the moved.entry.
+  // did_log is the genesis -- not the location entry.
   const completed = await fetch(`${base}/v1/oauth/authorize/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_id: client.client_id, redirect_uri: redirectUri, state: "moved-state-value", code_challenge: challenge, code_challenge_method: "S256", vp_token: vpToken(vc), id_token: idToken, did_log: `${JSON.stringify(genesis)}\n` }) });
   if (!completed.ok) throw new Error(await completed.text());
   const code = (await completed.json()).code;
@@ -304,49 +302,15 @@ test("a moved identity can still authorize with its ORIGINAL genesis as did_log"
   expect(claims).toMatchObject({ sub: did });
 });
 
-test("routing metadata is published as an origin-root did:webvh resource", async () => {
-  await ready();
-  const identity = await createIdentityMaterial();
-  const entry = await buildGenesis({
-    username: "alice", displayName: "", root: identity.root, sign: identity.sign,
-    nextSpare: identity.nextSpare, api: base, domain: "did.md",
-  });
-  const identityHeaders = { host: "alice.did.md" };
-  const log = await fetch(`${base}/.well-known/did.jsonl`, {
-    method: "PUT", headers: { ...identityHeaders, "content-type": "text/jsonl" },
-    body: `${JSON.stringify(entry)}\n`,
-  });
-  expect(log.status).toBe(201);
-
-  const document = { service: [{ id: "#mediator", type: "DIDCommMessaging", serviceEndpoint: "https://mediator.example" }] };
-  const proof = await createDataIntegrityProof(document, {
-    privateKey: identity.sign.privateKey,
-    verificationMethod: `did:key:${identity.sign.multikey}#${identity.sign.multikey}`,
-    proofPurpose: "assertionMethod",
-  });
-  const published = await fetch(`${base}/routing.json`, {
-    method: "PUT", headers: { ...identityHeaders, "content-type": "application/json" },
-    body: JSON.stringify({ ...document, proof }),
-  });
-  expect(published.status).toBe(204);
-
-  const resolved = await fetch(`${base}/routing.json`, { headers: identityHeaders });
-  expect(resolved.status).toBe(200);
-  expect(await resolved.json()).toEqual(document);
-  const legacy = await fetch(`${base}/.well-known/routing.json`, { headers: identityHeaders });
-  expect(legacy.status).toBe(200);
-  expect(await legacy.json()).toEqual(document);
-});
-
-test("a complete portable history can be imported to a new did.md location", async () => {
+test("a complete history can be published at a new did.md location", async () => {
   await ready();
   const identity = await createIdentityMaterial();
   const genesis = await buildGenesis({
     username: "old", root: identity.root, sign: identity.sign,
     nextSpare: identity.nextSpare, api: base, domain: "example.com",
   });
-  const moved = await preparePortableImport({
-    entries: [genesis], username: "moved", domain: "did.md", masterSeed: identity.masterSeed,
+  const moved = await prepareLocationEntry({
+    entries: [genesis], src: "https://moved.did.md", previousSrc: "https://old.example.com", masterSeed: identity.masterSeed, currentSpareIndex: 0,
   });
   const response = await fetch(`${base}/.well-known/did.jsonl`, {
     method: "PUT", headers: { host: "moved.did.md", "content-type": "text/jsonl" },
@@ -355,76 +319,48 @@ test("a complete portable history can be imported to a new did.md location", asy
   expect(response.status).toBe(201);
   const log = await (await fetch(`${base}/.well-known/did.jsonl`, { headers: { host: "moved.did.md" } })).text();
   expect(log.trimEnd().split("\n")).toHaveLength(2);
-  expect(JSON.parse(log.trimEnd().split("\n").at(-1)!).state.alsoKnownAs).toEqual([genesis.state.id]);
+  expect(JSON.parse(log.trimEnd().split("\n").at(-1)!).state.alsoKnownAs).toContain("did:web:moved.did.md");
+  expect(JSON.parse(log.trimEnd().split("\n").at(-1)!).state.id).toBe(genesis.state.id);
 });
 
-// PLAN6: a relying party can authenticate itself with a did:webvh client_id
-// (JAR/client_id_scheme=did) instead of a DCR-issued client_XXXX id. This
-// server never sees the JAR itself -- verification of the request object
-// happens client-side, in dito's own frontend (client/app.ts, see
-// PLAN6-rp-did-authentication.md §0.2) -- but /v1/oauth/authorize/complete
-// is a public HTTP API independent of that browser flow, so it must
-// independently resolve the RP's own DID document rather than trust that
-// dito already did (§0.3bis). These tests only exercise input validation
-// and branch selection (oauthClientId's format check, and
-// oauthAuthorizeComplete choosing DID resolution over the DCR client
-// registry) -- a real resolution requires a live HTTPS host for the RP's
-// domain, which packages/did-verify's and client/did-webvh.ts's own test
-// suites already cover with a mocked fetch.
-test("authorize/complete with a did:webvh client_id resolves the RP's own DID document instead of the DCR registry", async () => {
+// PLAN6: a relying party can authenticate itself with a did:vh client_id (JAR/client_id_scheme=did) instead of a
+// DCR-issued client_XXXX id. This server never sees the JAR itself -- verification of the request object happens
+// client-side, in dito's own frontend (client/app.ts) -- but /v1/oauth/authorize/complete is a public HTTP API
+// independent of that browser flow, so it must independently resolve the RP's own DID document rather than trust that
+// dito already did (§0.3bis). These tests only exercise input validation and branch selection (oauthClientId's format
+// check, and oauthAuthorizeComplete choosing DID resolution over the DCR client registry) -- a real resolution needs a
+// watcher the operator chose, which packages/did-verify's and client/request-object's own test suites cover with a
+// mocked fetch.
+const rpScid = "QmNf4Y7DyYWTZcrMdQMwftYe5JmcKXfPrxpqwriHa3A7w5";
+const completeBody = (clientId: string) => JSON.stringify({ client_id: clientId, redirect_uri: "https://t.example.invalid/callback", state: "did-client-state-value", code_challenge: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ", code_challenge_method: "S256", vp_token: {} });
+
+test("authorize/complete with a did:vh client_id resolves the RP's own DID document instead of the DCR registry", async () => {
   await ready();
-  // t.example.invalid cannot resolve -- the point is only to prove the
-  // server *attempted* did:webvh resolution (a network/DNS-shaped failure)
-  // rather than falling through to "authorization redirect URI is not
-  // registered", which is what the old DCR-only code path would have said
-  // for an unregistered client_id.
-  const clientId = "did:webvh:QmNf4Y7DyYWTZcrMdQMwftYe5JmcKXfPrxpqwriHa3A7w5:t.example.invalid";
-  const completed = await fetch(`${base}/v1/oauth/authorize/complete`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, redirect_uri: "https://t.example.invalid/callback", state: "did-client-state-value", code_challenge: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ", code_challenge_method: "S256", vp_token: { capability: [{}] } }),
-  });
+  // The operator's watcher (watcher.example.invalid) cannot be reached -- the point is only to prove the server
+  // *attempted* did:vh resolution (a network/DNS-shaped failure) rather than falling through to "authorization
+  // redirect URI is not registered", which is what the old DCR-only code path would have said for an unregistered client_id.
+  const completed = await fetch(`${base}/v1/oauth/authorize/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: completeBody(`did:vh:${rpScid}`) });
   expect(completed.status).toBe(500);
-  const text = await completed.text();
-  expect(text).not.toContain("authorization redirect URI is not registered");
+  expect(await completed.text()).not.toContain("authorization redirect URI is not registered");
 });
 
-test("a did:webvh client_id with a malformed domain is rejected by input validation before any resolution attempt", async () => {
+test("a did:vh client_id that is not a DID is rejected by input validation before any resolution attempt", async () => {
   await ready();
-  const clientId = "did:webvh:z6MkfakeRpScidForTestingOnlyXXXXXXXXXXXX:not a domain";
-  const completed = await fetch(`${base}/v1/oauth/authorize/complete`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, redirect_uri: "https://example.test/callback", state: "did-client-state-value", code_challenge: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ", code_challenge_method: "S256", vp_token: { capability: [{}] } }),
-  });
-  expect(completed.status).toBe(400);
-  expect(await completed.text()).toContain("client_id is invalid");
+  for (const clientId of ["did:vh:not-a-scid", "did:vh:", `did:vh:${rpScid}:t.biset.md`, `did:vh:${rpScid}?src=https://evil.example`, "did:web:t.biset.md"]) {
+    const completed = await fetch(`${base}/v1/oauth/authorize/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: completeBody(clientId) });
+    expect([clientId, completed.status]).toEqual([clientId, 400]);
+    expect(await completed.text()).toContain("client_id is invalid");
+  }
 });
 
-// Security review (2026-09-21): an unauthenticated caller of this public
-// endpoint could otherwise pick any did:webvh domain and make this server
-// fetch it (SSRF into internal infrastructure, cloud metadata endpoints,
-// etc.). OAUTH_DID_RP_DOMAINS (set to "t.biset.md,t.example.invalid" for
-// this test server, see the top of this file) must reject a domain outside
-// that allowlist *before* attempting any resolution -- confirmed here by a
-// domain that would otherwise behave exactly like the allowed one above.
-test("a did:webvh client_id outside OAUTH_DID_RP_DOMAINS is rejected before any resolution is attempted (SSRF guard)", async () => {
-  await ready();
-  const clientId = "did:webvh:z6MkfakeRpScidForTestingOnlyXXXXXXXXXXXX:internal.example.invalid";
-  const completed = await fetch(`${base}/v1/oauth/authorize/complete`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, redirect_uri: "https://internal.example.invalid/callback", state: "did-client-state-value", code_challenge: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ", code_challenge_method: "S256", vp_token: { capability: [{}] } }),
-  });
-  expect(completed.status).toBe(400);
-  expect(await completed.text()).toContain("not an accepted relying party domain");
-});
-
-test("a did:webvh client_id is rejected outright when OAUTH_DID_RP_DOMAINS is unset (fail closed by default)", async () => {
+test("a did:vh client_id is rejected outright when OAUTH_DID_RP_WATCHERS is unset (fail closed by default)", async () => {
   const dedicatedPort = 18_000 + Math.floor(Math.random() * 10_000);
   const dedicatedBase = `http://127.0.0.1:${dedicatedPort}`;
   const dedicatedDataDir = mkdtempSync(join(tmpdir(), "did-md-oauth-loopback-unconfigured-"));
   const dedicated = spawn({
     cmd: [process.execPath, "server/server.ts"],
     cwd: new URL("..", import.meta.url).pathname,
-    env: { ...process.env, PORT: String(dedicatedPort), DATA_DIR: dedicatedDataDir, OAUTH_DID_RP_DOMAINS: "", IDENTITY_FETCH_BASE_URL: dedicatedBase },
+    env: { ...process.env, PORT: String(dedicatedPort), DATA_DIR: dedicatedDataDir, OAUTH_DID_RP_WATCHERS: "", IDENTITY_FETCH_BASE_URL: dedicatedBase },
     stdout: "ignore", stderr: "ignore",
   });
   try {
@@ -432,13 +368,9 @@ test("a did:webvh client_id is rejected outright when OAUTH_DID_RP_DOMAINS is un
       try { if ((await fetch(`${dedicatedBase}/healthz`)).ok) break; } catch { /* still starting */ }
       await sleep(20);
     }
-    const clientId = "did:webvh:z6MkfakeRpScidForTestingOnlyXXXXXXXXXXXX:t.biset.md";
-    const completed = await fetch(`${dedicatedBase}/v1/oauth/authorize/complete`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ client_id: clientId, redirect_uri: "https://t.biset.md/callback", state: "did-client-state-value", code_challenge: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ", code_challenge_method: "S256", vp_token: { capability: [{}] } }),
-    });
+    const completed = await fetch(`${dedicatedBase}/v1/oauth/authorize/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: completeBody(`did:vh:${rpScid}`) });
     expect(completed.status).toBe(400);
-    expect(await completed.text()).toContain("not an accepted relying party domain");
+    expect(await completed.text()).toContain("did:vh relying parties are not accepted by this server");
   } finally {
     dedicated.kill(); await dedicated.exited; rmSync(dedicatedDataDir, { recursive: true, force: true });
   }

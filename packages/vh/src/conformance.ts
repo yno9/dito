@@ -1,12 +1,10 @@
 /**
- * The did:vh part of SPEC-webvh-hosting.md §7: black-box checks for a host that
- * advertises `"did:vh"` in `methods` of `/.well-known/did-hosting.json`. A host
- * that does not is not asked (the base suite, `runConformance`, is all it owes).
- * Run it with the same target as the base suite.
+ * Executable form of SPEC-vh-hosting.md: black-box checks a server must pass to
+ * interoperate with any conforming client. It only speaks HTTP and builds logs
+ * with this package, so it runs against did.md's server or a third party's alike.
  */
-import type { ConformanceResult, ConformanceTarget } from "../../webvh/src/conformance.ts";
-import { createDataIntegrityProof } from "../../webvh/src/proof.ts";
-import { keyFromPrivateKey, type Ed25519Key } from "../../webvh/src/signer.ts";
+import { createDataIntegrityProof } from "./proof.ts";
+import { keyFromPrivateKey, type Ed25519Key } from "./signer.ts";
 import { createVhLog, deactivateVhLog, updateVhLog } from "./create.ts";
 import { checkDidWebShadow, didWebFor } from "./didweb.ts";
 import { keyHash } from "./hash.ts";
@@ -14,14 +12,21 @@ import { serializeVhLog, type VhLogEntry } from "./log.ts";
 
 const key = () => keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
 
-/** Does the host advertise did:vh? (`methods` in its capability document.) */
-export async function advertisesVh(target: ConformanceTarget): Promise<boolean> {
-  try {
-    const response = await target.fetch(`https://${target.newLocation()}/.well-known/did-hosting.json`);
-    if (!response.ok) return false;
-    const caps = await response.json() as { methods?: unknown };
-    return Array.isArray(caps.methods) && caps.methods.includes("did:vh");
-  } catch { return false; }
+export type ConformanceTarget = {
+  /** A fresh, unused location (DNS name) the server is willing to host, e.g. `conf-1a2b.did.md`. */
+  newLocation(): string;
+  /** Sends requests to the server under test (may rewrite the URL / Host header). */
+  fetch: typeof fetch;
+};
+
+export type ConformanceResult = { name: string; ok: boolean; detail?: string; optional?: boolean };
+
+/** Human-readable report; returns whether every non-optional check passed. */
+export function formatReport(results: ConformanceResult[]): { text: string; ok: boolean } {
+  const lines = results.map(r => `${r.ok ? "PASS" : r.optional ? "warn" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : `\n      ${r.detail}`}`);
+  const failed = results.filter(r => !r.ok && !r.optional).length;
+  lines.push("", failed ? `${failed} required check(s) failed` : "all required checks passed");
+  return { text: lines.join("\n"), ok: failed === 0 };
 }
 
 /** A disconnect request for `did`, signed by `signer`. */
@@ -33,9 +38,9 @@ async function deleteBody(did: string, signer: Ed25519Key): Promise<string> {
 
 export async function runVhConformance(target: ConformanceTarget): Promise<ConformanceResult[]> {
   const results: ConformanceResult[] = [];
-  const check = async (name: string, fn: () => Promise<void>) => {
-    try { await fn(); results.push({ name, ok: true }); }
-    catch (error) { results.push({ name, ok: false, detail: error instanceof Error ? error.message : String(error) }); }
+  const check = async (name: string, fn: () => Promise<void>, optional = false) => {
+    try { await fn(); results.push({ name, ok: true, optional }); }
+    catch (error) { results.push({ name, ok: false, optional, detail: error instanceof Error ? error.message : String(error) }); }
   };
   const expect = (condition: unknown, message: string) => { if (!condition) throw new Error(message); };
 
@@ -62,6 +67,17 @@ export async function runVhConformance(target: ConformanceTarget): Promise<Confo
   const alice = await identity(host);
   let log = alice.log;
   const scid = alice.did.slice("did:vh:".length);
+
+  await check("V0. capability document (optional): valid when present", async () => {
+    const response = await target.fetch(`https://${host}/.well-known/did-hosting.json`);
+    if (!response.ok) return;
+    const caps = await response.json() as { protocol?: unknown };
+    expect(typeof caps.protocol === "string" && caps.protocol.startsWith("vh-hosting/"), "protocol must be vh-hosting/<n>");
+  }, true);
+
+  await check("V0. GET of an unpublished location is 404", async () => {
+    expect(await status(logUrl(host)) === 404, "expected 404");
+  });
 
   await check("V1. PUT of a valid did:vh log that names this location creates it (201) and GET returns the same bytes", async () => {
     const response = await put(host, log);
@@ -185,6 +201,16 @@ export async function runVhConformance(target: ConformanceTarget): Promise<Confo
     expect((await put(host, log)).status === 201, "the location must be free again");
     // best-effort cleanup, so repeated runs against a real server stay tidy
     await target.fetch(logUrl(host), { method: "DELETE", headers: { "content-type": "application/json" }, body: await request(alice.k1) }).catch(() => undefined);
+  });
+
+  await check("V11. preflight allows PUT/POST/DELETE and content-type from any origin", async () => {
+    const response = await target.fetch(logUrl(host), { method: "OPTIONS", headers: { origin: "https://wallet.example", "access-control-request-method": "PUT", "access-control-request-headers": "content-type" } });
+    expect(response.status < 300, `expected 2xx, got ${response.status}`);
+    const methods = (response.headers.get("access-control-allow-methods") ?? "").toUpperCase();
+    for (const method of ["PUT", "POST", "DELETE"]) expect(methods.includes(method), `allow-methods lacks ${method}: ${methods}`);
+    expect((response.headers.get("access-control-allow-headers") ?? "").toLowerCase().includes("content-type"), "allow-headers lacks content-type");
+    const allow = response.headers.get("access-control-allow-origin");
+    expect(allow === "*" || allow === "https://wallet.example", `got ${allow}`);
   });
 
   return results;

@@ -3,8 +3,8 @@
  * Deactivate). Every function returns a log only after verifying the whole of
  * it with the resolver, so a log that comes out of here is one that resolves.
  */
-import { createDataIntegrityProof } from "../../webvh/src/proof.ts";
-import type { Ed25519Key } from "../../webvh/src/signer.ts";
+import { createDataIntegrityProof } from "./proof.ts";
+import type { Ed25519Key } from "./signer.ts";
 import { SCID_PLACEHOLDER, VH_METHOD, vhDid } from "./did.ts";
 import { entryHash, generateScid, parseVersionId, parseVersionTime, timestamp, type UnsignedEntry, type VhLogEntry, type VhParameters } from "./log.ts";
 import { resolveVhLog, type ActiveParameters, applyParameters } from "./verify.ts";

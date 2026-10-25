@@ -2,7 +2,8 @@ import { afterAll, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildGenesis, createDataIntegrityProof, createIdentityMaterial } from "../packages/wallet/src/did-webvh.ts";
+import { createDataIntegrityProof, createIdentityMaterial } from "../packages/wallet/src/keys.ts";
+import { createGenesisEntry } from "../packages/wallet/src/vh-ops.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "./spawn.ts";
 
@@ -35,9 +36,9 @@ afterAll(async () => {
 
 async function publishGenesis(username: string) {
   const identity = await createIdentityMaterial();
-  const entry = await buildGenesis({
-    username, displayName: "", root: identity.root, sign: identity.sign,
-    nextSpare: identity.nextSpare, api: base, domain: "did.md",
+  const entry = await createGenesisEntry({
+    src: `https://${username}.did.md`, root: identity.root, sign: identity.sign,
+    nextSpare: identity.nextSpare, api: base,
   });
   const headers = { host: `${username}.did.md` };
   const published = await fetch(`${base}/.well-known/did.jsonl`, {
@@ -101,7 +102,7 @@ test("DELETE is rejected when the document.did does not match the published DID"
   const { identity, headers } = await publishGenesis("erin");
   const removed = await fetch(`${base}/.well-known/did.jsonl`, {
     method: "DELETE", headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify(await disconnectProof("did:webvh:wrong:erin.did.md", identity.sign)),
+    body: JSON.stringify(await disconnectProof(`did:vh:${"1".repeat(46)}`, identity.sign)),
   });
   expect(removed.status).toBe(400);
   const after = await fetch(`${base}/.well-known/did.jsonl`, { headers });
@@ -114,7 +115,7 @@ test("DELETE on a DID that was never published returns 404", async () => {
   const headers = { host: "neverconnected.did.md" };
   const removed = await fetch(`${base}/.well-known/did.jsonl`, {
     method: "DELETE", headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify(await disconnectProof("did:webvh:x:neverconnected.did.md", identity.sign)),
+    body: JSON.stringify(await disconnectProof(`did:vh:${"1".repeat(46)}`, identity.sign)),
   });
   expect(removed.status).toBe(404);
 });

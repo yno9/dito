@@ -2,18 +2,18 @@
 
 | package | what it is |
 |---|---|
-| `webvh/` | Generic did:webvh toolkit, incl. the [Hosting Protocol](../SPEC-webvh-hosting.md) client, conformance suite and a reference server: a thin typed layer over [`didwebvh-ts`](https://github.com/decentralized-identity/didwebvh-ts). Ed25519 signer, `createLog` / `updateLog` / `resolveLog`, Data Integrity proofs, strict DID -> `did.jsonl` URL, `resolveDidWebvh()`. Nothing dito-specific. |
-| `wallet/` | The wallet profile on top: Master-seed keys (mnemonic, SLIP-0010, permanent pre-rotation), hosting adapters (did.md, GitHub Pages), wallet credentials, and the DOM-free `Identity` session. |
+| `vh/` | did:vh, and nothing dito-specific: log verification (every entry, in order), creation, update and deactivation, the strict web-location parser and fetcher, the did:web shadow derivation, Ed25519 keys and Data Integrity proofs (`eddsa-jcs-2022`), the version memory (refuse an old or forked log), the [Hosting Protocol](../SPEC-vh-hosting.md) client and its conformance suite. No external DID library. |
+| `wallet/` | The wallet profile on top: Master-seed keys (mnemonic, SLIP-0010, permanent pre-rotation), hosting adapters (did.md, GitHub Pages), wallet credentials, and the DOM-free `Identity` session (a did:vh identity). |
 | `cli/` | `pnpm dito <command>`: the same operations from a terminal, a script or an agent. |
-| `did-verify/` | JWT/id_token verification for the OIDC bridge (embedded JWK or a did:webvh `kid`). |
+| `did-verify/` | JWT/id_token verification for the OIDC bridge (embedded JWK or a did:vh `kid`, from the verifier's watchers). |
 
 ## Identity, in code
 
 ```ts
 import { Identity } from "./packages/wallet/src/identity.ts";
 
-const { identity, mnemonic } = await Identity.create();   // provisional DID, no host
-await identity.connect({ username: "alice" });             // -> https://alice.did.md
+const { identity, mnemonic } = await Identity.create();   // a did:vh DID, no host yet
+await identity.connect({ username: "alice" });             // -> https://alice.did.md; the DID stays
 await identity.publishUpdate(doc => ({ ...doc, service: [...doc.service, { id: "#x", type: "X", serviceEndpoint: "https://…" }] }));
 await identity.rotate();
 
@@ -38,7 +38,7 @@ pnpm dito rotate | unpublish
 
 ## Swapping either side
 
-The wallet (`Identity`, the dashboard) only speaks [webvh-hosting/1](../SPEC-webvh-hosting.md); the host only
+The wallet (`Identity`, the dashboard) only speaks [vh-hosting/1](../SPEC-vh-hosting.md); the host only
 has to. To check a server: `pnpm conformance --domain <its-domain> [--base http://127.0.0.1:PORT]`.
-To start one: `createReferenceHost()` in `packages/webvh/src/reference-host.ts` is a complete `(Request) => Response`
-handler on top of didwebvh-ts.
+To start one: `createByoHost()` in `server/host/byo-host.ts` is a complete `(Request) => Response`
+handler for one domain, on top of `packages/vh`.

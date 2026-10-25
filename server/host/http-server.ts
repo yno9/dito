@@ -1,6 +1,6 @@
 /**
- * did:webvh host as a plain HTTP process: the whole did.md identity host
- * (server/host/identity-host.ts, which implements SPEC-webvh-hosting.md) and
+ * did:vh host as a plain HTTP process: the whole did.md identity host
+ * (server/host/identity-host.ts, which implements SPEC-vh-hosting.md) and
  * nothing else -- no OAuth layer, which runs in oidc-bridge.
  *
  * This is what runs on the VPS behind Caddy and Cloudflare's CDN:
@@ -26,7 +26,7 @@ const settings = openSettings({
   onProblem: message => console.warn(`[settings] ${message}`),
 });
 setHostLimits((): HostLimits => ({
-  maxLogBytes: settings.get("limits.maxLogBytes"), maxWitnessBytes: settings.get("limits.maxWitnessBytes"), maxJsonBytes: settings.get("limits.maxJsonBytes"),
+  maxLogBytes: settings.get("limits.maxLogBytes"), maxJsonBytes: settings.get("limits.maxJsonBytes"),
   maxIdentities: settings.get("limits.maxIdentities"), maxConcurrentValidations: settings.get("limits.maxConcurrentValidations"),
   createPerHour: settings.get("limits.createPerHour"), reservedNames: settings.get("names.reserved"),
 }));
@@ -47,7 +47,7 @@ const app = serve({
     try {
       const url = new URL(request.url);
       if (url.pathname === "/healthz" && request.method === "GET") {
-        return new Response(`${JSON.stringify({ ok: true, service: "did.md", method: "did:webvh:1.0", identityDomain: IDENTITY_DOMAIN })}\n`, {
+        return new Response(`${JSON.stringify({ ok: true, service: "did.md", method: "did:vh:1.0", identityDomain: IDENTITY_DOMAIN })}\n`, {
           headers: { ...publicDocumentCors(), "content-type": "application/json", "cache-control": "no-store" },
         });
       }

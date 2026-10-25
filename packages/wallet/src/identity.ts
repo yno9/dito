@@ -1,84 +1,72 @@
 /**
  * A dito identity as a plain, DOM-free object: everything the dashboard does
- * to a did:webvh log, callable from a script, a CLI or an agent.
+ * to a did:vh log, callable from a script, a CLI or an agent.
  *
  * The whole identity is a function of two things -- the 24-word mnemonic (the
  * only secret) and the public log -- so there is nothing to persist except
  * the log; callers keep the mnemonic wherever suits them (a prompt, an env
  * var, a password manager). Nothing here reads or writes storage.
  *
- * Publishing goes through an IdentityHost adapter (did.md, GitHub Pages), and
- * local state only advances once the host accepted the write.
+ * The keys: one 24-word mnemonic, a Root key at m/0', and permanent
+ * pre-rotation (every entry is signed by the Spare the entry before committed
+ * to and commits the next one; `entries.length - 1` is the Spare that signs
+ * the next entry).
+ *
+ *  - the DID (`did:vh:<SCID>`) names no host, so an identity can be created
+ *    with none, and given one later by a single update entry: the DID never
+ *    changes when the log moves;
+ *  - where the log is published is said in the document itself (`alsoKnownAs`:
+ *    the location's did:web DID and a `did:vh:<SCID>?src=<location>` alias),
+ *    which is also what a host checks before it stores the log;
+ *  - local state only advances once the host accepted the write.
  */
-import { currentParameters, didToLogUrl, fetchWitnessProofs, nextKeyHash, parseLog, resolveLog, serializeLog, usesWitnesses } from "../../webvh/src/index.ts";
 import {
-  buildGenesis,
-  createIdentityMaterial,
-  mnemonicForSeed,
-  preparePortableImport,
-  preparePreRotatedUpdate,
-  rootFromMasterSeed,
-  seedFromMnemonic,
-  spareFromMasterSeed,
-  type ControllerKey,
-} from "./did-webvh.ts";
+  VhHostingClient, applyParameters, keyHash, locationsOf, parseVhLog, resolveVhLog, serializeVhLog, updateVhLog, createVhLog, withLocation,
+  type ActiveParameters, type Location, type VhLogEntry,
+} from "../../vh/src/index.ts";
+import { createIdentityMaterial, mnemonicForSeed, rootFromMasterSeed, seedFromMnemonic, spareFromMasterSeed, type ControllerKey } from "./keys.ts";
+import { buildDidJson, githubDidLocation, publishToGitHub, verifyToken, type PublishProgress } from "./github-host.ts";
 import { openIdentityContainer, sealIdentityContainer } from "./identity-container.ts";
-import { buildDidJson } from "./github-host.ts";
-import { hostForDid, isProvisionalHostlessDid, type IdentityHost, type PublishResult } from "./host.ts";
-import { githubDidLocation, publishToGitHub, verifyToken, type PublishProgress } from "./github-host.ts";
-import type { Entry } from "./webvh-core.ts";
 
 type DidDocument = Record<string, any>;
 
-/** A prepared-but-unpublished next log state (see Identity.prepare*). */
-export type PreparedStep = {
-  entries: Entry[];
-  entry: Entry;
-  nextSpareIndex: number;
-  /** DID before the step, when it changes the DID (a location move). */
-  previousDid?: string;
-};
+/** A prepared-but-unpublished next log state. */
+export type VhStep = { entries: VhLogEntry[]; entry: VhLogEntry; nextSpareIndex: number };
 
-type WitnessProofs = NonNullable<Parameters<typeof resolveLog>[1]> extends { witnessProofs?: infer W } ? NonNullable<W> : never;
+export type VhPublishResult = { did: string; src: string; logUrl: string; versionId: string; verifiedLive: boolean };
 
-export type OpenOptions = {
-  /** The 24-word mnemonic (or the 32-byte seed it encodes). */
-  mnemonic?: string;
-  masterSeed?: Uint8Array;
-  /** The DID log: `did.jsonl` text or parsed entries. */
-  log: string | Entry[];
-  /** `did-witness.json` entries, for a log that configures witnesses. */
-  witnessProofs?: WitnessProofs;
-};
+function activeParameters(entries: ReadonlyArray<VhLogEntry>): ActiveParameters {
+  let active: ActiveParameters | undefined;
+  entries.forEach((entry, index) => { active = applyParameters(active, entry.parameters, index === 0); });
+  return active!;
+}
+
+/** `https://<username>.<domain>`, or `https://<domain>` without a username. */
+export function locationFor(target: { username?: string; domain?: string }): string {
+  const domain = (target.domain ?? "did.md").trim().toLowerCase();
+  if (target.username !== undefined && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(target.username)) throw new Error("Username must be a lowercase DNS-label-like identifier.");
+  return `https://${target.username ? `${target.username}.` : ""}${domain}`;
+}
 
 /**
- * Validates `entries` (the whole did:webvh chain, via didwebvh-ts) and that
- * `masterSeed` really owns the log: genesis root key, published root key,
- * current pre-rotation commitment, current sign key. Returns the derived keys.
+ * Validates `entries` (the whole did:vh log) and that `masterSeed` really owns it: genesis Root key,
+ * published Root key, the current pre-rotation commitment, the current Sign key.
  */
-export async function verifyMasterOwnsLog(entries: Entry[], masterSeed: Uint8Array, witnessProofs?: WitnessProofs): Promise<{ root: ControllerKey; sign: ControllerKey; currentSpareIndex: number }> {
-  await resolveLog(entries as never, witnessProofs ? { witnessProofs } : {});
-  const parameters = currentParameters(entries as never) as any;
-  if (!Array.isArray(parameters.nextKeyHashes) || parameters.nextKeyHashes.length !== 1) {
-    throw new Error("This identity does not satisfy permanent pre-rotation invariants.");
-  }
+export async function verifyMasterOwnsLog(entries: VhLogEntry[], masterSeed: Uint8Array): Promise<{ root: ControllerKey; sign: ControllerKey; currentSpareIndex: number }> {
+  const did = entries[0]?.state?.id;
+  if (typeof did !== "string") throw new Error("The DID log has no DID.");
+  await resolveVhLog(did, entries);
+  const parameters = activeParameters(entries);
+  if (parameters.nextKeyHashes.length !== 1) throw new Error("This identity does not satisfy permanent pre-rotation invariants.");
   const root = await rootFromMasterSeed(masterSeed);
-  if (!(entries[0]!.parameters as any).updateKeys?.includes(root.multikey)) {
-    throw new Error("This Passphrase does not match the identity's genesis Root Key.");
-  }
-  const methods = (entries.at(-1)!.state as any).verificationMethod;
-  if (!Array.isArray(methods) || !methods.some((method: any) => method?.publicKeyMultibase === root.multikey)) {
-    throw new Error("The Master-derived Root Key is missing from the DID Document.");
-  }
+  if (!entries[0]!.parameters.updateKeys?.includes(root.multikey)) throw new Error("This Passphrase does not match the identity's genesis Root Key.");
+  const methods = (entries.at(-1)!.state as DidDocument).verificationMethod;
+  if (!Array.isArray(methods) || !methods.some((method: any) => method?.publicKeyMultibase === root.multikey)) throw new Error("The Master-derived Root Key is missing from the DID Document.");
   const currentSpareIndex = entries.length - 1;
   const nextSpare = await spareFromMasterSeed(masterSeed, currentSpareIndex);
-  if (!parameters.nextKeyHashes.includes(await nextKeyHash(nextSpare.multikey))) {
-    throw new Error("This Passphrase does not match the current pre-rotation commitment.");
-  }
+  if (!parameters.nextKeyHashes.includes(keyHash(nextSpare.multikey))) throw new Error("This Passphrase does not match the current pre-rotation commitment.");
   const sign = entries.length === 1 ? root : await spareFromMasterSeed(masterSeed, currentSpareIndex - 1);
-  if (!parameters.updateKeys?.includes(sign.multikey)) {
-    throw new Error("The DID log's current Sign Key does not match this Master-derived key sequence.");
-  }
+  if (!parameters.updateKeys.includes(sign.multikey)) throw new Error("The DID log's current Sign Key does not match this Master-derived key sequence.");
   return { root, sign, currentSpareIndex };
 }
 
@@ -87,112 +75,114 @@ export class Identity {
   private _root: ControllerKey;
   private _sign: ControllerKey;
   private _spareIndex: number;
-  private _entries: Entry[];
+  private _entries: VhLogEntry[];
+  private readonly client: VhHostingClient;
 
-  private constructor(masterSeed: Uint8Array, root: ControllerKey, sign: ControllerKey, spareIndex: number, entries: Entry[]) {
+  private constructor(masterSeed: Uint8Array, root: ControllerKey, sign: ControllerKey, spareIndex: number, entries: VhLogEntry[], client: VhHostingClient) {
     this.masterSeed = masterSeed;
     this._root = root;
     this._sign = sign;
     this._spareIndex = spareIndex;
     this._entries = entries;
+    this.client = client;
   }
 
-  /** A fresh identity: provisional DID (`…:ex.alias`), no host yet, unless `username` gives it its address up front. */
-  static async create(options: { api?: string; displayName?: string; username?: string; domain?: string } = {}): Promise<{ identity: Identity; mnemonic: string }> {
+  /**
+   * A fresh identity. With a `location` it is born published-to-be at that address (its document already names it); without
+   * one it has no host yet and `connect` gives it one.
+   */
+  static async create(options: { api?: string; displayName?: string; location?: { username?: string; domain?: string }; services?: { id: string; type: string; serviceEndpoint: string }[]; fetch?: typeof fetch } = {}): Promise<{ identity: Identity; mnemonic: string }> {
     const material = await createIdentityMaterial();
-    const genesis = await buildGenesis({
-      // With a username the identity is born at that address (no provisional DID, no move entry).
-      username: options.username ?? "ex", domain: options.username ? (options.domain ?? "did.md") : "alias", root: material.root, sign: material.sign, nextSpare: material.nextSpare,
-      api: options.api, displayName: options.displayName,
+    const src = options.location ? locationFor(options.location) : undefined;
+    const created = await createVhLog({
+      signer: material.sign, updateKeys: [material.sign.multikey], nextKeyHashes: [keyHash(material.nextSpare.multikey)],
+      document: did => {
+        const document = {
+          "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
+          id: did,
+          // Relative: the reference does not depend on the DID string.
+          verificationMethod: [{ id: "#pass-1", type: "Multikey", controller: did, publicKeyMultibase: material.root.multikey }],
+          authentication: ["#pass-1"],
+          // SIOPv2 wallet discovery: where this identity's authorization screen is.
+          service: [
+            ...(options.api ? [{ id: "#wallet", type: "SelfIssuedOPAuthorizationEndpoint", serviceEndpoint: options.api }] : []),
+            ...(options.services ?? []),
+          ],
+          ...(options.displayName ? { name: options.displayName } : {}),
+        };
+        return src ? withLocation(document, did, src) : document;
+      },
     });
-    const identity = new Identity(material.masterSeed, material.root, material.sign, material.nextSpareIndex, [genesis]);
+    const identity = new Identity(material.masterSeed, material.root, material.sign, material.nextSpareIndex, created.log, new VhHostingClient({ fetch: options.fetch }));
     return { identity, mnemonic: material.masterMnemonic };
   }
 
-  /**
-   * Open an identity from its mnemonic and log. Verifies that the log is valid
-   * and that this mnemonic really owns it (genesis root key, published root
-   * key, current pre-rotation commitment, current sign key).
-   */
-  static async open(options: OpenOptions): Promise<Identity> {
+  /** Open an identity from its mnemonic and log; verifies the log and that this mnemonic owns it. */
+  static async open(options: { mnemonic?: string; masterSeed?: Uint8Array; log: string | VhLogEntry[]; fetch?: typeof fetch }): Promise<Identity> {
     const masterSeed = options.masterSeed ?? (options.mnemonic ? seedFromMnemonic(options.mnemonic, "Passphrase") : undefined);
     if (!masterSeed) throw new Error("A mnemonic or master seed is required.");
-    const entries = (typeof options.log === "string" ? parseLog(options.log) : options.log) as unknown as Entry[];
-    const { root, sign, currentSpareIndex: spareIndex } = await verifyMasterOwnsLog(entries, masterSeed, options.witnessProofs);
-    return new Identity(masterSeed, root, sign, spareIndex, entries);
+    const entries = typeof options.log === "string" ? parseVhLog(options.log) : options.log;
+    const { root, sign, currentSpareIndex } = await verifyMasterOwnsLog(entries, masterSeed);
+    return new Identity(masterSeed, root, sign, currentSpareIndex, entries, new VhHostingClient({ fetch: options.fetch }));
   }
 
   /**
-   * Open an identity whose public log is served at its DID (e.g. on a new
-   * device): fetches `did.jsonl` (and `did-witness.json` when the log uses
-   * witnesses) from the location the DID names.
+   * Open an identity whose log is published somewhere (a new device): from a web location (`src`), or by SCID from a host's
+   * watcher API (`GET <watcher>/log?scid=`; any host name serves it). The DID alone names neither.
    */
-  static async fromDid(options: { did: string; mnemonic?: string; masterSeed?: Uint8Array; fetch?: typeof fetch }): Promise<Identity> {
-    const doFetch = options.fetch ?? fetch;
-    const logUrl = didToLogUrl(options.did);
-    const response = await doFetch(logUrl, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Could not fetch the DID log (${response.status}).`);
-    const log = parseLog(await response.text());
-    const witnessProofs = usesWitnesses(log) ? await fetchWitnessProofs(logUrl, doFetch) : undefined;
-    return Identity.open({ mnemonic: options.mnemonic, masterSeed: options.masterSeed, log: log as unknown as Entry[], witnessProofs });
+  static async fromSource(options: { mnemonic?: string; masterSeed?: Uint8Array; src?: string; watcher?: string; scid?: string; fetch?: typeof fetch }): Promise<Identity> {
+    const client = new VhHostingClient({ fetch: options.fetch });
+    let text: string | null;
+    if (options.src) text = await client.read(options.src);
+    else if (options.watcher && options.scid) text = await client.readByScid(options.watcher, options.scid);
+    else throw new Error("A src, or a watcher and a SCID, is required.");
+    if (text === null) throw new Error("Could not find the DID log.");
+    return Identity.open({ mnemonic: options.mnemonic, masterSeed: options.masterSeed, log: text, fetch: options.fetch });
   }
 
-  get entries(): readonly Entry[] { return this._entries; }
-  get did(): string { return this._entries.at(-1)!.state.id as string; }
+  get entries(): readonly VhLogEntry[] { return this._entries; }
+  get did(): string { return this._entries[0]!.state.id as string; }
   get state(): DidDocument { return this._entries.at(-1)!.state as DidDocument; }
-  get scid(): string { return (this._entries[0]!.parameters as any).scid; }
-  get parameters() { return currentParameters(this._entries as never); }
-  /** True until the identity has been given a real location. */
-  get isProvisional(): boolean { return isProvisionalHostlessDid(this.did); }
-  get host(): IdentityHost { return hostForDid(this.did); }
+  get scid(): string { return this._entries[0]!.parameters.scid as string; }
+  get parameters(): ActiveParameters { return activeParameters(this._entries); }
+  /** The locations the current document says the log is published at (the first is where updates go). */
+  get locations(): Location[] { return locationsOf(this.did, this.state); }
+  /** True until the identity has a location. */
+  get isProvisional(): boolean { return this.locations.length === 0; }
   /** The recovery secret. Handle with care. */
   get mnemonic(): string { return mnemonicForSeed(this.masterSeed); }
-  /** The public log as `did.jsonl` text. */
+  logText(): string { return serializeVhLog(this._entries); }
+
   /** The identity as one portable `<scid>.jwe` (log + Master keyring), wrapped by the mnemonic itself. */
   async exportContainer(): Promise<{ scid: string; jwe: string }> {
-    const first = this._entries[0] as any, latest = this._entries.at(-1) as any;
-    const scid = first.parameters.scid as string;
-    const jwe = await sealIdentityContainer({ scid, did: latest.state.id, rootKey: this._root.multikey, generation: latest.versionId, didJsonl: this.logText(), masterSeed: this.masterSeed });
-    return { scid, jwe };
+    const latest = this._entries.at(-1)!;
+    const jwe = await sealIdentityContainer({ scid: this.scid, did: this.did, rootKey: this._root.multikey, generation: latest.versionId, didJsonl: this.logText(), masterSeed: this.masterSeed });
+    return { scid: this.scid, jwe };
   }
 
-  /** Open an identity from a `<scid>.jwe` and its mnemonic; the log is verified against the mnemonic like `open`. */
-  static async fromContainer(options: { jwe: string; mnemonic: string }): Promise<Identity> {
+  static async fromContainer(options: { jwe: string; mnemonic: string; fetch?: typeof fetch }): Promise<Identity> {
     const masterSeed = seedFromMnemonic(options.mnemonic, "Passphrase");
     const container = await openIdentityContainer(options.jwe, masterSeed);
-    const identity = await Identity.open({ masterSeed, log: container.didJsonl });
-    const latest = identity.entries.at(-1) as any;
-    if (latest.state.id !== container.did || latest.versionId !== container.generation) throw new Error("The container's DID log does not match its manifest.");
+    const identity = await Identity.open({ masterSeed, log: container.didJsonl, fetch: options.fetch });
+    if (identity.did !== container.did || identity.entries.at(-1)!.versionId !== container.generation) throw new Error("The container's DID log does not match its manifest.");
     return identity;
   }
 
-  logText(): string { return serializeLog(this._entries as never); }
-
   // ---- offline steps: prepare (pure) then commit (advance local state) ----
 
-  /** Next entry with a complete new DID Document (optionally moving location). */
-  async prepareUpdate(state: DidDocument, options: { domain?: string } = {}): Promise<PreparedStep> {
-    // The provisional `…:ex.alias` DID was never published: the library records
-    // it in alsoKnownAs when the DID moves to its real location, so drop it
-    // from the next entry on (the move entry itself cannot be changed).
-    const aliases = (state as any).alsoKnownAs;
-    if (Array.isArray(aliases) && aliases.some(isProvisionalHostlessDid)) {
-      state = { ...state, alsoKnownAs: aliases.filter(value => !isProvisionalHostlessDid(value)) } as DidDocument;
-    }
-    const prepared = await preparePreRotatedUpdate({
-      entries: this._entries, state, masterSeed: this.masterSeed, currentSpareIndex: this._spareIndex, domain: options.domain,
+  /** The next entry, with a complete new DID Document, signed by the committed Spare and committing the next one. */
+  async prepareUpdate(state: DidDocument): Promise<VhStep> {
+    const spare = await spareFromMasterSeed(this.masterSeed, this._spareIndex);
+    const nextSpare = await spareFromMasterSeed(this.masterSeed, this._spareIndex + 1);
+    const { log } = await updateVhLog({
+      log: this._entries, signer: spare, document: state,
+      parameters: { updateKeys: [spare.multikey], nextKeyHashes: [keyHash(nextSpare.multikey)] },
     });
-    return { entries: [...this._entries, prepared.entry], entry: prepared.entry, nextSpareIndex: prepared.nextSpareIndex };
-  }
-
-  /** The portability entry that gives this identity `<username>.<domain>`. */
-  async prepareMove(target: { username?: string; domain: string }): Promise<PreparedStep> {
-    const moved = await preparePortableImport({ entries: this._entries, ...target, masterSeed: this.masterSeed });
-    return { entries: [...this._entries, moved.entry], entry: moved.entry, nextSpareIndex: moved.nextSpareIndex, previousDid: this.did };
+    return { entries: log, entry: log.at(-1)!, nextSpareIndex: this._spareIndex + 1 };
   }
 
   /** Adopt a prepared step (after the host accepted it, or for offline use). */
-  async commit(step: PreparedStep): Promise<void> {
+  async commit(step: VhStep): Promise<void> {
     if (step.entries.length !== this._entries.length + 1) throw new Error("This step does not extend the current log.");
     this._sign = await spareFromMasterSeed(this.masterSeed, this._spareIndex);
     this._spareIndex = step.nextSpareIndex;
@@ -202,75 +192,103 @@ export class Identity {
   // ---- publishing ----
 
   /**
-   * Publish a document change (or a plain key rotation when `edit` is
-   * omitted) to the DID's current host, then advance local state.
+   * A document change (or a plain key rotation when `edit` is omitted): published to the first location, then local state
+   * advances. With no location it only advances locally. An edit that stops naming the location is refused here, as the
+   * host would refuse it.
    */
-  async publishUpdate(edit?: (state: DidDocument) => DidDocument | void, options: { credential?: string } = {}): Promise<PublishResult> {
+  async publishUpdate(edit?: (state: DidDocument) => DidDocument | void): Promise<VhPublishResult | undefined> {
     const draft = JSON.parse(JSON.stringify(this.state)) as DidDocument;
     const state = (edit ? edit(draft) : undefined) ?? draft;
+    const here = this.locations[0];
+    if (here && !locationsOf(this.did, state).some(location => location.src === here.src) ) throw new Error(`The edited document no longer names ${here.didWeb} and its ?src= alias; the host would refuse it.`);
+    if (here && !(Array.isArray(state.alsoKnownAs) && state.alsoKnownAs.includes(here.didWeb))) throw new Error(`The edited document no longer names ${here.didWeb}; the host would refuse it.`);
     const step = await this.prepareUpdate(state);
-    const result = await this.host.publish({ entries: step.entries, mode: "append", credential: options.credential, message: `Publish update ${step.entry.versionId}` });
+    if (!here) { await this.commit(step); return undefined; }
+    await this.client.append(here.src, `${JSON.stringify(step.entry)}\n`);
     await this.commit(step);
-    return result;
+    return this.resultAt(here.src);
+  }
+
+  /** PUT the whole log to the first location: the first publication of an identity that was created with one, or a republish. */
+  async publish(): Promise<VhPublishResult> {
+    const here = this.locations[0];
+    if (!here) throw new Error("This identity has no location; connect it to a host first.");
+    await this.client.publish(here.src, this.logText());
+    return this.resultAt(here.src);
   }
 
   /** Rotate the Sign key (a new pre-rotated entry, same document). */
-  rotate(options: { credential?: string } = {}): Promise<PublishResult> {
-    return this.publishUpdate(undefined, options);
-  }
+  rotate(): Promise<VhPublishResult | undefined> { return this.publishUpdate(); }
 
   /**
-   * Give the identity a did.md (or other HTTP host) location and publish the
-   * full log there. When it was hosted elsewhere, the old copy is removed on a
-   * best-effort basis (`cleanupError` reports a failure).
+   * Give the identity a location (`<username>.<domain>`, default did.md) and publish the full log there. One entry: the
+   * document starts to name the place (and stops naming the old one, if it had one); the DID stays what it was. The old copy
+   * is taken down on a best-effort basis (`cleanupError` reports a failure).
    */
-  async connect(target: { username: string; domain?: string }): Promise<PublishResult & { cleanupError?: Error }> {
-    const step = await this.prepareMove({ username: target.username, domain: target.domain ?? "did.md" });
-    const newDid = step.entry.state.id as string;
-    const result = await hostForDid(newDid).publish({ entries: step.entries, mode: "replace", message: `Publish ${step.entry.versionId}` });
-    const previous = { did: this.did, sign: this._sign };
+  async connect(target: { username?: string; domain?: string }): Promise<VhPublishResult & { cleanupError?: Error }> {
+    const src = locationFor(target);
+    const old = this.locations[0];
+    if (old?.src === src) throw new Error("This identity is already at that location.");
+    if (!await this.client.publishesVh(src)) throw new Error(`${new URL(src).host} does not publish did:vh.`);
+    const step = await this.prepareUpdate(withLocation(this.state, this.did, src, old?.src));
+    await this.client.publish(src, serializeVhLog(step.entries));
+    const previous = { sign: this._sign };
     await this.commit(step);
-    return { ...result, ...(await this.removeOld(previous.did, previous.sign)) };
+    const result = await this.resultAt(src);
+    if (!old) return result;
+    try { await this.client.remove(old.src, this.did, previous.sign); return result; }
+    catch (error) { return { ...result, cleanupError: error instanceof Error ? error : new Error(String(error)) }; }
   }
 
+
   /**
-   * Bring-your-own domain: re-home the identity on `host` itself (apex or any
-   * subdomain) locally. Nothing is published; the caller serves the log
-   * (`did.jsonl`) and the did:web mirror (`did.json`) under
-   * `https://<host>/.well-known/`, or PUTs the log to a host that speaks the
-   * hosting protocol. The old host copy is not touched.
+   * Bring-your-own domain: name `host` (apex or any subdomain) as this identity's location, locally. Nothing is published;
+   * the caller serves the log (`did.jsonl`) and the did:web document (`did.json`) under `https://<host>/.well-known/`, or PUTs
+   * the log to a host that speaks the hosting protocol. The DID does not change; the old host copy is not touched.
    */
-  async moveToDomain(host: string): Promise<{ did: string; didWeb: string; didJson: string; previousDid: string }> {
+  async moveToDomain(host: string): Promise<{ did: string; didWeb: string; didJson: string; src: string; previousSrc?: string }> {
     host = host.trim().toLowerCase();
     if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host)) throw new Error(`"${host}" is not a fully-qualified domain name.`);
-    const step = await this.prepareMove({ domain: host });
+    const src = `https://${host}`;
+    const old = this.locations[0];
+    const step = await this.prepareUpdate(withLocation(this.state, this.did, src, old?.src));
     await this.commit(step);
-    const did = step.entry.state.id as string;
-    return { did, didWeb: `did:web:${host}`, didJson: buildDidJson(step.entry.state, did), previousDid: step.previousDid! };
+    const didWeb = `did:web:${host}`;
+    return { did: this.did, didWeb, didJson: buildDidJson(step.entry.state as DidDocument, didWeb), src, previousSrc: old?.src };
   }
 
-  /** Host on `<login>.github.io` (login taken from the token). */
+  /** Host on `<login>.github.io` (login taken from the token): the document starts to name the site, the log goes there. */
   async hostOnGitHub(options: { token: string; onProgress?: PublishProgress; timeoutMs?: number; intervalMs?: number }) {
     const { login } = await verifyToken(options.token);
-    const onGitHub = githubDidLocation(login).domain === this.did.split(":").slice(3).join(":");
-    const step = onGitHub ? undefined : await this.prepareMove({ username: login, domain: "github.io" });
+    const location = githubDidLocation(login);
+    const old = this.locations[0];
+    const onGitHub = old?.src === location.src;
+    const step = onGitHub ? undefined : await this.prepareUpdate(withLocation(this.state, this.did, location.src, old?.src));
     const entries = step ? step.entries : [...this._entries];
     const result = await publishToGitHub({
       token: options.token, entries, onProgress: options.onProgress, timeoutMs: options.timeoutMs, intervalMs: options.intervalMs,
-      message: step ? `Publish did:webvh ${step.entry.versionId} (portability move)` : `Republish did:webvh ${entries.at(-1)!.versionId}`,
+      message: step ? `Publish did:vh ${step.entry.versionId} (new location)` : `Republish did:vh ${entries.at(-1)!.versionId}`,
     });
-    const previous = { did: this.did, sign: this._sign };
+    const previous = { sign: this._sign };
     if (step) await this.commit(step);
-    return { ...result, ...(step ? await this.removeOld(previous.did, previous.sign) : {}) };
+    if (!step || !old) return result;
+    try { await this.client.remove(old.src, this.did, previous.sign); return result; }
+    catch (error) { return { ...result, cleanupError: error instanceof Error ? error : new Error(String(error)) }; }
   }
 
-  /** Un-host the DID (did.md: signed DELETE; GitHub: deletes only the DID files). */
-  async unpublish(options: { credential?: string } = {}): Promise<void> {
-    await this.host.remove(this.did, this._sign, options.credential);
+  /** Take the log down from its first location (a signed DELETE). It does not deactivate the DID. */
+  async unpublish(): Promise<void> {
+    const here = this.locations[0];
+    if (!here) throw new Error("This identity has no location.");
+    await this.client.remove(here.src, this.did, this._sign);
   }
 
-  /** True if the current host serves the log right now. */
-  isLive(): Promise<boolean> { return this.host.isLive(this.did); }
+  /** True if the first location serves the newest version right now. */
+  async isLive(): Promise<boolean> {
+    const here = this.locations[0];
+    if (!here) return false;
+    try { return (await this.client.read(here.src)) === this.logText(); } catch { return false; }
+  }
 
   /** Scrub key material. The object is unusable afterwards. */
   destroy(): void {
@@ -279,9 +297,10 @@ export class Identity {
     this._sign.privateKey.fill(0);
   }
 
-  private async removeOld(did: string, sign: ControllerKey): Promise<{ cleanupError?: Error }> {
-    if (isProvisionalHostlessDid(did) || did === this.did) return {};
-    try { await hostForDid(did).remove(did, sign); return {}; }
-    catch (error) { return { cleanupError: error instanceof Error ? error : new Error(String(error)) }; }
+  private async resultAt(src: string): Promise<VhPublishResult> {
+    const versionId = this._entries.at(-1)!.versionId;
+    const live = await this.client.read(src).catch(() => null);
+    return { did: this.did, src, logUrl: `${this.client.baseUrl(src)}did.jsonl`, versionId, verifiedLive: live === this.logText() };
   }
 }
+

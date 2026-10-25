@@ -2,9 +2,9 @@ import { afterAll, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatReport, runConformance, createLog, serializeLog, keyFromPrivateKey, Ed25519Signer, nextKeyHash } from "../packages/webvh/src/index.ts";
+import { formatReport, serializeVhLog, runVhConformance } from "../packages/vh/src/index.ts";
+import { vhLogAt } from "./helpers/vh-log.ts";
 import { setTimeout as sleep } from "node:timers/promises";
-import { advertisesVh, runVhConformance } from "../packages/vh/src/index.ts";
 import { spawn } from "./spawn.ts";
 
 // The VPS entry point (server/host/http-server.ts): conforms to the protocol
@@ -32,41 +32,27 @@ const viaHost = ((input: RequestInfo | URL, init?: RequestInit) => {
   return fetch(`${base}${url.pathname}${url.search}`, { ...init, headers });
 }) as typeof fetch;
 
-test("the VPS host passes the protocol conformance suite", async () => {
-  await ready();
-  let n = 0;
-  const report = formatReport(await runConformance({ newLocation: () => `vps${Date.now().toString(36)}${n++}.did.md`, fetch: viaHost }));
-  if (!report.ok) console.log(report.text);
-  expect(report.ok).toBe(true);
-});
-
-test("the VPS host also passes the did:vh conformance checks it advertises, against the real file store", async () => {
+test("the VPS host passes the protocol conformance suite, against the real file store", async () => {
   await ready();
   let n = 0;
   const target = { newLocation: () => `vh${Date.now().toString(36)}${n++}.did.md`, fetch: viaHost };
-  expect(await advertisesVh(target)).toBe(true);
   const results = await runVhConformance(target);
   const report = formatReport(results);
   if (!report.ok) console.log(report.text);
   expect(report.ok).toBe(true);
-  expect(results.length).toBe(10);
+  expect(results.length).toBeGreaterThanOrEqual(12);
 });
 
 test("public reads are CDN-cacheable (s-maxage), 404s and writes are not", async () => {
   await ready();
-  const key = keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
-  const next = keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
   const host = `cache${Date.now().toString(36)}.did.md`;
-  const created = await createLog({
-    domain: host, signer: new Ed25519Signer(key), updateKeys: [key.multikey], nextKeyHashes: [await nextKeyHash(next.multikey)],
-    verificationMethods: [{ id: "#k", type: "Multikey", publicKeyMultibase: key.multikey }], authentication: ["#k"],
-  });
+  const created = await vhLogAt(host);
   const url = `https://${host}/.well-known/did.jsonl`;
   const missing = await viaHost(url);
   expect(missing.status).toBe(404);
   expect(missing.headers.get("cache-control")).toBe("no-store");
 
-  const put = await viaHost(url, { method: "PUT", headers: { "content-type": "text/jsonl" }, body: serializeLog(created.log) });
+  const put = await viaHost(url, { method: "PUT", headers: { "content-type": "text/jsonl" }, body: serializeVhLog(created.log) });
   expect(put.status).toBe(201);
   expect(put.headers.get("cache-control") ?? "").not.toContain("s-maxage");
 
@@ -82,14 +68,9 @@ test("public reads are CDN-cacheable (s-maxage), 404s and writes are not", async
 
 test("a name that sounds like the service (postmaster, didmail, support ...) cannot be registered, and says so when asked", async () => {
   await ready();
-  const key = keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
-  const next = keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
   const publish = async (host: string) => {
-    const created = await createLog({
-      domain: host, signer: new Ed25519Signer(key), updateKeys: [key.multikey], nextKeyHashes: [await nextKeyHash(next.multikey)],
-      verificationMethods: [{ id: "#k", type: "Multikey", publicKeyMultibase: key.multikey }], authentication: ["#k"],
-    });
-    return viaHost(`https://${host}/.well-known/did.jsonl`, { method: "PUT", headers: { "content-type": "text/jsonl" }, body: serializeLog(created.log) });
+    const created = await vhLogAt(host);
+    return viaHost(`https://${host}/.well-known/did.jsonl`, { method: "PUT", headers: { "content-type": "text/jsonl" }, body: serializeVhLog(created.log) });
   };
   for (const name of ["postmaster", "didmail", "support", "mailer-daemon", "xn--mail-6za"]) {
     const refused = await publish(`${name}.did.md`);

@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { didHost, didIsHostedAt, parseLoginHost } from "../packages/wallet/src/login-hint.ts";
+import { isHostedAt, locationHosts, parseLoginHost } from "../packages/wallet/src/login-hint.ts";
+import { withLocation } from "../packages/vh/src/index.ts";
 
 test("accepts did.md subdomains and bring-your-own domains", () => {
   expect(parseLoginHost("alice.did.md")).toBe("alice.did.md");
@@ -23,14 +24,14 @@ test("rejects anything that is not a plain DNS hostname", () => {
   expect(parseLoginHost(42)).toBeNull();
 });
 
-test("matches an identity by the host segment of its DID", () => {
-  const scid = "QmZdfGg8BAxEMLvHRC1RwDVcthg66akuBzJoeLvRdHXwQz";
-  expect(didHost(`did:webvh:${scid}:digitalcommons.jp`)).toBe("digitalcommons.jp");
-  expect(didIsHostedAt(`did:webvh:${scid}:digitalcommons.jp`, "digitalcommons.jp")).toBe(true);
-  expect(didIsHostedAt(`did:webvh:${scid}:alice.did.md`, "alice.did.md")).toBe(true);
-  // another host, another identity, a path-scoped DID, and non-webvh DIDs never match
-  expect(didIsHostedAt(`did:webvh:${scid}:alice.did.md`, "digitalcommons.jp")).toBe(false);
-  expect(didIsHostedAt(`did:webvh:${scid}:digitalcommons.jp:users:bob`, "digitalcommons.jp")).toBe(false);
-  expect(didIsHostedAt("did:web:digitalcommons.jp", "digitalcommons.jp")).toBe(false);
-  expect(didIsHostedAt(undefined, "digitalcommons.jp")).toBe(false);
+test("matches an identity by the locations its own document names", () => {
+  const did = `did:vh:${"Q".repeat(46)}`;
+  const at = (...srcs: string[]) => srcs.reduce<Record<string, any>>((document, src) => withLocation(document, did, src), { id: did });
+  expect(locationHosts(did, at("https://digitalcommons.jp"))).toEqual(["digitalcommons.jp"]);
+  expect(isHostedAt(did, at("https://digitalcommons.jp"), "digitalcommons.jp")).toBe(true);
+  expect(isHostedAt(did, at("https://alice.did.md"), "alice.did.md")).toBe(true);
+  // another host, an identity with no location, and a location under a path never match a plain host
+  expect(isHostedAt(did, at("https://alice.did.md"), "digitalcommons.jp")).toBe(false);
+  expect(isHostedAt(did, { id: did }, "alice.did.md")).toBe(false);
+  expect(isHostedAt(did, at("https://digitalcommons.jp/users/bob"), "bob.digitalcommons.jp")).toBe(false);
 });

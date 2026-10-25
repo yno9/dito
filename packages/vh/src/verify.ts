@@ -11,8 +11,8 @@
  * Witnesses are not implemented yet: a log that configures any is refused
  * (`featureNotSupported`) rather than accepted without the approvals it needs.
  */
-import { verifyDataIntegrityProof, publicKeyFromMultikey } from "../../webvh/src/proof.ts";
-import { checkAndRemember, type VersionMemory } from "../../webvh/src/freshness.ts";
+import { verifyDataIntegrityProof, publicKeyFromMultikey } from "./proof.ts";
+import { checkAndRemember, type VersionMemory } from "./freshness.ts";
 import { VH_METHOD, parseVhDid, isScid } from "./did.ts";
 import { keyHash } from "./hash.ts";
 import { entryHash, parseVersionId, parseVersionTime, verifyScid, type VhLogEntry, type VhParameters } from "./log.ts";

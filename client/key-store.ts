@@ -237,7 +237,7 @@ function copyApplicationEnvelope(value: any): EncryptedApplicationMetadata | und
  * has no rootKey of its own; it just tags which identity's log this is. */
 function didIdentifierFieldsAreValid(value: any): boolean {
   return value && typeof value.username === "string" && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value.username)
-    && typeof value.did === "string" && value.did.startsWith("did:webvh:") && value.did.length <= 4096
+    && typeof value.did === "string" && value.did.startsWith("did:vh:") && value.did.length <= 4096
     && typeof value.generation === "string" && value.generation.length <= 512;
 }
 

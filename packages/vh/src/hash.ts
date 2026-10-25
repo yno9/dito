@@ -4,14 +4,12 @@
  * pre-rotation commitment. SHA-256 is the only algorithm `did:vh:1.0` permits.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { MultibaseEncoding, multibaseEncode } from "didwebvh-ts";
+import { base58btc } from "./base58.ts";
+export { base58btc };
 import { canonicalize } from "./jcs.ts";
 
 const SHA2_256 = 0x12;
 
-export function base58btc(bytes: Uint8Array): string {
-  return multibaseEncode(bytes, MultibaseEncoding.BASE58_BTC).slice(1);
-}
 
 /** Multihash of `data` with SHA-256: code 0x12, length 0x20, digest. */
 export function multihashSha256(data: Uint8Array): Uint8Array {

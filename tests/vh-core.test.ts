@@ -1,8 +1,7 @@
 import { expect, test } from "vitest";
-import { Ed25519Signer, createLog, keyFromPrivateKey, nextKeyHash } from "../packages/webvh/src/index.ts";
 import {
   SCID_PLACEHOLDER, VH_METHOD, VhResolutionError, canonicalize, createVhLog, deactivateVhLog, entryHash, jcsHash, keyHash, parseVersionId,
-  parseVhDid, parseVhLog, resolveVhLog, serializeVhLog, updateVhLog, verifyScid, vhDid, type VhLogEntry,
+  keyFromPrivateKey, parseVhDid, parseVhLog, resolveVhLog, serializeVhLog, updateVhLog, verifyScid, vhDid, type VhLogEntry,
 } from "../packages/vh/src/index.ts";
 
 const key = () => keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
@@ -10,7 +9,7 @@ const document = (extra: Record<string, any> = {}) => (did: string) => ({ "@cont
 
 // ---- the specification's own vector -------------------------------------------------------------------------------
 
-test("the entry hash of did:webvh v1.0's worked example is the one that specification states", () => {
+test("the entry hash of the worked example in the did:webvh v1.0 specification (the algorithm did:vh shares) is the one that specification states", () => {
   // https://identity.foundation/didwebvh/v1.0/#generate-entry-hash (the algorithm did:vh shares).
   const preliminary = {"versionId": "QmdmPkUdYzbr9txmx8gM2rsHPgr5L6m3gHjJGAf4vUFoGE", "versionTime": "2025-04-01T17:39:50Z", "parameters": {"witness": {"threshold": 2, "witnesses": [{"id": "did:key:z6Mkkc51mg2vpQzKWAbWQZupeGYhowaBjYkmvcKMTqteqHB4", "weight": 1}, {"id": "did:key:z6MkuDdJdKLCgwZuQuEi9xG6LVgJJ9Tebr74CXPYPSumqgJs", "weight": 1}, {"id": "did:key:z6MkoSWmQyp4fTk4ZQy4KUsss9dFX51XfEUzKKKj1J1JUsrF", "weight": 1}]}, "updateKeys": ["z6MkgzBDcBFV3sk4ypPE5YXMZHmS213A3HpYY2LmcVKV15jr"], "nextKeyHashes": ["QmZreDcjvWEpyRFznQeExWNCsvMLk5i59AcRJJuQC8UodJ"], "method": "did:webvh:0.5", "scid": "QmdmPkUdYzbr9txmx8gM2rsHPgr5L6m3gHjJGAf4vUFoGE"}, "state": {"@context": ["https://www.w3.org/ns/did/v1"], "id": "did:webvh:QmdmPkUdYzbr9txmx8gM2rsHPgr5L6m3gHjJGAf4vUFoGE:domain.example"}};
   expect(jcsHash(preliminary)).toBe("QmQ6FJ4fk2xheSSQoEjVpTgx9AQPKhJgtR9hn1nr4EeCrZ");
@@ -28,25 +27,11 @@ test("JCS sorts keys by UTF-16 code unit, drops undefined members, and writes -0
   expect(() => canonicalize({ n: NaN })).toThrow();
 });
 
-test("keyHash is didwebvh-ts's pre-rotation hash", async () => {
+test("keyHash commits to the multikey string itself: base58btc(multihash(SHA-256, multikey))", () => {
   const k = key().multikey;
-  expect(keyHash(k)).toBe(await nextKeyHash(k));
-});
-
-// ---- the same algorithms as did:webvh: a didwebvh-ts log checks out with these functions ---------------------------
-
-test("the SCID and entry hashes of a log made by didwebvh-ts verify with did:vh's functions", async () => {
-  const [k0, k1] = [key(), key()];
-  const created = await createLog({
-    domain: "example.com", signer: new Ed25519Signer(k0), updateKeys: [k0.multikey], nextKeyHashes: [await nextKeyHash(k1.multikey)],
-    verificationMethods: [{ id: "#k", type: "Multikey", publicKeyMultibase: k0.multikey }], authentication: ["#k"],
-  });
-  const first = created.log[0] as unknown as VhLogEntry;
-  expect(verifyScid(first)).toBe(true);
-  expect(`1-${entryHash(first, first.parameters.scid!)}`).toBe(first.versionId);
-  const tampered = structuredClone(first);
-  tampered.state = { ...tampered.state, alsoKnownAs: ["https://evil.example"] };
-  expect(verifyScid(tampered)).toBe(false);
+  expect(keyHash(k)).toBe(keyHash(k));
+  expect(keyHash(k)).toMatch(/^Qm[1-9A-HJ-NP-Za-km-z]{44}$/);
+  expect(keyHash(k)).not.toBe(keyHash(key().multikey));
 });
 
 // ---- identifiers --------------------------------------------------------------------------------------------------
@@ -57,7 +42,7 @@ test("did:vh syntax: the whole identifier is a 46-character base58btc SCID", asy
   const created = await newLog();
   expect(created.did).toMatch(/^did:vh:[1-9A-HJ-NP-Za-km-z]{46}$/);
   expect(parseVhDid(created.did).scid).toBe(created.did.slice(7));
-  for (const bad of ["did:vh:", "did:vh:short", `${created.did}#k`, `${created.did}?src=https://a.example`, `${created.did}:x`, created.did.replace("did:vh", "did:webvh"), `did:vh:${"0".repeat(46)}`]) {
+  for (const bad of ["did:vh:", "did:vh:short", `${created.did}#k`, `${created.did}?src=https://a.example`, `${created.did}:x`, created.did.replace("did:vh", "did:web"), `did:vh:${"0".repeat(46)}`]) {
     expect(() => parseVhDid(bad), bad).toThrow();
   }
   expect(vhDid(SCID_PLACEHOLDER)).toBe("did:vh:{SCID}");
@@ -168,7 +153,7 @@ test("a log that is not the DID's is refused", async () => {
   const a = await newLog();
   const b = await newLog();
   await refuses(a.did, b.log, /SCID in the log is not the SCID/);
-  await expect(resolveVhLog("did:webvh:abc", a.log)).rejects.toMatchObject({ code: "invalidDid" });
+  await expect(resolveVhLog("did:web:abc", a.log)).rejects.toMatchObject({ code: "invalidDid" });
   await expect(resolveVhLog(`${a.did}#k`, a.log)).rejects.toMatchObject({ code: "invalidDid" });
 });
 
@@ -199,9 +184,9 @@ test("tampering is refused: the document, the SCID, the hash chain, the proof", 
   await refuses(did, unsigned, /no proof/);
 });
 
-test("the document id must be exactly the DID in every entry (a did:webvh id, a ?src= id, another SCID)", async () => {
+test("the document id must be exactly the DID in every entry (another method's id, a ?src= id, another SCID)", async () => {
   const { did, log, k0 } = await newLog();
-  for (const id of [`${did}?src=https://a.example`, "did:webvh:Qm:example.com", `did:vh:${"1".repeat(46)}`, `${did}#x`]) {
+  for (const id of [`${did}?src=https://a.example`, "did:web:example.com", `did:vh:${"1".repeat(46)}`, `${did}#x`]) {
     const next = await updateVhLogUnchecked(log, k0, { ...log[0]!.state, id });
     await refuses(did, next, /document id must be exactly/);
   }
@@ -211,7 +196,7 @@ test("parameters: portable, logVersion, null, unknown names, a wrong method, and
   const { did, log, k0 } = await newLog();
   const cases: Array<[Record<string, unknown>, RegExp]> = [
     [{ portable: true }, /portable/], [{ portable: false }, /portable/], [{ logVersion: "vh-log:1.0" }, /logVersion/],
-    [{ ttl: null }, /null/], [{ method: "did:webvh:1.0" }, /Unsupported method/], [{ method: "did:vh:2.0" }, /Unsupported method/],
+    [{ ttl: null }, /null/], [{ method: "did:web:1.0" }, /Unsupported method/], [{ method: "did:vh:2.0" }, /Unsupported method/],
     [{ scid: "x" }, /scid may only appear/], [{ unknown: 1 }, /not a did:vh parameter/], [{ ttl: -1 }, /ttl/], [{ ttl: 1.5 }, /ttl/],
     [{ deactivated: "yes" }, /deactivated/], [{ watchers: ["http://w.example"] }, /https/], [{ updateKeys: ["z6Mknotakey"] }, /Ed25519/],
     [{ nextKeyHashes: "x" }, /array of strings/],
@@ -243,7 +228,7 @@ test("times: not later than the entry before, not in the future, whole seconds, 
 
 /** A log with one more entry, signed correctly but NOT checked by the library, so the resolver's refusal can be tested. */
 async function updateVhLogUnchecked(log: VhLogEntry[], signer: ReturnType<typeof key>, document?: Record<string, any>, parameters: Record<string, unknown> = {}, versionTime?: string): Promise<VhLogEntry[]> {
-  const { createDataIntegrityProof } = await import("../packages/webvh/src/proof.ts");
+  const { createDataIntegrityProof } = await import("../packages/vh/src/proof.ts");
   const last = log[log.length - 1]!;
   const time = versionTime ?? new Date(Date.parse(last.versionTime) + 2000).toISOString().slice(0, 19) + "Z";
   const unsigned = { versionId: last.versionId, versionTime: time, parameters, state: document ?? last.state };

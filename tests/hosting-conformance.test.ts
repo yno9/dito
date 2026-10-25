@@ -2,8 +2,7 @@ import { afterAll, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatReport, runConformance } from "../packages/webvh/src/index.ts";
-import { advertisesVh, runVhConformance } from "../packages/vh/src/index.ts";
+import { formatReport, runVhConformance } from "../packages/vh/src/index.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "./spawn.ts";
 
@@ -28,10 +27,10 @@ async function ready() {
   throw new Error("server did not start");
 }
 
-test("did.md's host conforms to webvh-hosting/1", async () => {
+test("did.md's host conforms to vh-hosting/1", async () => {
   await ready();
   let counter = 0;
-  const results = await runConformance({
+  const results = await runVhConformance({
     newLocation: () => `conf-${Date.now().toString(36)}${counter++}.did.md`,
     fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -43,23 +42,5 @@ test("did.md's host conforms to webvh-hosting/1", async () => {
   const report = formatReport(results);
   if (!report.ok) console.log(report.text);
   expect(report.ok).toBe(true);
-  expect(results.length).toBeGreaterThanOrEqual(14);
-});
-
-test("did.md's full server also conforms to the did:vh checks it advertises", async () => {
-  await ready();
-  let counter = 0;
-  const target = {
-    newLocation: () => `confvh-${Date.now().toString(36)}${counter++}.did.md`,
-    fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(String(input));
-      const headers = new Headers(init?.headers);
-      headers.set("host", url.host);
-      return fetch(`${base}${url.pathname}${url.search}`, { ...init, headers });
-    }) as typeof fetch,
-  };
-  expect(await advertisesVh(target)).toBe(true);
-  const report = formatReport(await runVhConformance(target));
-  if (!report.ok) console.log(report.text);
-  expect(report.ok).toBe(true);
+  expect(results.length).toBeGreaterThanOrEqual(12);
 });

@@ -1,28 +1,30 @@
 # Architecture
 
-What dito is today and how the parts fit. (Protocol details: [SPEC-webvh-hosting.md](SPEC-webvh-hosting.md).)
+What dito is today and how the parts fit. (Protocol details: [SPEC-vh-hosting.md](SPEC-vh-hosting.md).)
 
 ## 1. Positioning
 
 - dito is a **Universal Digital Identity (UDI) wallet**, not an EUDI wallet. It keeps the OpenID4VC
   protocol family (SIOPv2 self-issued `id_token`, OID4VP, VC-DM 2.0) and replaces the state-accredited
-  trust anchor with a self-sovereign `did:webvh` identity: the trust root is a self-signed, verifiable log.
-- did:webvh handling is not the differentiator, so **all did:webvh log mechanics go through
-  [`didwebvh-ts`](https://github.com/decentralized-identity/didwebvh-ts)** (create, update, portability move,
-  validation, resolution). What is ours: the key profile, hosting, and the wallet.
-- Client and host are separable. The wallet is a generic did:webvh wallet; a host is anything that
-  implements `webvh-hosting/1`. Either can be replaced by a third party, and a conformance suite
+  trust anchor with a self-sovereign `did:vh` identity: the trust root is a self-signed, verifiable log.
+- **did:vh is the one DID method** (and did:web, published beside it as a shadow derived from the log, for clients that
+  only speak did:web). A `did:vh:<SCID>` names no host: the identity's own signed document says where its log is
+  published, so the DID never changes when the log moves. The method is a pre-draft built on VH-Log (see
+  `didvh-spec.md`); everything that depends on its details is in `packages/vh`, pinned by shared test vectors. What is
+  ours on top: the key profile, hosting, and the wallet.
+- Client and host are separable. The wallet is a generic did:vh wallet; a host is anything that
+  implements `vh-hosting/1`. Either can be replaced by a third party, and a conformance suite
   says whether a host qualifies.
 
 ```
                   ┌──────────── wallet (browser, CLI, library) ────────────┐
-                  │  keys (one mnemonic) · Identity · did:webvh via        │
-                  │  didwebvh-ts · webvh-hosting/1 client                  │
+                  │  keys (one mnemonic) · Identity · did:vh via           │
+                  │  packages/vh · vh-hosting/1 client                     │
                   └───────────────┬───────────────────────────┬────────────┘
       GET/PUT/POST/DELETE did.jsonl│                          │ OAuth / OID4VP (optional)
                   ┌───────────────▼───────────┐   ┌──────────▼───────────┐
-                  │ any webvh-hosting/1 host  │   │ relying party (RP)   │
-                  │ did.md · reference host · │   │ resolves the DID     │
+                  │ any vh-hosting/1 host     │   │ relying party (RP)   │
+                  │ did.md · byo-host ·       │   │ resolves the DID     │
                   │ <login>.github.io         │   │ itself                │
                   └───────────────────────────┘   └──────────────────────┘
 ```
@@ -40,13 +42,13 @@ What dito is today and how the parts fit. (Protocol details: [SPEC-webvh-hosting
 
 | path | role |
 |---|---|
-| `packages/webvh/` | Generic layer over `didwebvh-ts`: `Ed25519Signer`, `createLog` / `updateLog` / `resolveLog`, Data Integrity proofs, strict DID→URL parsing (`parseDid`, `didToLogUrl`), `resolveDidWebvh()`, the hosting **client** (`WebvhHostingClient`), the **conformance suite**, and a **reference host**. Nothing dito-specific. |
-| `packages/wallet/` | The wallet profile: Master-seed keys (BIP-39, SLIP-0010, permanent pre-rotation), portability moves, host adapters (any `webvh-hosting/1` host, GitHub Pages), backups, and `Identity`, the DOM-free session used by the CLI and scripts. |
+| `packages/vh/` | did:vh and nothing dito-specific: log verification (every entry, in order; witnesses refused), `createVhLog` / `updateVhLog` / `deactivateVhLog`, the strict web-location parser and fetcher (`src.ts`, also the SSRF guard), the did:web shadow derivation and check (`didweb.ts`), the location rule (`policy.ts`), Ed25519 keys and Data Integrity proofs (`eddsa-jcs-2022`, no external DID library), the version memory (`freshness.ts`), the hosting **client** (`VhHostingClient`) and the **conformance suite**. |
+| `packages/wallet/` | The wallet profile: Master-seed keys (BIP-39, SLIP-0010, permanent pre-rotation), host adapters (any `vh-hosting/1` host, GitHub Pages), backups, and `Identity`, the DOM-free session used by the CLI and scripts (`vh-ops.ts` is the same operations as plain functions, for the browser wallet). |
 | `packages/cli/` | `dito`, the same operations from a terminal, a script or an agent (`--json`). |
-| `packages/did-verify/` | JWT / `id_token` verification for the OIDC bridge (embedded JWK or a `did:webvh` `kid`); resolves the whole log before trusting a document. |
+| `packages/did-verify/` | JWT / `id_token` verification for the OIDC bridge (embedded JWK or a `did:vh` `kid`, whose log comes from the verifier's own watchers); resolves the whole log before trusting a document. |
 | `client/`, `public/`, `build.ts` | The browser wallet, bundled by esbuild into a single `dist/index.html` (inline script and styles) that also runs from `file://`. |
 | `web/`, `astro.config.mjs` | An Astro + React site with its own `srcDir`, `publicDir` and `outDir` (`build/astro`), so it cannot collide with the wallet's `public/` and `dist/`. |
-| `server/host/` | did.md's host: `identity-host.ts` (the protocol, plus the authentication-key resolution the OAuth layer uses) and `http-server.ts` (the process); `byo-host.ts` is the one-domain file host behind digitalcommons.jp. `server/serve.ts` adapts a `(Request) => Response` handler to `node:http`; `server/host-fetch.ts` is a `fetch` that honors a caller-set `Host`, which Node's own fetch overrides and the Host-routed host and its tests need. |
+| `server/host/` | did.md's host: `identity-host.ts` (the protocol, plus the authentication-key resolution the OAuth layer uses) and `http-server.ts` (the process); `byo-host.ts` is the independent one-domain file host behind digitalcommons.jp (it also stands in for a third party in the tests). `server/serve.ts` adapts a `(Request) => Response` handler to `node:http`; `server/host-fetch.ts` is a `fetch` that honors a caller-set `Host`, which Node's own fetch overrides and the Host-routed host and its tests need. |
 | `server/oauth/` | The optional OAuth 2.0 / OID4VP convenience layer and an OIDC bridge (`src/`). |
 
 ### 3.1 Runtime and tooling
@@ -61,26 +63,38 @@ What dito is today and how the parts fit. (Protocol details: [SPEC-webvh-hosting
 - **Deploy** is `deploy.sh [all|client|bridge|identity|byo]`. systemd units are managed on the host; the
   script replaces bundles and health-checks, restoring the previous bundle on failure.
 
-## 4. did:webvh, and where we keep a guard
+## 4. did:vh, and where we keep a guard
 
-- Logs are created, updated, moved and validated by `didwebvh-ts`. `packages/webvh/src/log.ts` is the only
-  place the rest of the code touches it, so its API stays contained.
-- `didwebvh-ts@2.8.0` accepts a log entry whose `proof` is an empty array. `resolveLog()` and the host's
-  `validateLogAt()` therefore each independently require an authorized proof on every entry.
-- The library does not export the DID→URL rule, so `packages/webvh/src/url.ts` keeps one strict
-  implementation (FQDN-only, no IP literals, no encoded path tricks) used by every fetcher, which is also the
-  SSRF guard.
-- The did:web mirror (`did.json`) is `generateParallelDidWeb` plus an atproto-shaped post-process.
+- Logs are created, updated, deactivated and verified by `packages/vh`, which depends on nothing outside the repository
+  (hashes and signatures are `@noble`; JCS and base58 are ours). It is stricter than the pre-draft where that leaves
+  room: an invalid entry anywhere fails the whole log, every proof of an entry must verify, an entry or `parameters`
+  with an unknown member is refused, and a log that configures witnesses is refused (`featureNotSupported`), never
+  accepted without the approvals it needs.
+- **Shared vectors.** `packages/vh/vectors/vectors.json` (generated by `generate.ts`, each invalid case pinned to a
+  code and a reason) is copied into biset, whose independent verifier must give the same verdicts. That, not trust in
+  one implementation, is what keeps a pre-draft from being a risk. The worked example of the entry-hash algorithm in
+  the did:webvh v1.0 specification is also a test (the algorithm is shared); the VH-Log copy of that example does not
+  reproduce from its edited input.
+- `src.ts` keeps one strict implementation of "a web location" (FQDN-only, no IP literals, https, no credentials or
+  query, no redirects, a bounded body) used by every fetcher, which is also the SSRF guard. A server-side verifier
+  fetches only from watchers its operator chose, never from a location a token or a request names.
+- **The did:web shadow.** `did.json` is derived from the latest did:vh document and never written by hand: every
+  `did:vh:<SCID>` becomes the location's did:web DID, and `alsoKnownAs` becomes `[did:vh:<SCID>]`. A verifier takes the
+  did:vh document as the truth and accepts a did:web document only if it equals that derivation *and* the did:vh
+  document names the did:web DID. The atproto `at://` alias is not in the derived document yet.
+- **Where a log is published** is said by the document: `alsoKnownAs` lists the location's did:web DID and a
+  `did:vh:<SCID>?src=<location>` alias. A host stores a log only if its current document names that host's did:web
+  DID, which is what binds a name (`alice.did.md`) to a log, and keeps one SCID at one location except by a *move*
+  (a log that extends the one held takes the SCID over).
 
 ### 4.1 Identity is the SCID, and a log is only as new as the newest one accepted
 
-- An identity is its **method and SCID** (`did:webvh:<SCID>`, `did:vh:<SCID>`); the rest of a did:webvh DID is where
-  the log currently is, and changes when it moves. Local stores key on the SCID; wires (DIDComm, id_tokens, DID documents)
-  carry the full DID. A did:webvh SCID and a did:vh SCID are never equal: two identities are one person only when each
-  document names the other in `alsoKnownAs` and both logs verify.
-- A log that verifies may still be old, or the other half of a fork. `packages/webvh/src/freshness.ts` keeps the newest
+- An identity is its **SCID** (`did:vh:<SCID>`, which is the whole DID); the host is where the log currently is, and
+  changes when it moves. Local stores key on the DID; a name people use (`alice@did.md`) is the alias, `alice.did.md`,
+  the document names (the did:web DID), and is believed only when the did:web shadow checks out in both directions.
+- A log that verifies may still be old, or the other half of a fork. `packages/vh/src/freshness.ts` keeps the newest
   `versionId` accepted per identity (`VersionMemory`) and refuses a log that is shorter (`StaleLogError`) or does not
-  contain it (`ForkedLogError`). `resolveDidWebvh` and `resolveVhLog` take a `memory`.
+  contain it (`ForkedLogError`). `resolveVhLog` takes a `memory`.
 - **The cost of that protection is that a rollback you meant to make is refused too**: a host restored from a backup, or a
   log recovered from an old copy, serves a version older than the one remembered, and every party that remembers the newer
   one will keep refusing it (they must forget the DID by hand), however valid the log is. So: restore by *extending* the
@@ -89,19 +103,17 @@ What dito is today and how the parts fit. (Protocol details: [SPEC-webvh-hosting
 - Where a memory lives: the CLI keeps one file, `$XDG_STATE_HOME/dito/versions.json` (default `~/.local/state/dito/versions.json`),
   used by `dito verify <did>` and `dito fetch <did>`; a damaged file is an error, never an empty memory. An `Identity`
   needs none for its own log: its container already holds the log, whose newest entry is what it remembers. The browser
-  wallet, biset and the host are still to do.
-- did:vh logs (`did:vh:<SCID>`, no host in the DID) are handled by `packages/vh`, not didwebvh-ts, which refuses a
-  `state.id` that is not a did:webvh. It follows didvh-spec.md (a pre-draft: expect it to move) and is pinned by
-  `packages/vh/vectors/vectors.json`. Witnesses are refused (`featureNotSupported`), not ignored.
+  wallet compares what it fetches with its saved snapshot, which is the same memory. biset keeps one in the browser
+  (`StoredVersionMemory`).
 
 ## 5. Keys and the wallet
 
 - **One phrase, deterministic keys.** 24-word BIP-39 → SLIP-0010 Ed25519: `m/0'` Root (and genesis Sign key),
   `m/1'/n'` pre-rotation key of generation n. Every update consumes the committed key and commits the next.
-- **Provisional genesis.** Create builds a portable log (`did:webvh:<SCID>:ex.alias`) entirely in the browser;
-  nothing is published. Choosing a host appends a signed portability entry (the old DID stays in
-  `alsoKnownAs`) and writes the full log there. A host is a place that validates and serves a signed log, not the
-  issuer of the identity.
+- **An identity with no host.** Create builds a `did:vh:<SCID>` log entirely in the browser; nothing is published and
+  the DID is already final. Choosing a host appends one signed update entry whose document names the place
+  (`alsoKnownAs`) and writes the full log there; the DID does not change, and moving again is another entry. A host is
+  a place that validates and serves a signed log, not the issuer of the identity.
 - **Identity Container.** A password-encrypted JWE (`PBES2-HS512+A256KW` + `A256GCM`) with a manifest and the
   logical files (`did.jsonl`, keyring, device bindings, grants) is the offline backup. Passkey and DPoP private
   keys, tokens and live capabilities are never included.
@@ -114,11 +126,12 @@ What dito is today and how the parts fit. (Protocol details: [SPEC-webvh-hosting
 
 ## 6. Hosting
 
-`webvh-hosting/1` (see the spec): `GET/PUT/POST/DELETE did.jsonl`, `PUT did-witness.json`, a disconnect request
-signed by a current update key, an error table, permissive CORS, an optional `/.well-known/did-hosting.json`.
+`vh-hosting/1` (see the spec): `GET/PUT/POST/DELETE did.jsonl`, the derived `did.json`, `GET /log?scid=`, a disconnect
+request signed by a current update key, an error table, permissive CORS, an optional `/.well-known/did-hosting.json`.
 
-- **Conformance.** `packages/webvh/src/conformance.ts` is the executable spec (`pnpm conformance`). did.md's
-  host and the independent reference host both pass it, and the unmodified wallet works against the reference host.
+- **Conformance.** `packages/vh/src/conformance.ts` is the executable spec (`pnpm conformance`). did.md's
+  host passes all of it; the independent one-domain host (`byo-host.ts`) passes the core that applies to it, and the
+  unmodified wallet works against it.
 - **Caching.** Reads carry `Cache-Control: public, max-age=0, s-maxage=30`; `404`s and writes are never cached; a
   writer bypasses the cache with `?_=<time>`. Behind a CDN the origin sees only misses and writes.
 - **Topologies.** did.md runs `server/host/http-server.ts` (one process, local disk) behind a reverse proxy and a
@@ -132,7 +145,7 @@ a backend of their own; the core never imports it.
 
 - **Identity layer**: `identity-host.ts` resolves a verification method from the DID's published `authentication` array
   and verifies by the proof's `cryptosuite` or the token's `alg`. Which method may sign the user in is `maySignIn`
-  (`packages/webvh`), shared with `did-verify`: on a did.md identity (its `authentication` includes the Root key `#pass-1`)
+  (`packages/vh`), shared with `did-verify`: on a did.md identity (its `authentication` includes the Root key `#pass-1`)
   only the Root may -- other authentication keys there were added for relying parties (a messaging app's DID Rotation
   signing key, say) and must not act as the user everywhere. A document without `#pass-1` is another wallet's, whose key
   names are not assumed (PLAN1): any of its authentication methods may. Only Ed25519 /
@@ -143,12 +156,14 @@ a backend of their own; the core never imports it.
 - **Transport**: the wallet talks to the OAuth layer with an OID4VP `vp_token` carrying a minimal VC-DM 2.0
   capability; RPs see a plain OAuth 2.0 `code` + PKCE exchange.
 - **RP authentication**: either dynamic client registration (RFC 7591), or a JWT-secured authorization
-  request (RFC 9101) signed by the RP's own `did:webvh` key, with the redirect URI checked against the RP's own DID
-  document. The wallet and the server both verify independently, and the server accepts RP DIDs only from an allow-listed
-  set of domains (fail-closed; SSRF).
+  request (RFC 9101) signed by the RP's own `did:vh` key, with the redirect URI checked against the RP's own DID
+  document. The wallet and the server both verify independently. The RP's log comes from the `src` its `kid` carries
+  (`did:vh:<SCID>?src=<location>#pass-1`; a browser wallet fetches it on the person's behalf) or from the wallet's own
+  watcher; the server takes RP DIDs only from the watchers its operator listed (`OAUTH_DID_RP_WATCHERS`; empty means
+  none: fail-closed, and nothing a request says chooses where the server fetches from).
 - **OIDC bridge**: turns a wallet's self-issued `id_token` into standard OIDC claims for RPs that cannot verify
-  DIDs (Forgejo, Outline, …). `sub` is the identity, not the DID string: `did:webvh:<SCID>` (`stableSubject` in `packages/did-verify`), so an
-  account survives a move to another host; the DID as it is now travels in the `did` claim. A key-only token keeps its JWK thumbprint.
+  DIDs (Forgejo, Outline, …). `sub` is the identity, which is the DID (`did:vh:<SCID>`, nothing in it moves: `stableSubject` in `packages/did-verify`), so an
+  account survives a move to another host. A key-only token keeps its JWK thumbprint.
 
 ### 7.1 SIOPv2 / OpenID4VP direct sign-in (a relying party with no key of its own)
 
@@ -173,10 +188,10 @@ biset speaks SIOPv2/OpenID4VP and nothing else, and the server is never asked an
 
 ## 8. Known gaps
 
-- Logs that use witnesses resolve in the CLI, `Identity.fromDid` and `resolveDidWebvh`; the dashboard's own log
-  fetch does not fetch `did-witness.json` yet.
+- Witnesses are not supported: a log that configures any is refused everywhere, rather than accepted without the
+  approvals it needs.
 - A disconnect request can be replayed for its 5-minute window (a nonce would tighten it).
-- The dashboard's Connect field takes `name.domain`; path-based locations work in the library and reference host only.
+- The dashboard's Connect field takes `name.domain`; path-based locations work in the library only.
 - The W3C Digital Credentials API and CHAPI are deliberately not used: an in-browser JS wallet cannot register as an
   OS credential provider, so "connect with [wallet]" stays an explicit, static directory.
 - Interoperability with other UDI wallets is only tested against mocks, since none exist yet.
@@ -315,11 +330,9 @@ anywhere. No new tab or window: nothing for a popup blocker to stop, and no `win
   `app.ts` prefers the live document, so a duplicate `#master-mnemonic` would be picked up by the main app.
 - It only works when the frame and the wallet are the same site. Cross-site, the frame's storage is partitioned
   and empty (PLAN-embedded-wallet.md), so the embed is not offered there.
-- Two entrances, two ways to make the DID (Create handler in `app.ts`). The embed (biset) has a mandatory Alias, so
-  the genesis is built at `name.did.md` directly: no `…:ex.alias` DID, no move entry. dito itself has an optional
-  Alias, so it keeps the provisional DID (its SCID is on screen before Create) and appends a move entry. The library
-  (`didwebvh-ts`) writes the old DID into `alsoKnownAs` on every move, so `Identity.prepareUpdate` drops
-  `…:ex.alias` from the next entry on; the move entry itself stays in the log.
+- Two entrances, two ways to make the log (Create handler in `app.ts`). The embed (biset) has a mandatory Alias, so
+  the genesis already names `name.did.md`. dito itself has an optional Alias, so it keeps a genesis with no host (its
+  DID is on screen before Create) and appends one location entry; the DID is the same either way.
 
 ### 9.5 The embedded create also signs in (the last page is `/authorize`)
 
@@ -328,7 +341,7 @@ sign-in request the moment Create is pressed (the frame sends `creating` with th
 a `redirect_uri:` SIOPv2 sign-in (§7.1) with `login_hint` pinned to that host, and saves its pending authorization as for any login).
 When the page moves on, biset passes the request's query string to the save page as `login=`.
 
-- The save page accepts it only in the shape a relying party sends (`client_id` of `redirect_uri:…`, or a did:webvh JAR with
+- The save page accepts it only in the shape a relying party sends (`client_id` of `redirect_uri:…`, or a did:vh JAR with
   `request`, `response_type`), only on this origin's `/authorize`, and marks the tab (`dito.embed-login`). Its form then POSTs to
   `/authorize?...`; **that page is the last page** (`EMBED_LOGIN`, `app.ts`; `public/index.html` hides the wallet
   from the first paint for it too).

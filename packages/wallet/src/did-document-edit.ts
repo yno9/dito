@@ -1,6 +1,6 @@
 /**
  * Applying an approved `urn:did-core:document-edit:v1` authorization detail to a DID
- * document. The result is committed as a signed did:webvh log entry; that entry is the only
+ * document. The result is committed as a signed did:vh log entry; that entry is the only
  * place the edit is published (there is no separate routing.json resource).
  *
  * A service can carry several endpoints (DID Core: a `serviceEndpoint` that is a set of

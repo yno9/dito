@@ -1,17 +1,17 @@
-// VhIdentity (packages/wallet/src/vh-identity.ts) against did.md's host, through identityFetch with an in-memory store.
+// Identity (packages/wallet/src/identity.ts) against did.md's host, through identityFetch with an in-memory store.
 import { afterEach, expect, test } from "vitest";
 import { checkDidWebShadow, locationsOf, parseVhLog, resolveVhLog, serializeVhLog } from "../packages/vh/src/index.ts";
-import { VhIdentity, locationFor } from "../packages/wallet/src/vh-identity.ts";
+import { Identity, locationFor } from "../packages/wallet/src/identity.ts";
 import { MemoryStore, freshHost, resetHost, viaHost } from "./helpers/vh-host.ts";
 
 let store: MemoryStore;
-function host(options: { vh?: boolean } = {}) { store = freshHost(options); }
+function host() { store = freshHost(); }
 afterEach(() => resetHost());
 
 const get = (url: string) => viaHost(url);
 
 test("an identity can be created with no host: a valid did:vh log and nothing else", async () => {
-  const { identity, mnemonic } = await VhIdentity.create({ api: "https://dito.did.md/authorize", displayName: "Alice" });
+  const { identity, mnemonic } = await Identity.create({ api: "https://dito.did.md/authorize", displayName: "Alice" });
   expect(mnemonic.split(" ")).toHaveLength(24);
   expect(identity.did).toMatch(/^did:vh:[1-9A-HJ-NP-Za-km-z]{46}$/);
   expect(identity.scid).toBe(identity.did.slice(7));
@@ -32,22 +32,22 @@ test("an identity can be created with no host: a valid did:vh log and nothing el
 });
 
 test("open: the mnemonic and the log are the whole identity; another passphrase is refused", async () => {
-  const { identity, mnemonic } = await VhIdentity.create();
-  const same = await VhIdentity.open({ mnemonic, log: identity.logText() });
+  const { identity, mnemonic } = await Identity.create();
+  const same = await Identity.open({ mnemonic, log: identity.logText() });
   expect(same.did).toBe(identity.did);
   expect(same.mnemonic).toBe(mnemonic);
-  const other = await VhIdentity.create();
-  await expect(VhIdentity.open({ mnemonic: other.mnemonic, log: identity.logText() })).rejects.toThrow(/genesis Root Key/);
-  await expect(VhIdentity.open({ log: identity.logText() })).rejects.toThrow(/mnemonic or master seed/);
+  const other = await Identity.create();
+  await expect(Identity.open({ mnemonic: other.mnemonic, log: identity.logText() })).rejects.toThrow(/genesis Root Key/);
+  await expect(Identity.open({ log: identity.logText() })).rejects.toThrow(/mnemonic or master seed/);
   // A log that is not valid is refused before anything about keys is asked.
   const broken = parseVhLog(identity.logText());
   broken[0]!.state = { ...broken[0]!.state, name: "tampered" };
-  await expect(VhIdentity.open({ mnemonic, log: broken })).rejects.toThrow();
+  await expect(Identity.open({ mnemonic, log: broken })).rejects.toThrow();
 });
 
 test("connect: one entry gives the identity a location and publishes the whole log there; the DID does not change", async () => {
   host();
-  const { identity } = await VhIdentity.create({ api: "https://dito.did.md/authorize", fetch: viaHost });
+  const { identity } = await Identity.create({ api: "https://dito.did.md/authorize", fetch: viaHost });
   const did = identity.did;
   const result = await identity.connect({ username: "alice" });
   expect(result).toMatchObject({ did, src: "https://alice.did.md", logUrl: "https://alice.did.md/.well-known/did.jsonl", verifiedLive: true });
@@ -70,7 +70,7 @@ test("connect: one entry gives the identity a location and publishes the whole l
 
 test("born with a location: publish() is the first PUT, and the host accepts it as it is", async () => {
   host();
-  const { identity } = await VhIdentity.create({ location: { username: "bob" }, fetch: viaHost });
+  const { identity } = await Identity.create({ location: { username: "bob" }, fetch: viaHost });
   expect(identity.entries).toHaveLength(1);
   expect(identity.isProvisional).toBe(false);
   expect(identity.state.alsoKnownAs).toEqual(["did:web:bob.did.md", `${identity.did}?src=https://bob.did.md`]);
@@ -81,7 +81,7 @@ test("born with a location: publish() is the first PUT, and the host accepts it 
 
 test("publishUpdate and rotate: each is one pre-rotated entry, POSTed; the host and the identity agree after every one", async () => {
   host();
-  const { identity, mnemonic } = await VhIdentity.create({ fetch: viaHost });
+  const { identity, mnemonic } = await Identity.create({ fetch: viaHost });
   await identity.connect({ username: "alice" });
   const result = await identity.publishUpdate(state => { state.service = [...(state.service ?? []), { id: "#files", type: "relativeRef", serviceEndpoint: "https://alice.did.md/" }]; });
   expect(result?.verifiedLive).toBe(true);
@@ -93,14 +93,14 @@ test("publishUpdate and rotate: each is one pre-rotated entry, POSTed; the host 
   expect(identity.entries).toHaveLength(6);
   // Permanent pre-rotation: exactly one commitment at every step, and the mnemonic still opens the identity.
   expect(identity.parameters.nextKeyHashes).toHaveLength(1);
-  const reopened = await VhIdentity.open({ mnemonic, log: identity.logText() });
+  const reopened = await Identity.open({ mnemonic, log: identity.logText() });
   expect(reopened.entries).toHaveLength(6);
   await resolveVhLog(identity.did, [...identity.entries]);
 });
 
 test("an edit that stops naming the location is refused before anything is sent", async () => {
   host();
-  const { identity } = await VhIdentity.create({ fetch: viaHost });
+  const { identity } = await Identity.create({ fetch: viaHost });
   await identity.connect({ username: "alice" });
   const before = identity.logText();
   await expect(identity.publishUpdate(state => { state.alsoKnownAs = []; })).rejects.toThrow(/no longer names/);
@@ -111,11 +111,11 @@ test("an edit that stops naming the location is refused before anything is sent"
 
 test("without a location an update is local; a refused publication leaves local state where it was", async () => {
   host();
-  const { identity } = await VhIdentity.create({ fetch: viaHost });
+  const { identity } = await Identity.create({ fetch: viaHost });
   expect(await identity.publishUpdate(state => { state.name = "Alice"; })).toBeUndefined();
   expect(identity.entries).toHaveLength(2);
   // A host that has the name already: publication fails, and the identity is not advanced.
-  const other = await VhIdentity.create({ location: { username: "taken" }, fetch: viaHost });
+  const other = await Identity.create({ location: { username: "taken" }, fetch: viaHost });
   await other.identity.publish();
   const before = identity.logText();
   await expect(identity.connect({ username: "taken" })).rejects.toThrow();
@@ -125,24 +125,24 @@ test("without a location an update is local; a refused publication leaves local 
 
 test("a new device: the log is found by its SCID from any host name, or from its location, and the mnemonic opens it", async () => {
   host();
-  const { identity, mnemonic } = await VhIdentity.create({ fetch: viaHost });
+  const { identity, mnemonic } = await Identity.create({ fetch: viaHost });
   await identity.connect({ username: "alice" });
   await identity.rotate();
-  const byScid = await VhIdentity.fromSource({ mnemonic, watcher: "https://anywhere.did.md", scid: identity.scid, fetch: viaHost });
+  const byScid = await Identity.fromSource({ mnemonic, watcher: "https://anywhere.did.md", scid: identity.scid, fetch: viaHost });
   expect(byScid.logText()).toBe(identity.logText());
-  const bySrc = await VhIdentity.fromSource({ mnemonic, src: "https://alice.did.md", fetch: viaHost });
+  const bySrc = await Identity.fromSource({ mnemonic, src: "https://alice.did.md", fetch: viaHost });
   expect(bySrc.did).toBe(identity.did);
   // ...and it carries on from there: its update is accepted by the host.
   expect((await bySrc.rotate())?.verifiedLive).toBe(true);
-  await expect(VhIdentity.fromSource({ mnemonic, src: "https://nobody.did.md", fetch: viaHost })).rejects.toThrow(/Could not find/);
-  await expect(VhIdentity.fromSource({ mnemonic, fetch: viaHost })).rejects.toThrow(/src, or a watcher/);
-  const wrong = await VhIdentity.create();
-  await expect(VhIdentity.fromSource({ mnemonic: wrong.mnemonic, src: "https://alice.did.md", fetch: viaHost })).rejects.toThrow(/genesis Root Key/);
+  await expect(Identity.fromSource({ mnemonic, src: "https://nobody.did.md", fetch: viaHost })).rejects.toThrow(/Could not find/);
+  await expect(Identity.fromSource({ mnemonic, fetch: viaHost })).rejects.toThrow(/src, or a watcher/);
+  const wrong = await Identity.create();
+  await expect(Identity.fromSource({ mnemonic: wrong.mnemonic, src: "https://alice.did.md", fetch: viaHost })).rejects.toThrow(/genesis Root Key/);
 });
 
 test("moving to another location keeps the DID, takes the old copy down, and the old name is free again", async () => {
   host();
-  const { identity } = await VhIdentity.create({ fetch: viaHost });
+  const { identity } = await Identity.create({ fetch: viaHost });
   await identity.connect({ username: "alice" });
   const did = identity.did;
   const moved = await identity.connect({ username: "alice2" });
@@ -159,7 +159,7 @@ test("moving to another location keeps the DID, takes the old copy down, and the
 
 test("unpublish takes the log down from the host; the identity keeps its state and can publish again", async () => {
   host();
-  const { identity } = await VhIdentity.create({ fetch: viaHost });
+  const { identity } = await Identity.create({ fetch: viaHost });
   await identity.connect({ username: "alice" });
   await identity.unpublish();
   expect((await get("https://alice.did.md/.well-known/did.jsonl")).status).toBe(404);
@@ -168,21 +168,23 @@ test("unpublish takes the log down from the host; the identity keeps its state a
 });
 
 test("connecting to a host that does not publish did:vh says so", async () => {
-  host({ vh: false });
-  const { identity } = await VhIdentity.create({ fetch: viaHost });
+  host();
+  // A host that serves no capability document (it does not speak the protocol).
+  const elsewhere = (async (input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith("/.well-known/did-hosting.json") ? new Response("", { status: 404 }) : viaHost(input, init)) as typeof fetch;
+  const { identity } = await Identity.create({ fetch: elsewhere });
   await expect(identity.connect({ username: "alice" })).rejects.toThrow(/does not publish did:vh/);
   expect(identity.entries).toHaveLength(1);
 });
 
 test("the container carries the identity: seal, open, and the same log comes back", async () => {
   host();
-  const { identity, mnemonic } = await VhIdentity.create({ fetch: viaHost });
+  const { identity, mnemonic } = await Identity.create({ fetch: viaHost });
   await identity.connect({ username: "alice" });
   const { scid, jwe } = await identity.exportContainer();
   expect(scid).toBe(identity.scid);
-  const opened = await VhIdentity.fromContainer({ jwe, mnemonic });
+  const opened = await Identity.fromContainer({ jwe, mnemonic });
   expect(opened.logText()).toBe(identity.logText());
-  await expect(VhIdentity.fromContainer({ jwe, mnemonic: (await VhIdentity.create()).mnemonic })).rejects.toThrow();
+  await expect(Identity.fromContainer({ jwe, mnemonic: (await Identity.create()).mnemonic })).rejects.toThrow();
 });
 
 test("locationFor builds the address and refuses a bad username", () => {
@@ -192,4 +194,26 @@ test("locationFor builds the address and refuses a bad username", () => {
   expect(() => locationFor({ username: "Al ice" })).toThrow(/Username/);
   expect(locationsOf("did:vh:x", { alsoKnownAs: [] })).toEqual([]);
   expect(serializeVhLog([])).toBe("\n");
+});
+
+test("moveToDomain (bring your own domain) names the host locally and derives the did:web document; nothing is published", async () => {
+  host();
+  const { identity, mnemonic } = await Identity.create({ fetch: viaHost });
+  const result = await identity.moveToDomain("DigitalCommons.jp");
+  expect(result.did).toBe(identity.did);
+  expect(result).toMatchObject({ didWeb: "did:web:digitalcommons.jp", src: "https://digitalcommons.jp" });
+  expect(identity.locations.map(location => location.src)).toEqual(["https://digitalcommons.jp"]);
+  const web = JSON.parse(result.didJson);
+  expect(web.id).toBe("did:web:digitalcommons.jp");
+  expect(web.alsoKnownAs).toEqual([identity.did]);
+  expect(checkDidWebShadow(identity.state, "did:web:digitalcommons.jp", web).ok).toBe(true);
+  expect(store.files.size).toBe(0);
+  await expect(identity.moveToDomain("not a host")).rejects.toThrow(/fully-qualified/);
+  const reopened = await Identity.open({ mnemonic, log: identity.logText() });
+  expect(reopened.locations).toHaveLength(1);
+
+  // and a later move replaces the place, never adds a second
+  const again = await identity.moveToDomain("example.org");
+  expect(again.previousSrc).toBe("https://digitalcommons.jp");
+  expect(identity.locations.map(location => location.src)).toEqual(["https://example.org"]);
 });

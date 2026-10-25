@@ -8,7 +8,7 @@ export class MemoryStore implements IdentityStore {
   files = new Map<string, string>();
   private locks = new Map<string, Promise<void>>();
   index = new Map<string, string>();
-  scids? = {
+  scids = {
     get: async (scid: string) => this.index.get(scid) ?? null,
     put: async (scid: string, username: string) => { this.index.set(scid, username); },
     remove: async (scid: string) => { this.index.delete(scid); },
@@ -26,10 +26,9 @@ export class MemoryStore implements IdentityStore {
   }
 }
 
-/** A new empty host (a store without the SCID index when `vh` is false). Returns the store. */
-export function freshHost(options: { vh?: boolean } = {}): MemoryStore {
+/** A new empty host. Returns the store. */
+export function freshHost(): MemoryStore {
   const store = new MemoryStore();
-  if (options.vh === false) delete store.scids;
   setIdentityStore(store);
   return store;
 }

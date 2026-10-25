@@ -1,53 +1,38 @@
 import { afterEach, expect, test } from "vitest";
-import { buildGenesis, createIdentityMaterial, preparePortableImport } from "../packages/wallet/src/did-webvh.ts";
-import {
-  CredentialRequiredError,
-  hostForDid,
-  isGitHubHostedDid,
-  serialiseEntries,
-} from "../packages/wallet/src/host.ts";
+import { createIdentityMaterial } from "../packages/wallet/src/keys.ts";
+import { createGenesisEntry } from "../packages/wallet/src/vh-ops.ts";
+import { CredentialRequiredError, hostForSrc, isGitHubSrc } from "../packages/wallet/src/host.ts";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
-}
-
-async function sampleMove() {
+async function sample() {
   const identity = await createIdentityMaterial();
-  const genesis = await buildGenesis({
-    username: "alice", domain: "did.md", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare,
-  });
-  const moved = await preparePortableImport({
-    entries: [genesis], username: "alice", domain: "github.io", masterSeed: identity.masterSeed,
-  });
-  return { genesis, moved, entries: [genesis, moved.entry] };
+  const genesis = await createGenesisEntry({ root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, src: "https://alice.did.md" });
+  return { genesis, entries: [genesis] };
 }
 
-test("hostForDid routes did.md and GitHub DIDs to different adapters", async () => {
-  const { genesis, moved } = await sampleMove();
-  expect(hostForDid(genesis.state.id).kind).toBe("http");
-  expect(hostForDid(moved.did).kind).toBe("github");
-  expect(isGitHubHostedDid(moved.did)).toBe(true);
-  expect(isGitHubHostedDid(genesis.state.id)).toBe(false);
+test("hostForSrc routes did.md and GitHub locations to different adapters", () => {
+  expect(hostForSrc("https://alice.did.md").kind).toBe("http");
+  expect(hostForSrc("https://alice.github.io").kind).toBe("github");
+  expect(isGitHubSrc("https://alice.github.io")).toBe(true);
+  expect(isGitHubSrc("https://alice.did.md")).toBe(false);
+  expect(isGitHubSrc("https://github.io.evil.example")).toBe(false);
 });
 
-test("logUrl on each adapter matches didToLogUrl for its own DID", async () => {
-  const { genesis, moved } = await sampleMove();
-  expect(hostForDid(genesis.state.id).logUrl(genesis.state.id)).toBe("https://alice.did.md/.well-known/did.jsonl");
-  expect(hostForDid(moved.did).logUrl(moved.did)).toBe("https://alice.github.io/.well-known/did.jsonl");
+test("logUrl on each adapter is the did.jsonl of its own location", () => {
+  expect(hostForSrc("https://alice.did.md").logUrl("https://alice.did.md")).toBe("https://alice.did.md/.well-known/did.jsonl");
+  expect(hostForSrc("https://alice.github.io").logUrl("https://alice.github.io")).toBe("https://alice.github.io/.well-known/did.jsonl");
 });
 
 test("GitHub host requires a PAT before any write", async () => {
-  const { moved, entries } = await sampleMove();
-  const host = hostForDid(moved.did);
-  await expect(host.publish({ entries })).rejects.toBeInstanceOf(CredentialRequiredError);
+  const { entries } = await sample();
+  await expect(hostForSrc("https://alice.github.io").publish({ src: "https://alice.github.io", entries })).rejects.toBeInstanceOf(CredentialRequiredError);
 });
 
 test("did.md host appends one entry with POST and never asks for a credential", async () => {
-  const { genesis } = await sampleMove();
-  const host = hostForDid(genesis.state.id);
+  const { genesis } = await sample();
+  const host = hostForSrc("https://alice.did.md");
   const calls: Array<{ url: string; method: string; body?: string }> = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -55,8 +40,9 @@ test("did.md host appends one entry with POST and never asks for a credential", 
     return new Response("ok", { status: 200 });
   }) as typeof fetch;
 
-  const result = await host.publish({ entries: [genesis], mode: "append" });
+  const result = await host.publish({ src: "https://alice.did.md", entries: [genesis], mode: "append" });
   expect(result.kind).toBe("http");
+  expect(result.did).toBe(genesis.state.id);
   expect(result.verifiedLive).toBe(true);
   expect(calls).toHaveLength(1);
   expect(calls[0]!.method).toBe("POST");
@@ -64,25 +50,15 @@ test("did.md host appends one entry with POST and never asks for a credential", 
   expect(calls[0]!.body).toBe(`${JSON.stringify(genesis)}\n`);
 });
 
-test("GitHub host rewrite uses the full log and treats 404 remove as success on did.md", async () => {
-  const { genesis, moved, entries } = await sampleMove();
-
-  // GitHub remove without a PAT is a credential error, not a silent no-op.
-  const github = hostForDid(moved.did);
+test("GitHub remove without a PAT is a credential error, and a 404 remove on did.md is already-gone success", async () => {
+  const { genesis } = await sample();
+  const did = genesis.state.id;
   await expect(
-    github.remove(moved.did, { privateKey: new Uint8Array(32), multikey: "z" }),
+    hostForSrc("https://alice.github.io").remove("https://alice.github.io", did, { privateKey: new Uint8Array(32), multikey: "z" }),
   ).rejects.toBeInstanceOf(CredentialRequiredError);
 
   // did.md remove: 404 already-gone is success (found live 2026-09-29).
-  const didMd = hostForDid(genesis.state.id);
   globalThis.fetch = (async () => new Response("Not Found", { status: 404 })) as typeof fetch;
-  await expect(didMd.remove(genesis.state.id, { privateKey: new Uint8Array(32), multikey: "z" })).resolves.toBe(true);
-});
-
-test("serialiseEntries writes compact JSONL with a trailing newline", async () => {
-  const { genesis } = await sampleMove();
-  const body = serialiseEntries([genesis]);
-  expect(body.endsWith("\n")).toBe(true);
-  expect(body.trimEnd().split("\n")).toHaveLength(1);
-  expect(JSON.parse(body.trim()).versionId).toBe(genesis.versionId);
+  const identity = await createIdentityMaterial();
+  await expect(hostForSrc("https://alice.did.md").remove("https://alice.did.md", did, identity.sign)).resolves.toBe(true);
 });

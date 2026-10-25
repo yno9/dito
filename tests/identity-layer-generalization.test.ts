@@ -1,4 +1,3 @@
-import { multihash } from "./helpers/webvh-fixtures.ts";
 // Dedicated tests for PLAN1: Identity-
 // layer key resolution no longer assumes a fixed "#pass-1" fragment or an
 // Ed25519-only cryptosuite/alg. The existing oauth-loopback tests only ever
@@ -11,7 +10,8 @@ import { afterAll, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createIdentityMaterial, createSelfIssuedIdToken, signEntry } from "../packages/wallet/src/did-webvh.ts";
+import { createIdentityMaterial, createSelfIssuedIdToken } from "../packages/wallet/src/keys.ts";
+import { createVhLog, keyHash, withLocation } from "../packages/vh/src/index.ts";
 import { buildCapabilityCredential, vpToken } from "./helpers/capability-vc.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "./spawn.ts";
@@ -43,57 +43,27 @@ afterAll(async () => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-// buildGenesis (client/did-webvh.ts) always names its authentication method
-// "#pass-1" -- dito itself is not changed by PLAN1 (see PLAN1's "non-scope").
-// This local helper reproduces buildGenesis's construction with an
-// arbitrary fragment name instead, so the SERVER's fragment-independence can
-// actually be exercised end to end (genesis -> publish -> authorize ->
-// token), the same way a hypothetical non-dito wallet would name its key.
-const SCID_PLACEHOLDER = "{SCID}";
-function didFor(scid: string, username: string, domain: string): string { return `did:webvh:${scid}:${username}.${domain}`; }
-function replaceScid(value: object, scid: string): any { return JSON.parse(JSON.stringify(value).split(SCID_PLACEHOLDER).join(scid)); }
-function versionTime(): string { return new Date().toISOString().replace(/\.\d{3}Z$/, "Z"); }
-
+// createGenesisEntry (packages/wallet/src/vh-ops.ts) always names its authentication method "#pass-1" -- dito itself
+// is not changed by PLAN1 (see PLAN1's "non-scope"). This local helper builds the same document with an arbitrary
+// fragment name instead, so the SERVER's fragment-independence can actually be exercised end to end (genesis ->
+// publish -> authorize -> token), the same way a hypothetical non-dito wallet would name its key.
 async function buildGenesisWithFragment(args: {
   username: string; domain: string; fragment: string;
   root: Awaited<ReturnType<typeof createIdentityMaterial>>["root"];
   sign: Awaited<ReturnType<typeof createIdentityMaterial>>["sign"];
   nextSpare: Awaited<ReturnType<typeof createIdentityMaterial>>["nextSpare"];
 }): Promise<any> {
-  const time = versionTime();
-  const placeholderDid = didFor(SCID_PLACEHOLDER, args.username, args.domain);
-  const parameters = {
-    method: "did:webvh:1.0",
-    scid: SCID_PLACEHOLDER,
-    updateKeys: [args.sign.multikey],
-    nextKeyHashes: [await multihash(args.nextSpare.multikey)],
-    witness: {},
-    watchers: [],
-    portable: true,
-    deactivated: false,
-    ttl: 3600,
-  };
-  const state = {
-    "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
-    id: placeholderDid,
-    verificationMethod: [{
-      id: args.fragment,
-      type: "Multikey",
-      controller: placeholderDid,
-      publicKeyMultibase: args.root.multikey,
-    }],
-    authentication: [args.fragment],
-    service: [],
-  };
-  const scid = await multihash({ versionId: SCID_PLACEHOLDER, versionTime: time, parameters, state });
-  const real = replaceScid({ parameters, state }, scid);
-  const unsigned = {
-    versionId: `1-${await multihash({ versionId: scid, versionTime: time, parameters: real.parameters, state: real.state })}`,
-    versionTime: time,
-    parameters: real.parameters,
-    state: real.state,
-  };
-  return signEntry(unsigned, args.sign.privateKey, args.sign.multikey, time);
+  const created = await createVhLog({
+    signer: args.sign, updateKeys: [args.sign.multikey], nextKeyHashes: [keyHash(args.nextSpare.multikey)],
+    document: did => withLocation({
+      "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
+      id: did,
+      verificationMethod: [{ id: args.fragment, type: "Multikey", controller: did, publicKeyMultibase: args.root.multikey }],
+      authentication: [args.fragment],
+      service: [],
+    }, did, `https://${args.username}.${args.domain}`),
+  });
+  return created.log[0];
 }
 
 test("an authentication fragment other than #pass-1 can still authorize (Identity layer is fragment-independent)", async () => {
@@ -118,7 +88,7 @@ test("an authentication fragment other than #pass-1 can still authorize (Identit
   const challenge = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))).toString("base64url");
 
   // The credential's proof.verificationMethod names the NON-"#pass-1"
-  // fragment -- proof over exactly the same DID Document that buildGenesis
+  // fragment -- proof over exactly the same DID Document that createGenesisEntry
   // with "#pass-1" would have used, but under a different key name.
   const vc = await buildCapabilityCredential({ privateKey: identity.root.privateKey, did, verificationMethod: `${did}${fragment}`, capabilityType: "did.md/DeviceCapability", audience: client.client_id, scope: ["openid", "profile"], issuedAt, expiresAt: new Date(issuedAtMs + 3600_000).toISOString() });
   const idToken = await createIdTokenWithKid({ iss: did, sub: did, aud: client.client_id, iat: Math.floor(issuedAtMs / 1000), exp: Math.floor(issuedAtMs / 1000) + 3600 }, identity.root.privateKey, `${did}${fragment}`);
@@ -148,7 +118,7 @@ test("a proof with an unsupported cryptosuite is rejected explicitly, not silent
   const client = await registered.json();
 
   const identity = await createIdentityMaterial();
-  const { buildGenesis } = await import("../packages/wallet/src/did-webvh.ts");
+  const { buildGenesis } = await import("./helpers/genesis.ts");
   const genesis = await buildGenesis({ username: "badsuite", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, api: base, domain: "did.md" });
   await fetch(`${base}/.well-known/did.jsonl`, { method: "PUT", headers: { host: "badsuite.did.md", "content-type": "text/jsonl" }, body: `${JSON.stringify(genesis)}\n` });
   const did = genesis.state.id as string;
@@ -180,7 +150,7 @@ test("an id_token with an unsupported alg is rejected explicitly, not silently a
   const client = await registered.json();
 
   const identity = await createIdentityMaterial();
-  const { buildGenesis } = await import("../packages/wallet/src/did-webvh.ts");
+  const { buildGenesis } = await import("./helpers/genesis.ts");
   const genesis = await buildGenesis({ username: "badalg", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, api: base, domain: "did.md" });
   await fetch(`${base}/.well-known/did.jsonl`, { method: "PUT", headers: { host: "badalg.did.md", "content-type": "text/jsonl" }, body: `${JSON.stringify(genesis)}\n` });
   const did = genesis.state.id as string;
@@ -204,7 +174,7 @@ test("an id_token with an unsupported alg is rejected explicitly, not silently a
   expect(await completed.text()).toContain("id_token");
 });
 
-// createSelfIssuedIdToken (client/did-webvh.ts) always signs with the DID's
+// createSelfIssuedIdToken (packages/wallet/src/keys.ts) always signs with the DID's
 // Root key under a hardcoded "#pass-1" kid. This local helper is the same
 // construction with an arbitrary kid, mirroring buildGenesisWithFragment
 // above -- needed only for the fragment-independence test.

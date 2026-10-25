@@ -2,7 +2,7 @@
 // the SCID index and `GET /log?scid=`, deactivation and taking down. Driven through identityFetch with a
 // swapped-in in-memory store, as identity-store.test.ts does.
 import { afterEach, expect, test } from "vitest";
-import { createDataIntegrityProof, keyFromPrivateKey } from "../packages/webvh/src/index.ts";
+import { createDataIntegrityProof, keyFromPrivateKey } from "../packages/vh/src/index.ts";
 import {
   checkDidWebShadow, createVhLog, deactivateVhLog, keyHash, serializeVhLog, updateVhLog, type VhLogEntry,
 } from "../packages/vh/src/index.ts";
@@ -72,7 +72,7 @@ test("a did:vh log naming this location is published, and its did:web document i
   expect(document.id).toBe("did:web:alice.did.md");
   expect(document.alsoKnownAs).toEqual([did]);
   expect(checkDidWebShadow(log[0]!.state, "did:web:alice.did.md", document)).toEqual({ ok: true });
-  // The atproto handle file is the did:web DID, as for a did:webvh identity.
+  // The atproto handle file is the did:web DID of the location.
   expect((await (await call("alice", "/.well-known/atproto-did")).text()).trim()).toBe("did:web:alice.did.md");
 });
 
@@ -141,7 +141,6 @@ test("the log is found by its SCID, from any name's host, with public CORS", asy
     expect(response.headers.get("content-type")).toMatch(/jsonl/);
     expect(response.headers.get("cache-control")).toMatch(/s-maxage/);
   }
-  expect((await call("alice", `/witness?scid=${scid}`)).status).toBe(404);
   expect((await call("alice", `/log?scid=${"1".repeat(46)}`)).status).toBe(404);
   expect((await call("alice", "/log")).status).toBe(400);
   expect((await call("alice", "/log?scid=nope")).status).toBe(400);
@@ -201,26 +200,8 @@ test("taking the log down (a disconnect request signed by an update key) frees t
   expect((await put("alice", log)).status).toBe(201);
 });
 
-test("witnesses are refused for did:vh, and a store without a SCID index does not publish did:vh at all", async () => {
-  fresh();
-  const { log } = await identity();
-  await put("alice", log);
-  const witness = await call("alice", "/.well-known/did-witness.json", { method: "PUT", body: JSON.stringify([{ versionId: log[0]!.versionId, proof: [] }]) });
-  expect(witness.status).toBe(400);
-  expect(await witness.text()).toMatch(/witnesses are not supported for did:vh/);
-
-  const bare = new MemoryStore();
-  delete (bare as { scids?: unknown }).scids;
-  setIdentityStore(bare);
-  const refused = await put("alice", log);
-  expect(refused.status).toBe(400);
-  expect(await refused.text()).toMatch(/does not publish did:vh/);
-  const capabilities = await (await call("alice", "/.well-known/did-hosting.json")).json();
-  expect(capabilities.methods).toEqual(["did:webvh"]);
-});
-
 test("the capability document says which methods the host publishes", async () => {
   fresh();
   const capabilities = await (await call("alice", "/.well-known/did-hosting.json")).json();
-  expect(capabilities).toMatchObject({ protocol: "webvh-hosting/1", methods: ["did:webvh", "did:vh"] });
+  expect(capabilities).toMatchObject({ protocol: "vh-hosting/1", methods: ["did:vh"] });
 });

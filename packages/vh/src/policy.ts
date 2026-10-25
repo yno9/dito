@@ -4,10 +4,9 @@
  * its locations (`alice.did.md`), the current document names that location's
  * did:web DID in `alsoKnownAs`.
  *
- * That last rule stands in for what did:webvh got for free. A did:webvh DID
- * contains its host, so a log could only be published where its `state.id`
- * pointed; a did:vh DID contains no host, so without the rule any valid log
- * could be put at `alice.did.md`, and the name would mean nothing. With it, the
+ * That last rule is what binds a name to a log. A did:vh DID contains no host, so
+ * without the rule any valid log could be put at `alice.did.md`, and the name would
+ * mean nothing. With it, the
  * log's own signed document says "this is alice.did.md", which is also what
  * lets anyone check the did:web shadow against the did:vh document (didweb.ts).
  */
@@ -26,7 +25,7 @@ export type VhPolicy = {
 export type CheckedVhLog = {
   did: string;
   latest: VhLogEntry;
-  /** The parameters in force after the last entry (same names as the did:webvh host's `Params`). */
+  /** The parameters in force after the last entry (as the host reads them). */
   parameters: { scid: string; updateKeys: string[]; nextKeyHashes: string[]; witness: Record<string, unknown>; watchers: string[]; portable: false; deactivated: boolean };
 };
 

@@ -4,7 +4,7 @@
  * (`$XDG_STATE_HOME/dito/versions.json`, default `~/.local/state/dito/versions.json`).
  *
  * It makes `dito verify <did>` and `dito fetch <did>` refuse a log that is older
- * than, or forks, one seen before (see packages/webvh/src/freshness.ts). The cost
+ * than, or forks, one seen before (see packages/vh/src/freshness.ts). The cost
  * is that a rollback which is *meant* (a host restored from a backup, a log
  * recovered from an old copy) is refused too, until the DID is forgotten:
  * `dito forget <did>`, or `--no-memory` for a single check.
@@ -16,7 +16,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { KnownVersion, VersionMemory } from "../../webvh/src/freshness.ts";
+import type { KnownVersion, VersionMemory } from "../../vh/src/freshness.ts";
 
 export function versionMemoryPath(env: Record<string, string | undefined>): string {
   const state = env.XDG_STATE_HOME || join(env.HOME || homedir(), ".local", "state");

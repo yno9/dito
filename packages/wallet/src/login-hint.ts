@@ -2,10 +2,12 @@
  * The OAuth `login_hint` the wallet accepts: the host an identity is published at.
  *
  * It names a did.md subdomain ("alice.did.md") or a bring-your-own domain
- * ("digitalcommons.jp"). Either way it is only ever compared with the host segment of the
- * loaded identity's DID (did:webvh:<scid>:<host>), to pin the consent screen to the identity
- * the relying party asked for -- it grants nothing by itself.
+ * ("digitalcommons.jp"). Either way it is only ever compared with the locations the loaded
+ * identity's own document names, to pin the consent screen to the identity the relying party
+ * asked for -- it grants nothing by itself.
  */
+import { locationsOf } from "../../vh/src/index.ts";
+
 const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 const HOST = new RegExp(`^(?:${LABEL}\\.)+[a-z][a-z0-9-]*[a-z0-9]$`);
 
@@ -16,13 +18,12 @@ export function parseLoginHost(hint: unknown): string | null {
   return host.length <= 253 && HOST.test(host) ? host : null;
 }
 
-/** The host segment of a did:webvh identifier -- did:webvh:<scid>:<host>. */
-export function didHost(did: unknown): string | null {
-  const match = typeof did === "string" ? /^did:webvh:[^:]+:(.+)$/.exec(did) : null;
-  return match ? match[1]! : null;
+/** The hosts (`alice.did.md`) a DID document says its log is published at, in the order it lists them. */
+export function locationHosts(did: string, document: Record<string, any>): string[] {
+  return locationsOf(did, document).flatMap(location => { try { return [new URL(location.src).host]; } catch { return []; } });
 }
 
-/** True when the identity `did` is published at `host`. */
-export function didIsHostedAt(did: unknown, host: string): boolean {
-  return didHost(did) === host;
+/** True when the identity `did`, whose current document is `document`, is published at `host`. */
+export function isHostedAt(did: string, document: Record<string, any>, host: string): boolean {
+  return locationHosts(did, document).includes(host);
 }

@@ -1,11 +1,12 @@
 /**
  * Data Integrity proofs (`eddsa-jcs-2022`) over arbitrary JSON documents:
- * routing/disconnect requests, wallet grants, and log entries alike. The
- * canonicalization and hashing are didwebvh-ts's (`prepareDataForSigning`), so
- * these proofs are byte-compatible with the ones inside a did:webvh log.
+ * log entries, hosting requests and wallet grants alike. The signed bytes are
+ * SHA-256(JCS(proof options)) followed by SHA-256(JCS(document)).
  */
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { MultibaseEncoding, multibaseDecode, multibaseEncode, prepareDataForSigning } from "didwebvh-ts";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { decodeMultibaseBase58, multibaseBase58 } from "./base58.ts";
+import { canonicalize } from "./jcs.ts";
 import { multikeyFromPublicKey } from "./signer.ts";
 
 export type Proof = {
@@ -13,6 +14,8 @@ export type Proof = {
   /** Data Integrity proof options: what a presentation is bound to (the verifier's nonce and its identifier). */
   challenge?: string; domain?: string;
 };
+
+const utf8 = (text: string) => new TextEncoder().encode(text);
 
 function templateFor(args: { verificationMethod: string; proofPurpose: string; created?: string; challenge?: string; domain?: string }) {
   return {
@@ -26,6 +29,12 @@ function templateFor(args: { verificationMethod: string; proofPurpose: string; c
   };
 }
 
+function signingBytes(document: object, proofOptions: object): Uint8Array {
+  const proofHash = sha256(utf8(canonicalize(proofOptions)));
+  const documentHash = sha256(utf8(canonicalize(document)));
+  return new Uint8Array([...proofHash, ...documentHash]);
+}
+
 /** Sign `document` with a raw 32-byte Ed25519 private key. */
 export async function createDataIntegrityProof(document: object, args: {
   privateKey: Uint8Array; verificationMethod: string; proofPurpose: string; created?: string; challenge?: string; domain?: string;
@@ -33,23 +42,22 @@ export async function createDataIntegrityProof(document: object, args: {
   if (args.privateKey.length !== 32) throw new Error("An Ed25519 private key must be 32 bytes.");
   if (!args.verificationMethod || !args.proofPurpose) throw new Error("A verification method and proof purpose are required.");
   const template = templateFor(args);
-  const data = await prepareDataForSigning(document, template as never);
-  const proofValue = multibaseEncode(ed25519.sign(data, args.privateKey), MultibaseEncoding.BASE58_BTC);
+  const proofValue = multibaseBase58(ed25519.sign(signingBytes(document, template), args.privateKey));
   return { ...template, proofValue };
 }
 
 /**
  * Signature check only: `proof` over `document` by the raw Ed25519
  * `publicKey`. Which key may sign, and how the proof names it, is the
- * caller's policy (see verifyDataIntegrityProof for the did:webvh log rule).
+ * caller's policy (see verifyDataIntegrityProof for the log rule).
  */
 export async function verifyProofSignature(document: object, proof: Proof, publicKey: Uint8Array): Promise<boolean> {
   if (proof.type !== "DataIntegrityProof" || proof.cryptosuite !== "eddsa-jcs-2022" || typeof proof.proofValue !== "string" || !proof.proofValue.startsWith("z")) return false;
   try {
-    const { bytes: signature } = multibaseDecode(proof.proofValue);
+    const signature = decodeMultibaseBase58(proof.proofValue);
     if (signature.length !== 64) return false;
-    const { proofValue: _omitted, ...config } = proof;
-    return ed25519.verify(signature, await prepareDataForSigning(document, config as never), publicKey);
+    const { proofValue: _omitted, ...options } = proof;
+    return ed25519.verify(signature, signingBytes(document, options), publicKey);
   } catch { return false; }
 }
 
@@ -58,7 +66,7 @@ const DID_KEY = /^did:key:(z[1-9A-HJ-NP-Za-km-z]+)#(z[1-9A-HJ-NP-Za-km-z]+)$/;
 /** Raw Ed25519 public key of a multikey (`z6Mk…`), or undefined if it is not one. */
 export function publicKeyFromMultikey(multikey: string): Uint8Array | undefined {
   try {
-    const { bytes } = multibaseDecode(multikey);
+    const bytes = decodeMultibaseBase58(multikey);
     if (bytes.length !== 34 || bytes[0] !== 0xed || bytes[1] !== 0x01) return undefined;
     const key = bytes.slice(2);
     return multikeyFromPublicKey(key) === multikey ? key : undefined;

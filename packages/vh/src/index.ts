@@ -1,5 +1,5 @@
 export * from "./did.ts";
-export * from "./hash.ts";
+export { jcsHash, keyHash, multihashSha256 } from "./hash.ts";
 export * from "./jcs.ts";
 export * from "./log.ts";
 export * from "./verify.ts";
@@ -10,3 +10,9 @@ export * from "./policy.ts";
 export * from "./conformance.ts";
 export * from "./hosting.ts";
 export * from "./aliases.ts";
+export * from "./base58.ts";
+export * from "./signer.ts";
+export * from "./proof.ts";
+export * from "./freshness.ts";
+export * from "./auth.ts";
+export * from "./watch.ts";

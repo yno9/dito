@@ -3,7 +3,7 @@
  *
  * This file only composes two independent modules into one serve():
  *
- *   - identity-host.ts: the essential, non-optional did:webvh host. This is
+ *   - identity-host.ts: the essential, non-optional did:vh host. This is
  *     what did.md fundamentally IS.
  *   - oauth-server.ts: an optional OAuth 2.0 / OID4VP convenience layer for
  *     relying parties that lack their own backend, and for continued/
@@ -43,9 +43,9 @@ const app = serve({
   async fetch(request) {
     try {
       const url = new URL(request.url);
-      // /.well-known/* preflights belong to identityFetch (the did:webvh Hosting Protocol resources allow any origin).
+      // /.well-known/* preflights belong to identityFetch (the did:vh Hosting Protocol resources allow any origin).
       if (request.method === "OPTIONS" && !url.pathname.startsWith("/.well-known/")) return new Response(null, { status: 204, headers: url.pathname.startsWith("/v1/oauth/") ? oauthCors(request) : cors(request) });
-      if (url.pathname === "/healthz" && request.method === "GET") return json(request, { ok: true, service: "did.md", method: "did:webvh:1.0", identityDomain: IDENTITY_DOMAIN });
+      if (url.pathname === "/healthz" && request.method === "GET") return json(request, { ok: true, service: "did.md", method: "did:vh:1.0", identityDomain: IDENTITY_DOMAIN });
       const oauthResponse = await oauthFetch(request, url); if (oauthResponse) return oauthResponse;
       const identityResponse = await identityFetch(request, url); if (identityResponse) return identityResponse;
       return text(request, "not found", 404);

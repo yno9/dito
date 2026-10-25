@@ -1,24 +1,19 @@
 /**
- * Host a portable did:webvh log on the user's own GitHub Pages site.
+ * Host a did:vh log on the user's own GitHub Pages site.
  *
  * Pure location helpers plus thin Octokit wrappers -- no UI. The browser
  * talks only to api.github.com and the published *.github.io URL; did.md
  * servers are never involved. The PAT lives in a local variable only and is
  * never written to storage.
  *
- * Pre-push validation reuses server/host/webvh-core.ts (no Node imports) so
- * a log that would be rejected by the did.md host is never written to GitHub
- * either.
+ * Pre-push validation is the did.md host's (packages/vh policy: the log
+ * verifies and its current document names this site), so a log that would be
+ * rejected by the did.md host is never written to GitHub either.
  */
 import { Octokit } from "@octokit/core";
-import {
-  mirrorDocument,
-  parseJsonl,
-  serialise,
-  validateLogAt,
-  type Entry,
-  type Obj,
-} from "./webvh-core.ts";
+import { deriveDidWebDocument, parseVhLog, serializeVhLog, validateVhLogAt, type VhLogEntry } from "../../vh/src/index.ts";
+
+type Entry = VhLogEntry;
 
 export type GitHubLocation = {
   login: string;
@@ -27,7 +22,11 @@ export type GitHubLocation = {
   domain: string;
   /** No path segments in MVP (user site only). */
   segments: string[];
-  /** Public log URL matching didWebvhLogUrl / didToLogUrl. */
+  /** The web location (`src`) of the site: `https://<login>.github.io`. */
+  src: string;
+  /** The did:web DID of the site: the one the DID document must name. */
+  webDid: string;
+  /** Public log URL. */
   publicUrl: string;
   /** Repo path of the DID log. */
   contentsPath: string;
@@ -58,7 +57,7 @@ export type PublishResult = {
 
 const USER_SITE_REPO_SUFFIX = ".github.io";
 
-/** Lowercase login -- did:webvh domains are case-insensitive DNS labels. */
+/** Lowercase login -- domains are case-insensitive DNS labels. */
 export function normalizeLogin(login: string): string {
   const trimmed = typeof login === "string" ? login.trim() : "";
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?$/.test(trimmed)) {
@@ -82,6 +81,8 @@ export function githubDidLocation(login: string, repo?: string): GitHubLocation 
     repo: name,
     domain,
     segments: [],
+    src: `https://${domain}`,
+    webDid: `did:web:${domain}`,
     publicUrl: `https://${domain}/.well-known/did.jsonl`,
     contentsPath: ".well-known/did.jsonl",
     didJsonPath: ".well-known/did.json",
@@ -90,7 +91,7 @@ export function githubDidLocation(login: string, repo?: string): GitHubLocation 
   };
 }
 
-/** Public DID-log URL for a user site -- matches didWebvhLogUrl exactly. */
+/** Public DID-log URL for a user site. */
 export function githubLogUrl(login: string, repo?: string): string {
   return githubDidLocation(login, repo).publicUrl;
 }
@@ -492,30 +493,29 @@ export async function waitForPublish(
 
 /**
  * Same checks the did.md host runs before every write, pointed at the
- * GitHub publication URL. Never throws into a network call -- the caller
+ * GitHub site. Never throws into a network call -- the caller
  * must run this before any Octokit write.
  */
-export async function validateBeforePublish(entries: Entry[], expectedLogUrl: string): Promise<Entry> {
+export async function validateBeforePublish(entries: Entry[], webDid: string): Promise<Entry> {
   if (!Array.isArray(entries) || !entries.length) throw new Error("There is no DID log to publish.");
-  const result = await validateLogAt(entries, [], expectedLogUrl);
+  const result = await validateVhLogAt(entries, { webDid });
   return result.latest;
 }
 
-/** did:web mirror of the final state. `hostedResources: false` omits
- *  #files/#whois, which only exist on did.md hosts. */
-export function buildDidJson(state: Obj, webvhDid: string): string {
-  return `${JSON.stringify(mirrorDocument(state, webvhDid, { hostedResources: false }))}\n`;
+/** The did:web document of the site, derived from the log's final state (never written by hand). */
+export function buildDidJson(state: Record<string, any>, webDid: string): string {
+  return `${JSON.stringify(deriveDidWebDocument(state, webDid))}\n`;
 }
 
 /**
  * The three files published in one commit:
- *  1. .well-known/did.jsonl  -- full log (history + portability entry)
+ *  1. .well-known/did.jsonl  -- full log
  *  2. .nojekyll              -- empty; Jekyll otherwise drops .well-known
- *  3. .well-known/did.json   -- did:web mirror of the final state
+ *  3. .well-known/did.json   -- the did:web document derived from the final state
  *
  * `.nojekyll` is required on GitHub Pages: without it Jekyll strips
  * dot-directories and `.well-known/did.jsonl` is never served. The official
- * did:webvh tutorial does not mention this; confirmed against real Pages
+ * the did:vh docs do not mention this; confirmed against real Pages
  * builds (2026-09).
  */
 export function buildPublishFiles(entries: Entry[], location: GitHubLocation): PublishFile[] {
@@ -523,8 +523,8 @@ export function buildPublishFiles(entries: Entry[], location: GitHubLocation): P
   if (!latest || !isRecord(latest.state) || typeof latest.state.id !== "string") {
     throw new Error("The DID log has no current DID Document.");
   }
-  const didJsonl = serialise(entries);
-  const didJson = buildDidJson(latest.state as Obj, latest.state.id as string);
+  const didJsonl = serializeVhLog(entries);
+  const didJson = buildDidJson(latest.state as Record<string, any>, location.webDid);
   return [
     { path: location.contentsPath, content: didJsonl },
     { path: location.nojekyllPath, content: "" },
@@ -533,9 +533,9 @@ export function buildPublishFiles(entries: Entry[], location: GitHubLocation): P
 }
 
 /** Re-parse a published log and confirm it still validates + matches. */
-export async function verifyPublishedLog(body: string, expectedLogUrl: string, expectedVersionId: string): Promise<void> {
-  const entries = parseJsonl(body);
-  const latest = await validateBeforePublish(entries, expectedLogUrl);
+export async function verifyPublishedLog(body: string, webDid: string, expectedVersionId: string): Promise<void> {
+  const entries = parseVhLog(body);
+  const latest = await validateBeforePublish(entries, webDid);
   if (latest.versionId !== expectedVersionId) {
     throw new Error("The published DID log's last version does not match what was uploaded.");
   }
@@ -565,18 +565,18 @@ export async function publishToGitHub(args: PublishArgs): Promise<PublishResult>
   const progress = args.onProgress ?? (() => {});
   const entries = args.entries.map(entry => JSON.parse(JSON.stringify(entry)) as Entry);
   // Token check is a read; everything after local validation may write.
-  // A log that fails validateLogAt must never create a repo or touch files.
+  // A log that fails validateBeforePublish must never create a repo or touch files.
   progress("verify-token");
   const { login } = await verifyToken(args.token);
   const location = githubDidLocation(login);
   progress("validate");
-  const latest = await validateBeforePublish(entries, location.publicUrl);
+  const latest = await validateBeforePublish(entries, location.webDid);
   const versionId = latest.versionId;
   const files = buildPublishFiles(entries, location);
   progress("ensure-repo");
   const repo = await ensureRepo(args.token, location);
   progress("commit");
-  await commitFiles(args.token, location, repo.defaultBranch, files, args.message ?? `Publish did:webvh ${versionId}`);
+  await commitFiles(args.token, location, repo.defaultBranch, files, args.message ?? `Publish did:vh ${versionId}`);
   progress("enable-pages");
   const pages = await ensurePages(args.token, location, repo.defaultBranch);
   progress("wait-build");
@@ -615,7 +615,7 @@ export async function publishToGitHub(args: PublishArgs): Promise<PublishResult>
     });
     publishedBody = published.body;
     progress("verify-published");
-    await verifyPublishedLog(published.body, location.publicUrl, versionId);
+    await verifyPublishedLog(published.body, location.webDid, versionId);
     verifiedLive = true;
   } catch (error) {
     // CORS / slow Pages -- still return a usable result with the public URL;
@@ -642,7 +642,7 @@ export async function publishToGitHub(args: PublishArgs): Promise<PublishResult>
     try {
       const mirrorResponse = await (args.fetchImpl ?? fetch)(mirrorUrl, { cache: "no-store" });
       if (mirrorResponse.ok) {
-        const expected = buildDidJson(latest.state as Obj, latest.state.id as string);
+        const expected = buildDidJson(latest.state as Record<string, any>, location.webDid);
         const actual = await mirrorResponse.text();
         if (actual !== expected) throw new Error("The published did.json does not match the DID log's final state.");
       }
@@ -687,10 +687,10 @@ export async function updateGitHubLog(
 ): Promise<{ versionId: string; publicUrl: string; domain: string; did: string }> {
   const { login } = await verifyToken(token);
   const location = githubDidLocation(login);
-  const latest = await validateBeforePublish(entries, location.publicUrl);
+  const latest = await validateBeforePublish(entries, location.webDid);
   const files = buildPublishFiles(entries, location);
   const repo = await ensureRepo(token, location);
-  await commitFiles(token, location, repo.defaultBranch, files, message ?? `Update did:webvh ${latest.versionId}`);
+  await commitFiles(token, location, repo.defaultBranch, files, message ?? `Update did:vh ${latest.versionId}`);
   return {
     versionId: latest.versionId,
     publicUrl: location.publicUrl,

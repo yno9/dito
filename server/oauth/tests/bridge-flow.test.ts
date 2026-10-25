@@ -15,7 +15,7 @@ const forgejoRedirect = "http://127.0.0.1:3999/callback"; const forgejoSecret = 
 const widgetRedirect = "http://127.0.0.1:3998/callback"; const widgetSecret = "widget-client-secret";
 const walletKey = ed25519.utils.randomSecretKey();
 
-function walletToken(aud: string, extra: Record<string, unknown> = {}) { const jwk = { kty: "OKP", crv: "Ed25519", x: Buffer.from(ed25519.getPublicKey(walletKey)).toString("base64url") }; const header = Buffer.from(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid: "did:webvh:test#pass-1", jwk })).toString("base64url"); const now = Math.floor(Date.now() / 1000); const payload = Buffer.from(JSON.stringify({ iss: "did:webvh:test", sub: "ignored", aud, iat: now, exp: now + 300, preferred_username: "alice", ...extra })).toString("base64url"); return `${header}.${payload}.${Buffer.from(ed25519.sign(new TextEncoder().encode(`${header}.${payload}`), walletKey)).toString("base64url")}`; }
+function walletToken(aud: string, extra: Record<string, unknown> = {}) { const jwk = { kty: "OKP", crv: "Ed25519", x: Buffer.from(ed25519.getPublicKey(walletKey)).toString("base64url") }; const header = Buffer.from(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid: "did:vh:test#pass-1", jwk })).toString("base64url"); const now = Math.floor(Date.now() / 1000); const payload = Buffer.from(JSON.stringify({ iss: "did:vh:test", sub: "ignored", aud, iat: now, exp: now + 300, preferred_username: "alice", ...extra })).toString("base64url"); return `${header}.${payload}.${Buffer.from(ed25519.sign(new TextEncoder().encode(`${header}.${payload}`), walletKey)).toString("base64url")}`; }
 function base64urlJson(part: string) { return JSON.parse(Buffer.from(part, "base64url").toString()); }
 let requestedAudience = upstreamClientId;
 const upstream = serve({ port: upstreamPort, fetch: async request => { const url = new URL(request.url); if (url.pathname === "/v1/oauth/register") return Response.json({ client_id: upstreamClientId }, { status: 201 }); if (url.pathname === "/v1/oauth/token") return Response.json({ id_token: walletToken(requestedAudience) }); return new Response("not found", { status: 404 }); } });
@@ -81,7 +81,7 @@ test("rejects an upstream id_token with the wrong audience", async () => {
 });
 
 // PLAN6: oidc-bridge.did.md is a single reverse-proxied process, so its own
-// did:webvh log (the public counterpart of RP_DID_KEY_FILE, letting did.md's
+// did:vh log (the public counterpart of RP_DID_KEY_FILE, letting did.md's
 // server resolve this RP's identity when it authenticates via JAR) has to be
 // served by a route here instead of dropped in as a static file next to the
 // app, unlike t.biset.md. Unconfigured by default -- see this test server's
@@ -91,7 +91,7 @@ test("GET /.well-known/did.jsonl is 404 until RP_DID_LOG_FILE is configured", as
   await ready();
   const response = await fetch(`${bridgeBase}/.well-known/did.jsonl`);
   expect(response.status).toBe(404);
-  // A did:webvh log is a public document resolved from any origin (e.g.
+  // A did:vh log is a public document resolved from any origin (e.g.
   // app.did.md verifying this RP's JAR signature) -- CORS must be open even
   // on the 404, or a browser fetch() fails with a network error before the
   // caller ever sees the 404 status to react to.
@@ -100,7 +100,7 @@ test("GET /.well-known/did.jsonl is 404 until RP_DID_LOG_FILE is configured", as
 
 test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", async () => {
   const logFile = join(temporary, "rp-did.jsonl");
-  writeFileSync(logFile, '{"versionId":"1-fake","state":{"id":"did:webvh:fake:oidc-bridge.did.md"}}\n');
+  writeFileSync(logFile, '{"versionId":"1-fake","state":{"id":"did:vh:fake"}}\n');
   const dedicatedPort = bridgePort + 1000;
   const dedicated = spawn({
     cmd: [process.execPath, "server/oauth/src/server.ts"], cwd: root,
@@ -111,7 +111,7 @@ test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", asy
     for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${dedicatedPort}/healthz`)).ok) break; } catch {} await sleep(20); }
     const response = await fetch(`http://127.0.0.1:${dedicatedPort}/.well-known/did.jsonl`);
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('{"versionId":"1-fake","state":{"id":"did:webvh:fake:oidc-bridge.did.md"}}\n');
+    expect(await response.text()).toBe('{"versionId":"1-fake","state":{"id":"did:vh:fake"}}\n');
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
   } finally {
     dedicated.kill(); await dedicated.exited;
@@ -125,7 +125,7 @@ test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", asy
 // the shared instance above, since DitoClient.isRpDid is fixed for a
 // process's whole lifetime.
 {
-  const rpDid = "did:webvh:zRpTestOnlyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX:oidc-bridge.example";
+  const rpDid = `did:vh:${"Q".repeat(46)}`;
   const rpPrivateKey = ed25519.utils.randomSecretKey();
   const rpKeyFile = join(temporary, "rp-did-key.json");
   writeFileSync(rpKeyFile, JSON.stringify({ did: rpDid, verificationMethod: `${rpDid}#pass-1`, privateKey: Buffer.from(rpPrivateKey).toString("base64url") }));
@@ -219,7 +219,7 @@ test("GET /.well-known/did.jsonl serves the configured RP DID log verbatim", asy
 // nothing here is a vulnerability -- it's a same-process behavior change
 // gated on the wrong signal.
 {
-  const rpDid = "did:webvh:zRpNoResponseUriYetXXXXXXXXXXXXXXXXXXXXXXXX:oidc-bridge.example";
+  const rpDid = `did:vh:${"R".repeat(46)}`;
   const rpPrivateKey = ed25519.utils.randomSecretKey();
   const rpKeyFile = join(temporary, "rp-did-key-no-response-uri.json");
   writeFileSync(rpKeyFile, JSON.stringify({ did: rpDid, verificationMethod: `${rpDid}#pass-1`, privateKey: Buffer.from(rpPrivateKey).toString("base64url") }));

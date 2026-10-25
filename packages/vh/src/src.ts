@@ -1,8 +1,7 @@
 /**
  * Where a did:vh log is fetched from: the `src` of didvh-spec ("Web Locations").
  * A web location is the base URL under which `did.jsonl` is published. The
- * layout is did:webvh's, so a dito host serves `https://alice.did.md` at
- * `/.well-known/did.jsonl` exactly as it serves a did:webvh log.
+ * layout: a dito host serves `https://alice.did.md` at `/.well-known/did.jsonl`.
  *
  * This is also the SSRF guard for anything that fetches on behalf of someone
  * else: a domain name (never an IP address), https, no credentials, no query,

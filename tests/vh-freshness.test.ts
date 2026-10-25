@@ -1,23 +1,26 @@
 import { expect, test } from "vitest";
 import {
-  Ed25519Signer, ForkedLogError, InMemoryVersionMemory, StaleLogError, checkAndRemember, createLog, fetchDidLog, keyFromPrivateKey,
-  latestVersion, nextKeyHash, resolveDidWebvh, serializeLog, standingOf, updateLog, verifyDidLog, versionNumberOf,
-} from "../packages/webvh/src/index.ts";
+  ForkedLogError, InMemoryVersionMemory, StaleLogError, checkAndRemember, createVhLog, keyFromPrivateKey, keyHash,
+  latestVersion, resolveVhFromWatchers, resolveVhLog, serializeVhLog, standingOf, updateVhLog, versionNumberOf,
+} from "../packages/vh/src/index.ts";
 
 const key = () => keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
 
 /** A log of three entries, plus the two different fourth entries that fork it. */
 async function history() {
   const keys = [key(), key(), key(), key(), key()];
-  const signer = (index: number) => new Ed25519Signer(keys[index]!);
-  const created = await createLog({
-    domain: "example.com", signer: signer(0), updateKeys: [keys[0]!.multikey], nextKeyHashes: [await nextKeyHash(keys[1]!.multikey)],
-    verificationMethods: [{ id: "#k", type: "Multikey", publicKeyMultibase: keys[0]!.multikey }], authentication: ["#k"],
+  const created = await createVhLog({
+    signer: keys[0]!, updateKeys: [keys[0]!.multikey], nextKeyHashes: [keyHash(keys[1]!.multikey)],
+    document: did => ({ "@context": ["https://www.w3.org/ns/did/v1"], id: did, verificationMethod: [{ id: `${did}#k`, type: "Multikey", controller: did, publicKeyMultibase: keys[0]!.multikey }], authentication: [`${did}#k`] }),
   });
-  const rotate = async (log: typeof created.log, from: number, nextTo: number, service?: string) => updateLog({
-    log, signer: signer(from), updateKeys: [keys[from]!.multikey], nextKeyHashes: [await nextKeyHash(keys[nextTo]!.multikey)],
-    ...(service ? { services: [{ id: "#a", type: "A", serviceEndpoint: service }] } : {}),
-  });
+  let clock = Date.now() + 1000;
+  const rotate = async (log: typeof created.log, from: number, nextTo: number, service?: string) => {
+    clock += 1000;
+    return updateVhLog({
+      log, signer: keys[from]!, now: clock, document: { ...log.at(-1)!.state, ...(service ? { service: [{ id: `${created.did}#a`, type: "A", serviceEndpoint: service }] } : {}) },
+      parameters: { updateKeys: [keys[from]!.multikey], nextKeyHashes: [keyHash(keys[nextTo]!.multikey)] },
+    });
+  };
   const second = await rotate(created.log, 1, 2);
   const third = await rotate(second.log, 2, 3);
   // Two different continuations of the same three entries (same pre-committed key 3, different content).
@@ -72,52 +75,43 @@ test("keys are separate: one identity's history does not constrain another", asy
   expect(await checkAndRemember(memory, "b", other.one)).toBe("new");
 });
 
-function hostOf(logs: Record<string, string>): typeof fetch {
+function watcherOf(logs: Record<string, string>): typeof fetch {
   return (async (url: string | URL) => {
-    const body = logs[String(url)];
+    const body = logs[new URL(String(url)).searchParams.get("scid") ?? ""];
     return body === undefined ? new Response("", { status: 404 }) : new Response(body, { status: 200 });
   }) as typeof fetch;
 }
 
-test("resolveDidWebvh with a memory accepts the growing log and refuses an old copy served later", async () => {
+const scidOf = (did: string) => did.slice("did:vh:".length);
+
+test("resolveVhFromWatchers with a memory accepts the growing log and refuses an old copy served later", async () => {
   const { did, two, three } = await history();
-  const url = "https://example.com/.well-known/did.jsonl";
   const memory = new InMemoryVersionMemory();
-  await resolveDidWebvh(did, { fetch: hostOf({ [url]: serializeLog(two) }), memory });
-  await resolveDidWebvh(did, { fetch: hostOf({ [url]: serializeLog(three) }), memory });
-  await expect(resolveDidWebvh(did, { fetch: hostOf({ [url]: serializeLog(two) }), memory })).rejects.toThrow(StaleLogError);
+  const sources = (log: typeof two) => ({ watchers: ["https://w.example"], fetch: watcherOf({ [scidOf(did)]: serializeVhLog(log) }), memory });
+  await resolveVhFromWatchers(did, sources(two));
+  await resolveVhFromWatchers(did, sources(three));
+  await expect(resolveVhFromWatchers(did, sources(two))).rejects.toThrow(StaleLogError);
 });
 
-test("resolveDidWebvh with a memory refuses the other continuation of a log it accepted", async () => {
+test("resolveVhFromWatchers with a memory refuses the other continuation of a log it accepted", async () => {
   const { did, forkA, forkB } = await history();
-  const url = "https://example.com/.well-known/did.jsonl";
   const memory = new InMemoryVersionMemory();
-  await resolveDidWebvh(did, { fetch: hostOf({ [url]: serializeLog(forkA) }), memory });
-  await expect(resolveDidWebvh(did, { fetch: hostOf({ [url]: serializeLog(forkB) }), memory })).rejects.toThrow(ForkedLogError);
+  await resolveVhFromWatchers(did, { watchers: ["https://w.example"], fetch: watcherOf({ [scidOf(did)]: serializeVhLog(forkA) }), memory });
+  await expect(resolveVhFromWatchers(did, { watchers: ["https://w.example"], fetch: watcherOf({ [scidOf(did)]: serializeVhLog(forkB) }), memory })).rejects.toThrow(ForkedLogError);
 });
 
-test("without a memory, resolveDidWebvh behaves as before (any valid log is accepted)", async () => {
+test("without a memory, resolution behaves as before (any valid log is accepted)", async () => {
   const { did, two, three } = await history();
-  const url = "https://example.com/.well-known/did.jsonl";
-  await resolveDidWebvh(did, { fetch: hostOf({ [url]: serializeLog(three) }) });
-  await resolveDidWebvh(did, { fetch: hostOf({ [url]: serializeLog(two) }) });
+  await resolveVhFromWatchers(did, { watchers: ["https://w.example"], fetch: watcherOf({ [scidOf(did)]: serializeVhLog(three) }) });
+  await resolveVhFromWatchers(did, { watchers: ["https://w.example"], fetch: watcherOf({ [scidOf(did)]: serializeVhLog(two) }) });
 });
 
 test("a log is remembered only after it verifies: an invalid log leaves the memory untouched", async () => {
   const { did, two, three } = await history();
   const memory = new InMemoryVersionMemory();
-  await verifyDidLog(did, { log: two }, { memory });
+  await resolveVhLog(did, two, { memory });
   const broken = structuredClone(three);
   broken[2]!.state = { ...broken[2]!.state, service: [{ id: "#x", type: "X", serviceEndpoint: "https://evil.example" }] };
-  await expect(verifyDidLog(did, { log: broken }, { memory })).rejects.toThrow();
-  expect(memory.get(`did:webvh:${did.split(":")[2]}`)).toEqual(latestVersion(two));
-});
-
-test("fetchDidLog only fetches: a log for another DID is returned, and verifyDidLog refuses it", async () => {
-  const mine = await history();
-  const theirs = await history();
-  const url = "https://example.com/.well-known/did.jsonl";
-  const fetched = await fetchDidLog(mine.did, { fetch: hostOf({ [url]: serializeLog(theirs.three) }) });
-  expect(fetched.log).toHaveLength(3);
-  await expect(verifyDidLog(mine.did, fetched)).rejects.toThrow(/expected DID/);
+  await expect(resolveVhLog(did, broken, { memory })).rejects.toThrow();
+  expect(memory.get(`did:vh:${scidOf(did)}`)).toEqual(latestVersion(two));
 });

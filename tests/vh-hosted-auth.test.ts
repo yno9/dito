@@ -5,8 +5,8 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { serve, type Served } from "../server/serve.ts";
 import { freshHost, viaHost } from "./helpers/vh-host.ts";
 import * as host from "../server/host/identity-host.ts";
-import { VhIdentity } from "../packages/wallet/src/vh-identity.ts";
-import { createSelfIssuedIdToken } from "../packages/wallet/src/did-webvh.ts";
+import { Identity } from "../packages/wallet/src/identity.ts";
+import { createSelfIssuedIdToken } from "../packages/wallet/src/keys.ts";
 
 let served: Served;
 
@@ -17,7 +17,7 @@ beforeAll(() => {
 afterAll(() => { served?.stop(true); });
 
 async function published() {
-  const { identity } = await VhIdentity.create({ fetch: viaHost });
+  const { identity } = await Identity.create({ fetch: viaHost });
   await identity.connect({ username: "alice" });
   return identity;
 }
@@ -32,7 +32,7 @@ test("the host resolves a did:vh issuer's authentication key by SCID, and verifi
   const verified = await host.verifySelfIssuedIdToken(token, identity.did, "https://rp.example", 5 * 60_000);
   expect(verified).toBeTruthy();
   // Another key signing for that DID is refused.
-  const stranger = (await VhIdentity.create()).identity as unknown as { _root: { privateKey: Uint8Array } };
+  const stranger = (await Identity.create()).identity as unknown as { _root: { privateKey: Uint8Array } };
   const forged = createSelfIssuedIdToken(claims(identity.did), { privateKey: stranger._root.privateKey, did: identity.did });
   await expect(host.verifySelfIssuedIdToken(forged, identity.did, "https://rp.example", 5 * 60_000)).rejects.toThrow();
 });

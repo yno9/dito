@@ -1,9 +1,8 @@
-import { InMemoryVersionMemory, authenticationPublicKey, maySignIn, parseDid, resolveDidWebvh, type VersionMemory } from "../webvh/src/index.ts";
-import { VhHostingClient, parseVhDid, parseVhLog, resolveVhLog } from "../vh/src/index.ts";
+import { InMemoryVersionMemory, authenticationPublicKey, maySignIn, parseVhDid, resolveVhFromWatchers, type VersionMemory } from "../vh/src/index.ts";
 
 export interface VerifiedSigner {
   sub: string;
-  method: "jwk" | "did-webvh" | "did-vh";
+  method: "jwk" | "did-vh";
   publicKeyJwk: JsonWebKey;
 }
 
@@ -51,22 +50,12 @@ export async function verifyViaEmbeddedJwk(jwt: string, jwk: JsonWebKey): Promis
   return { sub: await jwkThumbprint(jwk), method: "jwk", publicKeyJwk: jwk };
 }
 
-// The pieces of a did:webvh identifier a caller needs to apply an allowlist
-// (domain suffix) before anything is fetched. The strict parse (FQDN-only
-// domain, no IP literals, sane port/path, SCID shape) is packages/webvh's, so
-// a domain like "evil.com%23.did.md" is refused before it is compared or
-// put in a URL.
-export function parseWebvhDid(did: string): { domain: string; port?: number; segments: string[] } {
-  const { domain, port, segments } = parseDid(did);
-  return { domain, port, segments };
-}
-
 // A resolved document's own freshness window: short enough that a key
 // rotation is still visible almost immediately, long enough to absorb the
 // network round trip's cost when the *same* DID is resolved again within a
 // few seconds -- e.g. an OID4VP direct_post approval, then whatever
 // downstream request re-verifies the same wallet's signature a moment
-// later. Not a general-purpose HTTP cache: only resolveDidWebvhDocument's
+// later. Not a general-purpose HTTP cache: only resolveDidVhDocument's
 // own callers benefit, and only for exactly this DID-keyed lookup.
 const DID_DOCUMENT_CACHE_TTL_MS = 60_000;
 const didDocumentCache = new Map<string, { document: Record<string, unknown>; expiresAt: number }>();
@@ -88,68 +77,12 @@ function setCachedDidDocument(did: string, document: Record<string, unknown>): v
   didDocumentCache.set(did, { document, expiresAt: now + DID_DOCUMENT_CACHE_TTL_MS });
 }
 
-// Resolves a did:webvh DID by fetching its published log over HTTPS and
-// validating the WHOLE log (hash chain, pre-rotation, proofs, witnesses) with
-// didwebvh-ts before trusting the latest DID Document. The URL is derived and
-// fetched here, not by the library, so this caller's own policy applies (the
-// allowed-domain suffix, no redirects to other hosts beyond fetch's default,
-// the short cache below). Cached briefly (see DID_DOCUMENT_CACHE_TTL_MS) --
-// the live fetch is dominated by DNS/TLS/round-trip latency, not payload size.
-export async function resolveDidWebvhDocument(did: string, allowedDomainSuffix?: string): Promise<Record<string, unknown>> {
-  if (allowedDomainSuffix) {
-    const { domain } = parseWebvhDid(did);
-    if (domain !== allowedDomainSuffix && !domain.endsWith(`.${allowedDomainSuffix}`)) throw new Error("DID domain is not an accepted issuer domain");
-  }
-  const cached = cachedDidDocument(did);
-  if (cached) return cached;
-  const document = (await resolveDidWebvh(did)).doc as unknown as Record<string, unknown>;
-  setCachedDidDocument(did, document);
-  return document;
-}
-
-/** The key of a method that may sign the user in (an id_token's `kid`). */
-async function resolveDidWebvhSignInKey(did: string, verificationMethod: string): Promise<Uint8Array> {
-  const document = await resolveDidWebvhDocument(did);
-  if (!maySignIn(document, did, verificationMethod)) throw new Error("did:webvh authentication method may not sign in");
-  return authenticationPublicKey(document, did, verificationMethod);
-}
-
-export async function verifyViaDidWebvh(jwt: string, kid: string, allowedDomainSuffix?: string): Promise<VerifiedSigner> {
-  const hashIndex = kid.indexOf("#");
-  if (hashIndex <= 0) throw new Error("kid is not a DID with a fragment");
-  const did = kid.slice(0, hashIndex);
-  if (!did.startsWith("did:webvh:")) throw new Error("kid is not a did:webvh DID");
-  if (allowedDomainSuffix) {
-    const { domain } = parseWebvhDid(did);
-    if (domain !== allowedDomainSuffix && !domain.endsWith(`.${allowedDomainSuffix}`)) throw new Error("kid domain is not an accepted issuer domain");
-  }
-  const parts = jwt.split(".");
-  if (parts.length !== 3) throw new Error("JWT is malformed");
-  const header = parseHeader(jwt);
-  if (header.alg !== "EdDSA") throw new Error("JWT algorithm must be EdDSA");
-  const rawKey = await resolveDidWebvhSignInKey(did, kid);
-  const jwk: JsonWebKey = { kty: "OKP", crv: "Ed25519", x: Buffer.from(rawKey).toString("base64url") };
-  let key: CryptoKey;
-  try { key = await crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, false, ["verify"]); }
-  catch { throw new Error("resolved did:webvh authentication key is invalid"); }
-  const valid = await crypto.subtle.verify({ name: "Ed25519" }, key, decodePart(parts[2]!, "JWT signature"), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
-  if (!valid) throw new Error("JWT signature is invalid");
-  return { sub: did, method: "did-webvh", publicKeyJwk: jwk };
-}
-
 /**
- * The subject an OIDC relying party should key an account on. A did:webvh DID
- * names its current location (`did:webvh:<scid>:<host>`), and the string changes
- * when the identity moves; only the SCID is the identity (the SCID is derived
- * from the genesis entry, never from where the log is served). So a did:webvh
- * DID becomes `did:webvh:<scid>`, with the method kept in the value so that a
- * SCID of another method can never collide with it. Anything else (a JWK
- * thumbprint) is already stable and is returned as is.
+ * The subject an OIDC relying party should key an account on. A did:vh DID is its SCID already (it names no
+ * location, so nothing in it moves) and is returned as it is; so is a JWK thumbprint.
  */
 export function stableSubject(sub: string): string {
-  // A did:vh DID is its SCID already: nothing in it moves.
-  try { return parseVhDid(sub) && sub; } catch { /* not a did:vh DID */ }
-  try { return `did:webvh:${parseDid(sub).scid}`; } catch { return sub; }
+  return sub;
 }
 
 /**
@@ -168,9 +101,9 @@ const vhMemory = new InMemoryVersionMemory();
  * also name a did:web DID under that domain (what a did.md-hosted identity does).
  */
 export async function resolveDidVhDocument(did: string, sources: VhSources, allowedDomainSuffix?: string): Promise<Record<string, unknown>> {
-  const { scid } = parseVhDid(did);
+  parseVhDid(did);
   // The cache holds what was verified, not what was allowed: the issuer-domain rule applies to a cached document too.
-  const document = cachedDidDocument(did) ?? await fetchDidVhDocument(did, scid, sources);
+  const document = cachedDidDocument(did) ?? await fetchDidVhDocument(did, sources);
   if (allowedDomainSuffix) {
     const names: unknown[] = Array.isArray(document.alsoKnownAs) ? document.alsoKnownAs : [];
     const accepted = names.some(name => typeof name === "string" && name.startsWith("did:web:") && (() => {
@@ -182,15 +115,8 @@ export async function resolveDidVhDocument(did: string, sources: VhSources, allo
   return document;
 }
 
-async function fetchDidVhDocument(did: string, scid: string, sources: VhSources): Promise<Record<string, unknown>> {
-  const client = new VhHostingClient({ fetch: sources.fetch });
-  let text: string | null = null;
-  for (const watcher of sources.watchers) {
-    try { text = await client.readByScid(watcher, scid); } catch { text = null; }
-    if (text !== null) break;
-  }
-  if (text === null) throw new Error("the DID log of this did:vh DID was not found at any accepted watcher");
-  const resolved = await resolveVhLog(did, parseVhLog(text), { memory: sources.memory ?? vhMemory });
+async function fetchDidVhDocument(did: string, sources: VhSources): Promise<Record<string, unknown>> {
+  const resolved = await resolveVhFromWatchers(did, { watchers: sources.watchers, fetch: sources.fetch, memory: sources.memory ?? vhMemory });
   if (!resolved.doc) throw new Error("the did:vh DID is deactivated");
   setCachedDidDocument(did, resolved.doc);
   return resolved.doc;
@@ -222,7 +148,6 @@ export async function verifyViaDidVh(jwt: string, kid: string, sources: VhSource
 export async function verifyIdTokenSignature(jwt: string, allowedDomainSuffix?: string, vh?: VhSources): Promise<VerifiedSigner> {
   const header = parseHeader(jwt);
   if (header.jwk && typeof header.jwk === "object" && !Array.isArray(header.jwk)) return verifyViaEmbeddedJwk(jwt, header.jwk as JsonWebKey);
-  if (typeof header.kid === "string" && header.kid.startsWith("did:webvh:")) return verifyViaDidWebvh(jwt, header.kid, allowedDomainSuffix);
   if (typeof header.kid === "string" && header.kid.startsWith("did:vh:")) {
     if (!vh) throw new Error("a did:vh signer needs a verifier with watchers to get its log from");
     return verifyViaDidVh(jwt, header.kid, vh, allowedDomainSuffix);

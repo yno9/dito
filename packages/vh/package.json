@@ -2,6 +2,6 @@
   "name": "@did-md/vh",
   "private": true,
   "type": "module",
-  "description": "did:vh (VH-Log specialisation): verify, create, update and deactivate logs, the web-location fetcher, and the did:web shadow derivation. Independent of didwebvh-ts, which refuses a state.id that is not a did:webvh.",
+  "description": "did:vh (VH-Log specialisation): verify, create, update and deactivate logs, the web-location fetcher, the did:web shadow derivation, signing keys and Data Integrity proofs, and the hosting client and its conformance suite.",
   "main": "src/index.ts"
 }

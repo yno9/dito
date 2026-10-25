@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { endpointIdentity, mergeServiceEndpoints, sameDidDocumentReference, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
 
-const did = "did:webvh:Qm123:alice.did.md";
+const did = `did:vh:${"Q".repeat(46)}`;
 const state = {
   id: did,
   verificationMethod: [{ id: `${did}#old`, type: "Multikey" }],

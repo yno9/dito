@@ -1,7 +1,7 @@
 {
   "id": "dito",
   "name": "dito (identity host)",
-  "description": "did:webvh hosting for *.did.md: how many identities, how fast, how big",
+  "description": "did:vh hosting for *.did.md: how many identities, how fast, how big",
   "unit": "did-md.service",
   "settings": {
     "limits.createPerHour": {
@@ -44,16 +44,6 @@
       "group": "Sizes",
       "reload": "live",
       "description": "The largest did.jsonl the host takes. A normal identity's log is a few KB."
-    },
-    "limits.maxWitnessBytes": {
-      "type": "integer",
-      "default": 262144,
-      "min": 1024,
-      "max": 4194304,
-      "unit": "bytes",
-      "group": "Sizes",
-      "reload": "live",
-      "description": "The largest did-witness.json."
     },
     "limits.maxJsonBytes": {
       "type": "integer",

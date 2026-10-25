@@ -1,18 +1,16 @@
 import {
-  buildGenesis,
   controllerFromPrivate,
   createKeyAuthorizationCredentialWire,
   createDataIntegrityProof,
   createSelfIssuedIdToken,
   deriveWalletSecret,
   createIdentityMaterial,
-  preparePortableImport,
-  preparePreRotatedUpdate,
   rootFromMasterSeed,
   seedFromMnemonic,
   spareFromMasterSeed,
-  verifyRequestObjectJws,
-} from "../packages/wallet/src/did-webvh.ts";
+} from "../packages/wallet/src/keys.ts";
+import { createGenesisEntry, currentVhParameters, prepareLocationEntry, prepareUpdateEntry } from "../packages/wallet/src/vh-ops.ts";
+import { resolveRpDocument, verifyRequestObjectJws } from "./request-object.ts";
 import {
   createPasskeyProtector,
   clearLocalIdentityState,
@@ -39,7 +37,7 @@ import { decryptIdentityContainer, encryptIdentityContainer } from "../packages/
 import { initCcd } from "./ccd.ts";
 import {
   githubErrorMessage,
-  githubLogUrl,
+  githubDidLocation,
   publishToGitHub,
   validateBeforePublish,
   verifyPublishedLog,
@@ -47,15 +45,15 @@ import {
 } from "../packages/wallet/src/github-host.ts";
 import {
   CredentialRequiredError,
-  hostForDid,
-  isGitHubHostedDid as isGitHubHostedDidHost,
+  hostForSrc,
+  isGitHubSrc,
 } from "../packages/wallet/src/host.ts";
 import { verifyMasterOwnsLog } from "../packages/wallet/src/identity.ts";
-import { parseLoginHost, didIsHostedAt } from "../packages/wallet/src/login-hint.ts";
+import { parseLoginHost, isHostedAt } from "../packages/wallet/src/login-hint.ts";
 import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
 import { applyOutcome, grantDisplayState, shouldPoll } from "../packages/wallet/src/grant-outcome.ts";
 import { assertEditSparesMethods, assertEndpointRemovals, assertServiceEndpointMode, assertVerificationMethodEdit, VERIFICATION_RELATIONSHIPS, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
-import { ROOT_KEY_FRAGMENT, WebvhHostingClient, resolveDidWebvh, currentParameters, parseLog as parseWebvhLog, resolveLog, uncachedUrl } from "../packages/webvh/src/index.ts";
+import { ROOT_KEY_FRAGMENT, ForkedLogError, StaleLogError, VhHostingClient, latestVersion, locationsOf, standingOf, parseVhDid, parseVhLog, resolveVhLog, resolveVhFromWatchers, serializeVhLog, uncachedUrl } from "../packages/vh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
 import dashboardHeaderTemplate from "./pages/dashboard-header.html";
 import footerTemplate from "./pages/footer.html";
@@ -296,7 +294,7 @@ const DERIVED_SECRET_DETAIL = "urn:did.md:derived-secret:v1";
 // other than /authorize shortly after load (to remove a just-submitted
 // Create/Load form's username/password from the address bar), and reading
 // it fresh from an async continuation risks losing the race against that.
-// It carries no authority -- the identity created still needs a did:webvh
+// It carries no authority -- the identity created still needs a did:vh
 // SCID/Root key regardless, and the toggle can always be switched back off
 // by hand.
 const requestedAliasFromUrl = (() => {
@@ -480,7 +478,7 @@ function linkFact(label, href) {
 // The DID/username are already known locally (no identity this browser
 // hasn't verified gets into `loaded`/`storedIdentityRecord` in the first
 // place), so this always renders them immediately. The live did.json fetch
-// only adds an optional enhancement -- the canonical webvh form and a
+// only adds an optional enhancement -- a
 // display name -- and never hides the row if it fails; Connect/Disconnect
 // are exactly the actions where the host is momentarily unreachable, and an
 // error message shown over this row must not vanish because of that.
@@ -511,14 +509,10 @@ async function renderLoadedIdentity() {
     updateIdentityHostRow();
     if (!username) return;
     try {
+      // The did:web document the host derives from the log: only a display name is taken from it.
       const response = await fetch(endpoint(did, "did.json"), { cache: "no-store" });
       if (response.ok) {
         const state = await response.json();
-        const webvhDid = Array.isArray(state.alsoKnownAs) ? state.alsoKnownAs.find(id => id.startsWith("did:webvh:")) : null;
-        if (webvhDid) {
-          renderDidLine(query("#identity-did"), query("#identity-did-alias"), webvhDid);
-          query("#identity-did-copy").dataset.did = webvhDid;
-        }
         if (state.name) query("#loaded-identity-summary").append(fact("Name", state.name));
       }
     } catch { /* the row already shows the local DID; the live extras are optional */ }
@@ -529,8 +523,18 @@ async function renderLoadedIdentity() {
  * persisted identity record, independent of whether this tab has the
  * password-derived Master unlocked. Only keyring.json stays gated behind a
  * password prompt; the DID and its public log are shown immediately. */
+/** The stored identity record, with where its log is published learned from its saved snapshot. */
+async function readStoredRecord() {
+  const record = (await listStoredIdentities())[0] ?? null;
+  if (record) {
+    const snapshot = await readDidLogSnapshot(record.username).catch(() => undefined);
+    if (snapshot?.did === record.did) { try { rememberLocation(parseLog(snapshot.didJsonl)); } catch { /* unreadable snapshot: learned when the log is fetched */ } }
+  }
+  return record;
+}
+
 async function restoreStoredIdentityRecord() {
-  storedIdentityRecord = (await listStoredIdentities())[0] ?? null;
+  storedIdentityRecord = await readStoredRecord();
   // Home's ?/load buttons stay hidden (see html.identity-pending in
   // styles.css) until this resolves -- renderRoute() below runs once,
   // synchronously, before this async IndexedDB read can possibly have
@@ -652,7 +656,7 @@ function didDocumentEditDetail(details, did) {
   // DID Core permits a fragment-only relative DID URL (for example
   // `#didcomm`) for resources in this same DID Document.
   const validId = id => typeof id === "string" && (/^#[^\s#]+$/.test(id)
-    || ((did ? id.startsWith(`${did}#`) : id.startsWith("did:webvh:")) && id.includes("#") && !/[\s#]/.test(id.slice(id.indexOf("#") + 1))));
+    || ((did ? id.startsWith(`${did}#`) : id.startsWith("did:vh:")) && id.includes("#") && !/[\s#]/.test(id.slice(id.indexOf("#") + 1))));
   // DID Core allows serviceEndpoint to be a string, a map, or a set of
   // strings and/or maps -- accept all three shapes, not just the first two.
   const validEndpoint = endpoint => typeof endpoint === "string" || (!!endpoint && typeof endpoint === "object" && !Array.isArray(endpoint));
@@ -717,7 +721,7 @@ function keyAuthorizationDetail(details) {
 // Rather than trust an RP-supplied secret (which would need transporting
 // over the very channel it's trying to keep private), the Wallet derives it
 // itself from the identity's Root private key and hands back only the
-// result -- see deriveWalletSecret in did-webvh.ts. purpose/context are
+// result -- see deriveWalletSecret in packages/wallet/src/keys.ts. purpose/context are
 // domain-separation labels the RP supplies; several distinct requests may
 // appear in one authorization, so (unlike the "exactly one" detail types
 // above) this collects every match.
@@ -1630,29 +1634,44 @@ async function saveApplicationAuthorizationMetadata({ capability, edit, appKey }
 }
 
 function scidFromDid(did) {
-  const match = /^did:webvh:([^:]+):/.exec(did);
-  if (!match) throw new Error("Could not derive an SCID filename from this DID.");
-  return match[1];
+  try { return parseVhDid(did).scid; } catch { throw new Error("Could not derive an SCID filename from this DID."); }
 }
 
-// Shows the method prefix followed by the {scid} segment. The host remains
-// omitted here since the full DID is carried (for password-manager pairing)
-// in the offscreen username field.
+// A did:vh names no host. Where its log is published is what the newest document says (its first
+// location), so the host of an identity is looked up from its log: the loaded one's entries, or the
+// last snapshot saved in this browser for the stored one (rememberLocation, below).
+const knownSources = new Map(); // did -> src ("https://alice.did.md") | null
+function sourceOfEntries(entries) {
+  const did = entries?.[0]?.state?.id;
+  if (!did) return null;
+  return locationsOf(did, entries.at(-1).state)[0]?.src ?? null;
+}
+function rememberLocation(entries) {
+  const did = entries?.[0]?.state?.id;
+  if (did) knownSources.set(did, sourceOfEntries(entries));
+}
+/** The web location (`https://alice.did.md`) the DID's log is published at, or null (no host yet / not known). */
+function didSource(did) {
+  if (typeof did !== "string") return null;
+  if (loaded?.entries?.[0]?.state?.id === did) return sourceOfEntries(loaded.entries);
+  return knownSources.get(did) ?? null;
+}
+
+// Shows the method prefix followed by the {scid} segment. The host is not part of the DID.
 function renderDidWithScid(element, did) {
   let scid;
   try { scid = scidFromDid(did); } catch { renderDidValue(element, did); return; }
-  const suffix = did.slice(`did:webvh:${scid}:`.length);
   const prefix = document.createElement("span");
   prefix.className = "did-prefix";
-  prefix.textContent = "did:webvh:";
+  prefix.textContent = "did:vh:";
   const span = document.createElement("span");
   span.className = "did-scid";
   span.textContent = scid;
   const suffixSpan = document.createElement("span");
   suffixSpan.className = "did-suffix";
-  suffixSpan.textContent = `:${suffix}`;
+  suffixSpan.textContent = "";
   element.replaceChildren(prefix, span, suffixSpan);
-  element.dataset.defaultSuffix = suffix;
+  element.dataset.defaultSuffix = "";
   element.title = did;
 }
 
@@ -1661,7 +1680,7 @@ function renderDidValue(element, did) {
   element.title = did;
 }
 
-// Truncates "did:webvh:{scid}" from the right to whatever room is left in
+// Truncates "did:vh:{scid}" from the right to whatever room is left in
 // the did-line row once its plain, unshrinkable neighbors (the copy icon,
 // the ":" and the alias) are accounted for. The room is measured from the
 // row itself, not from headElement's own box: headElement is a plain
@@ -1717,20 +1736,20 @@ function fitDidHead(headElement) {
   void document.fonts?.ready.then(refit);
 }
 
-// Splits "did:webvh:{scid}:{alias}" across the three independently
-// clickable/plain pieces that make up the did-line (see dashboard.html):
-// headElement gets "did:webvh:{scid}" (copy target, truncated by
-// fitDidHead), the ":" between them is static markup owned by neither span,
-// and aliasElement gets "{alias}" alone (its own click target -- opens the
-// hosted did.jsonl -- so it must never be truncated away by the head).
-function renderDidLine(headElement, aliasElement, did) {
-  const match = /^(did:webvh:[^:]+):(.+)$/.exec(did);
+// Splits the did-line (see dashboard.html) into the independently clickable/plain pieces:
+// headElement gets "did:vh:{scid}" (copy target, truncated by fitDidHead), the separator between
+// them is static markup owned by neither span, and aliasElement gets the host the log is published
+// at, alone (its own click target -- opens the hosted did.jsonl -- so it must never be truncated
+// away by the head). An identity with no host yet shows the DID alone.
+function renderDidLine(headElement, aliasElement, did, host = didHost(did)) {
+  const match = /^(did:vh:[^:]+)$/.exec(did);
   if (!match) { renderDidValue(headElement, did); aliasElement.textContent = ""; return; }
-  const [, head, alias] = match;
+  const head = match[1];
   headElement._didHeadFull = head;
   headElement.title = did;
-  aliasElement.textContent = alias;
+  aliasElement.textContent = host ?? "";
   const row = headElement.closest(".identity-did-row");
+  row.querySelector('.identity-did[aria-hidden="true"]')?.classList.toggle("hidden", !host);
   didHeadResizeObserver ??= new ResizeObserver(entries => {
     for (const entry of entries) fitDidHead(headElement);
   });
@@ -1738,10 +1757,10 @@ function renderDidLine(headElement, aliasElement, did) {
   fitDidHead(headElement);
 }
 
-// The SCID is this identity's only permanent identifier -- the domain
-// segment of a did:webvh DID changes (genesis -> a real host, or one
-// host to another), so nothing is keyed by it. Local storage is always keyed
-// by a hash of the SCID, unrelated to whatever host currently serves it.
+// The SCID is this identity's only permanent identifier -- the host that
+// serves the log changes (none yet -> a real host, or one host to another),
+// so nothing is keyed by it. Local storage is always keyed by a hash of the
+// SCID, unrelated to whatever host currently serves it.
 async function storageKeyForDid(did) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(scidFromDid(did))));
   return [...digest].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 48);
@@ -1750,7 +1769,7 @@ async function storageKeyForDid(did) {
 // This identity's did.md subdomain, derived from its current DID -- or null
 // if it is not (or not yet) hosted on did.md.
 function didMdUsername(did) {
-  const match = new RegExp(`^did:webvh:[^:]+:([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\\.${DOMAIN.replace(/\./g, "\\.")}$`).exec(did);
+  const match = new RegExp(`^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\\.${DOMAIN.replace(/\./g, "\\.")}$`).exec(didHost(did) ?? "");
   return match ? match[1] : null;
 }
 
@@ -1776,6 +1795,8 @@ function legacyContainerPath(username, name) {
 }
 
 async function fetchCompleteDidLog(record) {
+  const snapshot = await readDidLogSnapshot(record.username);
+  if (snapshot?.did === record.did) { try { rememberLocation(parseLog(snapshot.didJsonl)); } catch { /* unreadable snapshot: the live log decides */ } }
   const response = await fetchLog(hostLogUrl(record.did));
   if (!response.ok) throw new Error(`Could not read the complete DID log for ${record.did}.`);
   const didJsonl = await response.text();
@@ -1989,7 +2010,7 @@ async function importIdentityContainer(contents, masterSeed, protection) {
       wipe(identity.masterSeed);
     }
   }
-  await saveDidLogSnapshot({ username: storageKey, did: identity.did, generation: identity.generation, didJsonl: identity.didJsonl, savedAt: importedAt });
+  await saveSnapshot({ username: storageKey, did: identity.did, generation: identity.generation, didJsonl: identity.didJsonl, savedAt: importedAt });
   // Device keys themselves are deliberately absent. These are display-only
   // audit records and identify that they cannot restore a live session.
   await Promise.all([
@@ -2014,14 +2035,44 @@ function endpoint(did, file = "did.jsonl") {
 
 /** Public DID-log URL for any host (did.md or GitHub). Prefer this for GETs. */
 function hostLogUrl(did) {
-  return hostForDid(did).logUrl(did);
+  return hostForDid(did).logUrl();
 }
 
-// The did:webvh log mechanics (parse, validate, parameters) are didwebvh-ts's,
-// through packages/webvh.
+/**
+ * The publication host of a DID, bound to the location its log is at (a did:vh DID names none, so the
+ * location is passed or looked up): the same few verbs for did.md and GitHub Pages.
+ */
+function hostForDid(did, src = didSource(did)) {
+  if (!src) throw new Error("This identity has no host yet.");
+  const adapter = hostForSrc(src);
+  return {
+    kind: adapter.kind, label: adapter.label, src,
+    logUrl: () => adapter.logUrl(src),
+    isLive: () => adapter.isLive(src),
+    publish: args => adapter.publish({ ...args, src }),
+    remove: (signKey, credential) => adapter.remove(src, did, signKey, credential),
+  };
+}
+
+function probeHost(host, options) {
+  return new VhHostingClient().probe(`https://${host}`, options);
+}
+
+// The did:vh log mechanics (parse, validate, parameters) are packages/vh's.
 function parseLog(text) {
   if (!text.endsWith("\n")) throw new Error("Public log was not found.");
-  return parseWebvhLog(text);
+  return parseVhLog(text);
+}
+
+/** A log verified against its own DID (the whole chain), as the wallet needs it before trusting it. */
+function resolveLog(entries) {
+  return resolveVhLog(entries[0].state.id, entries);
+}
+
+/** Saves the public log snapshot kept in this browser and remembers where it says the log is published. */
+async function saveSnapshot(snapshot) {
+  await saveDidLogSnapshot(snapshot);
+  try { rememberLocation(parseLog(snapshot.didJsonl)); } catch { /* the snapshot was saved; its location is learned next time */ }
 }
 
 function rootIsPublished(state, rootKey) {
@@ -2035,12 +2086,12 @@ async function publish(url, method, body) {
   return response;
 }
 
-/** An approved DID-document edit is a did:webvh state change: the signed log
+/** An approved DID-document edit is a did:vh state change: the signed log
  * entry is the only place it is published. The Wallet, never the host,
  * creates the signed entry. */
 async function publishDidDocumentEdit(state) {
   if (!loaded) throw new Error("Load an identity first.");
-  const prepared = await preparePreRotatedUpdate({
+  const prepared = await prepareUpdateEntry({
     entries: loaded.entries, state, masterSeed: loaded.masterSeed, currentSpareIndex: loaded.currentSpareIndex,
   });
   const nextEntries = [...loaded.entries, prepared.entry];
@@ -2052,7 +2103,7 @@ async function publishDidDocumentEdit(state) {
   );
   if (published !== "published") return;
   loaded.entries = nextEntries;
-  loaded.parameters = currentParameters(loaded.entries);
+  loaded.parameters = currentVhParameters(loaded.entries);
   loaded.sign = await spareFromMasterSeed(loaded.masterSeed, loaded.currentSpareIndex);
   loaded.currentSpareIndex = prepared.nextSpareIndex;
   await persistMasterMetadata();
@@ -2272,14 +2323,18 @@ function wipeCreateMaterial(material) {
 
 async function fetchIdentityLog(storageKey, did, logUrl) {
   let text;
-  if (isProvisionalDid(did)) {
-    // genesis has no host to fetch from -- its genesis entry is the
+  const snapshot = await readDidLogSnapshot(storageKey);
+  const snapshotEntries = snapshot?.didJsonl && snapshot.did === did ? parseLog(snapshot.didJsonl) : undefined;
+  // Where the log is: the location the caller read it from, else the one the last snapshot says (a did:vh DID names none).
+  const source = logUrl ? "given" : (snapshotEntries ? sourceOfEntries(snapshotEntries) : null) ?? didSource(did);
+  if (!source) {
+    // A DID with no host yet has nothing to fetch from -- its log is the
     // locally loaded data saved when it was created.
-    text = (await readDidLogSnapshot(storageKey))?.didJsonl;
+    text = snapshot?.didJsonl;
     if (!text) throw new Error("This identity has no locally loaded log.");
   } else {
     try {
-      const response = await fetchLog(logUrl ?? hostLogUrl(did));
+      const response = await fetchLog(logUrl ?? hostForSrc(source).logUrl(source));
       if (!response.ok) throw new Error(await response.text());
       text = await response.text();
     } catch (error) {
@@ -2288,14 +2343,24 @@ async function fetchIdentityLog(storageKey, did, logUrl) {
       // gone for good. Fall back to the last log snapshot saved locally
       // (kept up to date by connectHostedData) instead of making an
       // identity permanently ununlockable whenever its host is unreachable.
-      const snapshot = await readDidLogSnapshot(storageKey);
       if (!snapshot?.didJsonl) throw error;
       text = snapshot.didJsonl;
     }
   }
   const entries = parseLog(text);
   await resolveLog(entries);
-  const parameters = currentParameters(entries);
+  // The snapshot is what this browser has already accepted: a copy older than it (a host restored from a backup, a
+  // cache) or another continuation of it is refused rather than trusted.
+  if (snapshotEntries) {
+    try { standingOf(entries, latestVersion(snapshotEntries)); }
+    catch (error) {
+      if (error instanceof StaleLogError) throw new Error("The host serves an older copy of this identity's log than this browser has already accepted. Try again later, or restore from a backup.");
+      if (error instanceof ForkedLogError) throw new Error("The host serves a different history for this identity than this browser has accepted.");
+      throw error;
+    }
+  }
+  rememberLocation(entries);
+  const parameters = currentVhParameters(entries);
   if (!Array.isArray(parameters.nextKeyHashes) || parameters.nextKeyHashes.length !== 1) {
     throw new Error("This identity does not satisfy permanent pre-rotation invariants.");
   }
@@ -2365,7 +2430,7 @@ async function keepOnlyLoadedIdentityRecord() {
   await clearBrowserIdentityState();
   if (!record) return;
   await restoreIdentityKeyringRecord(exportIdentityKeyringRecord(record));
-  if (snapshot?.did === record.did) await saveDidLogSnapshot(snapshot);
+  if (snapshot?.did === record.did) await saveSnapshot(snapshot);
   await Promise.all([
     ...oauth.filter(grant => grant.did === record.did).map(grant => saveWalletOAuthGrant(grant)),
     ...deviceBindings.filter(binding => binding.did === record.did).map(binding => saveWalletDeviceBinding(binding)),
@@ -2428,8 +2493,9 @@ async function activateLoadedIdentity() {
   if (walletAuthorization) selectTab("home");
 }
 
+// Provisional: no host yet -- the document names no place the log is published at.
 function isProvisionalDid(did) {
-  return typeof did === "string" && did.endsWith(":ex.alias");
+  return didSource(did) === null;
 }
 
 // Key rotation needs the Sign key decrypted in memory. Any identity that is
@@ -2441,8 +2507,7 @@ function updateKeysUnlockVisibility() {
 }
 
 // "Connected" means this host currently serves the identity's did.jsonl.
-// Disconnecting removes it from the host (the did:webvh spec treats this as
-// a legitimate way to signal deactivation) without touching the local copy,
+// Disconnecting removes it from the host without touching the local copy,
 // so it can be reconnected -- to the same host -- later. Works from a
 // `storedIdentityRecord` alone (no in-tab unlock needed) so it also shows up
 // right after a cold reload.
@@ -2530,7 +2595,7 @@ async function updateConnectionStatus() {
     // the log is currently served. A GitHub-hosted identity must show as
     // connected when its Pages URL is live -- the old endpoint() call threw
     // for *.github.io and left the status-dot permanently gray.
-    try { connected = await hostForDid(did).isLive(did); } catch { connected = false; }
+    try { connected = await hostForDid(did).isLive(); } catch { connected = false; }
   }
   // A fresh post-publish/remove hint wins over a stale CDN answer.
   if (connectionHint && Date.now() < connectionHint.until) {
@@ -2548,7 +2613,8 @@ async function updateConnectionStatus() {
 // Host transport lives in host.ts / github-host.ts.
 
 function isGitHubHostedDid(did) {
-  return isGitHubHostedDidHost(did);
+  const src = didSource(did);
+  return Boolean(src && isGitHubSrc(src));
 }
 
 function updateIdentityHostRow() {
@@ -2655,12 +2721,7 @@ function openGitHubHostCard(options = {}) {
     return;
   }
   if (intent === "host") {
-    const parameters = loaded?.parameters ?? (loaded?.entries ? currentParameters(loaded.entries) : null);
-    // preparePortableImport requires portable:true and no active witnesses.
-    if (parameters && parameters.portable === false) {
-      showContextToast("This identity is not portable.");
-      return;
-    }
+    const parameters = loaded?.parameters ?? (loaded?.entries ? currentVhParameters(loaded.entries) : null);
     if (parameters && parameters.witness && Object.keys(parameters.witness).length) {
       showContextToast("Identities with active witnesses cannot move yet.");
       return;
@@ -2672,7 +2733,7 @@ function openGitHubHostCard(options = {}) {
     query("#github-host-publish").textContent = "Publish update";
     query("#github-host-result").textContent = "A classic PAT is required to commit this change to your GitHub repository. It is never stored.";
   } else if (intent === "remove") {
-    query("#github-host-title").textContent = "Remove did:web from GitHub";
+    query("#github-host-title").textContent = "Remove DID files from GitHub";
     query("#github-host-publish").textContent = "Remove";
   } else {
     query("#github-host-title").textContent = hosted ? "Republish to your GitHub" : "Host on your GitHub";
@@ -2709,31 +2770,30 @@ const GITHUB_PUBLISH_STEPS = [
   { key: "wait-build", label: "Wait for Pages build" },
   { key: "wait-publish", label: "Wait for public URL" },
   { key: "verify-published", label: "Verify published DID log" },
-  { key: "verify-mirror", label: "Verify did.json mirror" },
+  { key: "verify-mirror", label: "Verify did:web document" },
   { key: "done", label: "Done" },
 ];
 
 async function publishIdentityToGitHub(token) {
   const currentDid = loaded.entries.at(-1).state.id;
   const hostedHere = isGitHubHostedDid(currentDid);
-  const previousDid = hostedHere ? null : currentDid;
-  const previousSign = previousDid ? loaded.sign : null;
+  const previousSrc = hostedHere ? null : didSource(currentDid);
+  const previousSign = previousSrc ? loaded.sign : null;
 
   let entries = loaded.entries;
   let move = null;
   if (!hostedHere) {
-    // Portability move to <login>.github.io. login is taken from the PAT
-    // (GET /user) before any write; publishToGitHub repeats the same check.
+    // The document starts to name <login>.github.io (one update entry; the DID does not change). login is taken
+    // from the PAT (GET /user) before any write; publishToGitHub repeats the same check.
     const { login } = await verifyToken(token);
-    move = await preparePortableImport({
-      entries: loaded.entries,
-      username: login,
-      domain: "github.io",
-      masterSeed: loaded.masterSeed,
+    const location = githubDidLocation(login);
+    move = await prepareLocationEntry({
+      entries: loaded.entries, src: location.src, previousSrc: previousSrc ?? undefined,
+      masterSeed: loaded.masterSeed, currentSpareIndex: loaded.currentSpareIndex,
     });
     entries = [...loaded.entries, move.entry];
     // Local gate first -- never hand a bad log to Octokit.
-    await validateBeforePublish(entries, githubLogUrl(login));
+    await validateBeforePublish(entries, location.webDid);
   }
 
   const stepIndex = new Map(GITHUB_PUBLISH_STEPS.map((step, index) => [step.key, index]));
@@ -2741,8 +2801,8 @@ async function publishIdentityToGitHub(token) {
     token,
     entries,
     message: move
-      ? `Publish did:webvh ${move.entry.versionId} (portability move)`
-      : `Republish did:webvh ${entries.at(-1).versionId}`,
+      ? `Publish did:vh ${move.entry.versionId} (new location)`
+      : `Republish did:vh ${entries.at(-1).versionId}`,
     onProgress: key => {
       const index = stepIndex.get(key);
       if (index !== undefined) setGitHubProgress(GITHUB_PUBLISH_STEPS, index);
@@ -2757,11 +2817,11 @@ async function publishIdentityToGitHub(token) {
   // at an entry that was never published.
   if (move) {
     loaded.entries = entries;
-    loaded.parameters = currentParameters(entries);
+    loaded.parameters = currentVhParameters(entries);
     loaded.sign = await spareFromMasterSeed(loaded.masterSeed, loaded.currentSpareIndex);
     loaded.currentSpareIndex = move.nextSpareIndex;
     await persistMasterMetadata();
-    await saveDidLogSnapshot({
+    await saveSnapshot({
       username: loaded.username,
       did: loaded.entries.at(-1).state.id,
       generation: loaded.entries.at(-1).versionId,
@@ -2777,9 +2837,9 @@ async function publishIdentityToGitHub(token) {
   // Plan §7-1: after GitHub publish + resolution check, remove the old
   // *.did.md alias (best-effort). Failure keeps GitHub and reports it.
   let cleanupNote = "";
-  if (previousDid && previousSign) {
+  if (previousSrc && previousSign) {
     try {
-      await disconnectHostedDataAt(previousDid, previousSign);
+      await disconnectHostedDataAt(currentDid, previousSign, previousSrc);
     } catch (error) {
       cleanupNote = ` Published on GitHub, but the previous alias could not be removed: ${errorMessage(error)}`;
     }
@@ -2840,7 +2900,7 @@ query("#github-host-recheck").addEventListener("click", async () => {
       return;
     }
     const body = await response.text();
-    await verifyPublishedLog(body, publicUrl, expectedVersionId);
+    await verifyPublishedLog(body, `did:web:${host}`, expectedVersionId);
     hintConnection(true);
     query("#github-host-recheck").classList.add("hidden");
     const message = `Confirmed at ${publicUrl}.`;
@@ -2961,7 +3021,7 @@ let menuViewActive = false;
 // The Context Window's one persistent left-side icon -- swaps with whatever
 // context is current: "file" for the default actions/menu view/Unload,
 // "unlock" while the command line is asking for the Passphrase, "profile"
-// while editing/connecting the did:webvh alias, "search" once the command
+// while editing/connecting the alias, "search" once the command
 // line itself is actually showing (typed input), entered either from the
 // default view or the menu view.
 function setContextIcon(context) {
@@ -3195,7 +3255,7 @@ async function runContextCommand(raw) {
     case "connect": {
       if (!arg) { output("#loaded-identity-message", "Usage: connect <host>", true); return; }
       const host = await checkConnectTarget(arg);
-      if (!host) { output("#loaded-identity-message", "That location is taken or the server did not respond (it must host did:webvh logs).", true); return; }
+      if (!host) { output("#loaded-identity-message", "That location is taken or the server did not respond (it must host did:vh logs).", true); return; }
       setCommandMode(false);
       void withUnlock(async () => {
         try { await connectHostedData(host); }
@@ -3296,12 +3356,13 @@ query("#connection-dot").addEventListener("click", () => {
 });
 query("#identity-alias-link").addEventListener("click", openHostedDidLog);
 
-// The host segment of a did:webvh identifier -- did:webvh:<scid>:<host>.
+// The host the identity's log is published at -- `alice.did.md`, from the location its document names.
 // Unlike didMdUsername() this makes no assumption about DOMAIN, since it is
 // also used to compare against an arbitrary Server URL the user typed in.
 function didHost(did) {
-  const match = typeof did === "string" ? /^did:webvh:[^:]+:(.+)$/.exec(did) : null;
-  return match ? match[1] : null;
+  const src = didSource(did);
+  if (!src) return null;
+  try { return new URL(src).host; } catch { return null; }
 }
 
 function normalizeServerUrl(raw) {
@@ -3350,10 +3411,10 @@ async function checkConnectTarget(rawUrl) {
   if (!url || !splitHostedTarget(url.host)) { setConnectCheckState("idle"); return null; }
   setConnectCheckState("checking");
   try {
-    // Any host that speaks the did:webvh Hosting Protocol (SPEC-webvh-hosting.md)
+    // Any host that speaks the did:vh Hosting Protocol (SPEC-vh-hosting.md)
     // will do -- did.md or a third party. "Ready" = the location is reachable
     // and free (its did.jsonl is a 404); a taken or unreachable one is not.
-    const probe = await new WebvhHostingClient().probe(url.host);
+    const probe = await probeHost(url.host);
     if (token !== connectCheckToken) return null;
     if (probe.available !== true) { setConnectCheckState("error"); return null; }
     setConnectCheckState("ok");
@@ -3427,39 +3488,41 @@ function closeConnectForm() {
 
 // Publishes the currently loaded identity at `targetHost` (a full
 // <username>.<domain> host, e.g. "myname.did.md"). If it is not already
-// hosted there, this first signs the one additional did:webvh portability
-// entry that moves it (see preparePortableImport) -- the existing entries
-// are otherwise sent untouched, since PUT requires the prior log as a
-// byte-for-byte prefix.
+// hosted there, this first signs the one additional update entry that makes
+// the document name the new place (see prepareLocationEntry; the DID does
+// not change) -- the existing entries are otherwise sent untouched, since PUT
+// requires the prior log as a byte-for-byte prefix.
 async function connectHostedData(targetHost, { keepPrevious = false } = {}) {
   const parsed = splitHostedTarget(targetHost);
   if (!parsed) throw new Error("Enter a full host, e.g. myname.did.md.");
   const currentDid = loaded.entries.at(-1).state.id;
-  const isMove = isProvisionalDid(currentDid) || didHost(currentDid) !== targetHost;
+  const targetSrc = `https://${targetHost}`;
+  const previousSrc = didSource(currentDid);
+  const isMove = previousSrc !== targetSrc;
   // Moving off an already-hosted alias (not just claiming one for the first
   // time) leaves a stale copy on the old host once this succeeds -- capture
-  // its DID and the Sign key that's currently authorized *there* now, before
-  // the move below rotates `loaded.sign` to the new generation.
-  const previousDid = isMove && !isProvisionalDid(currentDid) ? currentDid : null;
-  const previousSign = previousDid ? loaded.sign : null;
+  // its location and the Sign key that's currently authorized *there* now,
+  // before the move below rotates `loaded.sign` to the new generation.
+  const previousSign = isMove && previousSrc ? loaded.sign : null;
   let entries = loaded.entries;
   let move = null;
   if (isMove) {
-    move = await preparePortableImport({
-      entries: loaded.entries, username: parsed.username, domain: parsed.domain, masterSeed: loaded.masterSeed,
+    move = await prepareLocationEntry({
+      entries: loaded.entries, src: targetSrc, previousSrc: previousSrc ?? undefined,
+      masterSeed: loaded.masterSeed, currentSpareIndex: loaded.currentSpareIndex,
     });
     entries = [...loaded.entries, move.entry];
   }
-  const body = `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`;
+  const body = serializeVhLog(entries);
   // Only touch in-memory state once the host has actually accepted the full
   // log -- otherwise a failed PUT (e.g. a CORS error from a third-party
   // server) would leave `loaded` referring to an entry that was never
   // published, and every later network check against the real DID would
   // fail (see restoreStoredIdentityRecord's fallback for what that breaks).
-  await publish(`https://${targetHost}/.well-known/did.jsonl`, "PUT", body);
+  await publish(`${targetSrc}/.well-known/did.jsonl`, "PUT", body);
   if (move) {
     loaded.entries = entries;
-    loaded.parameters = currentParameters(entries);
+    loaded.parameters = currentVhParameters(entries);
     loaded.sign = await spareFromMasterSeed(loaded.masterSeed, loaded.currentSpareIndex);
     loaded.currentSpareIndex = move.nextSpareIndex;
   }
@@ -3468,7 +3531,7 @@ async function connectHostedData(targetHost, { keepPrevious = false } = {}) {
   // disconnected (fetchIdentityLog falls back to this snapshot when the live
   // fetch 404s) -- a disconnected host is an expected, supported state, not
   // the identity being gone.
-  await saveDidLogSnapshot({
+  await saveSnapshot({
     username: loaded.username, did: loaded.entries.at(-1).state.id,
     generation: loaded.entries.at(-1).versionId,
     didJsonl: `${loaded.entries.map(entry => JSON.stringify(entry)).join("\n")}\n`,
@@ -3484,8 +3547,8 @@ async function connectHostedData(targetHost, { keepPrevious = false } = {}) {
   // ordering it this way means a failure here never leaves the identity
   // unhosted, only an old, still-verifiable copy sitting on the previous
   // host until this is retried (via Disconnect) or it's cleaned up by hand.
-  if (previousDid && previousSign && !keepPrevious) {
-    try { await disconnectHostedDataAt(previousDid, previousSign); }
+  if (previousSrc && previousSign && !keepPrevious) {
+    try { await disconnectHostedDataAt(currentDid, previousSign, previousSrc); }
     catch (error) {
       output("#loaded-identity-message", `Connected as ${targetHost}, but the previous alias could not be removed: ${errorMessage(error)}`, true);
       return;
@@ -3523,7 +3586,7 @@ query("#context-connect-toggle").addEventListener("click", () => {
   void withUnlock(async () => {
     const host = await checkConnectTarget(raw);
     if (!host) {
-      output("#loaded-identity-message", "That location is taken or the server did not respond (it must host did:webvh logs).", true);
+      output("#loaded-identity-message", "That location is taken or the server did not respond (it must host did:vh logs).", true);
       return;
     }
     try {
@@ -3777,7 +3840,7 @@ function renderWalletAuthorization() {
     hideSheet("authorize");
     return;
   }
-  // clientName is a did:webvh identifier for a SIOPv2 relying party (its own
+  // clientName is a did:vh identifier for a SIOPv2 relying party (its own
   // client_name never having been registered anywhere) -- show just its
   // host segment (e.g. "oidc-bridge.did.md") instead of the full DID, same
   // as elsewhere in this app. Non-DID client names (an OAuth client_name
@@ -3803,7 +3866,7 @@ function renderWalletAuthorization() {
   derived.classList.toggle("hidden", !derivedRequests.length);
   if (derivedRequests.length) { const list = document.createElement("ul"); list.replaceChildren(...derivedRequests.map(request => { const item = document.createElement("li"); item.textContent = `Derive a private value from your Root key: ${request.purpose}`; return item; })); derived.replaceChildren(list); }
   // The device key if the application supplied one, otherwise the requesting application
-  // itself (its full DID for a did:webvh client).
+  // itself (its full DID for a did:vh client).
   query("#wallet-authorize-device").textContent = walletAuthorization.deviceJkt ?? walletAuthorization.clientName;
   const deviceLabel = query("#wallet-authorize-device-label");
   const requestKey = walletAuthorization.state ?? walletAuthorization.requestId ?? "";
@@ -3837,7 +3900,7 @@ function renderWalletAuthorization() {
   } else if (walletAuthorization.did && loaded.entries.at(-1).state.id !== walletAuthorization.did) {
     approve.disabled = true;
     status.textContent = "A different identity is loaded in this tab. Load the identity requested above.";
-  } else if (walletAuthorization.loginHost && !didIsHostedAt(loaded.entries.at(-1).state.id, walletAuthorization.loginHost)) {
+  } else if (walletAuthorization.loginHost && !isHostedAt(loaded.entries.at(-1).state.id, loaded.entries.at(-1).state, walletAuthorization.loginHost)) {
     approve.disabled = true;
     status.textContent = "A different identity is loaded in this tab. Load the identity requested by this application.";
   } else {
@@ -3891,14 +3954,14 @@ function restorePendingAuthorizeSearch() {
 // this one parsed request (see approveAuthorization/setAliasStatusIcon-
 // style unification elsewhere in this file for the same "one shape,
 // no state-dependent branch" principle).
-// PLAN6 §0.2: a relying party that authenticates itself via a did:webvh key
+// PLAN6 §0.2: a relying party that authenticates itself via a did:vh key
 // (rather than DCR client_id/secret) sends a JAR (RFC 9101) request object
 // instead of flat query parameters. The outer query string then carries
 // only client_id/response_type/request -- everything security-relevant
 // (redirect_uri, state, code_challenge, dcql_query, ...) lives inside the
 // signed JWT, so an attacker tampering with the unsigned outer URL cannot
 // change any of it. verifyRequestObjectJws resolves the RP's DID key from
-// its own published did:webvh log and checks the signature; the redirect_uri
+// its own published did:vh log and checks the signature; the redirect_uri
 // is additionally checked against that same DID document's `service` array
 // (PLAN6 §0.3bis) -- this is the entire trust basis, there is no separate
 // RP registration for a DID-authenticated relying party.
@@ -3914,7 +3977,9 @@ function restorePendingAuthorizeSearch() {
 // "vp_token id_token".
 function validResponseType(value) { return value === "code" || value === "vp_token id_token"; }
 async function jarAuthorizationParameters(clientId, jwt) {
-  const { payload, rpDid, service } = await verifyRequestObjectJws(jwt);
+  const { payload, rpDid, service, document: rpDocument } = await verifyRequestObjectJws(jwt, { watchers: [`https://${DOMAIN}`] });
+  // Where the RP's log is published, for showing its host: from its own document.
+  knownSources.set(rpDid, locationsOf(rpDid, rpDocument)[0]?.src ?? null);
   if (rpDid !== clientId) throw new Error("The authorization request client_id does not match its signer.");
   if (payload.client_id !== clientId || !validResponseType(payload.response_type)) throw new Error("The authorization request is invalid.");
   const usesCode = payload.response_type === "code";
@@ -4045,9 +4110,9 @@ async function siopAuthorizationParameters(params) {
   const metadata = params.has("client_metadata") ? siopJson(params.get("client_metadata"), "client_metadata") : {};
   // Believed only when the DID itself says so; any trouble reading its document leaves the host alone as the identity.
   let rpDid;
-  if (typeof metadata.rp_did === "string" && metadata.rp_did.startsWith("did:webvh:")) {
+  if (typeof metadata.rp_did === "string" && metadata.rp_did.startsWith("did:vh:")) {
     try {
-      const document = (await resolveDidWebvh(metadata.rp_did)).doc;
+      const document = (await resolveRpDocument(metadata.rp_did, { watchers: [`https://${DOMAIN}`] })).document;
       const published = Array.isArray(document.service) && document.service.some(entry => entry && typeof entry === "object" && entry.type === SIOP_REDIRECT_TARGET && entry.serviceEndpoint === callback);
       if (published) rpDid = metadata.rp_did;
     } catch { /* unverified: the redirect URL is the only identity */ }
@@ -4070,7 +4135,7 @@ async function oauthAuthorizationParameters(search = null, { embedded = false } 
   const keys = [...params.keys()];
   // SIOPv2 / OpenID4VP, the way a relying party that has no key of its own asks: `client_id=redirect_uri:<its redirect URL>`.
   if (params.get("client_id")?.startsWith("redirect_uri:")) return await siopAuthorizationParameters(params);
-  if (params.get("client_id")?.startsWith("did:webvh:")) {
+  if (params.get("client_id")?.startsWith("did:vh:")) {
     const jarKeys = ["client_id", "request", "response_type"];
     if (keys.length !== jarKeys.length || keys.some(key => !jarKeys.includes(key)) || !validResponseType(params.get("response_type"))) throw new Error("The authorization request is invalid.");
     return jarAuthorizationParameters(params.get("client_id"), params.get("request"));
@@ -4156,18 +4221,18 @@ async function beginOAuthAuthorization() {
   try {
     const request = await oauthAuthorizationParameters(null, { embedded: EMBED_LOGIN });
     if (!request) return;
-    // A did:webvh-authenticated relying party (PLAN6) has no DCR
+    // A did:vh-authenticated relying party (PLAN6) has no DCR
     // registration to look up: jarAuthorizationParameters already verified
     // its identity (JAR signature) and its redirect_uri (against its own
     // DID document's `service` array) directly, so client metadata is
     // derived from the request itself rather than fetched from
     // /v1/oauth/clients/.
     let clientName;
-    // Only a registered client can opt in to outcome reporting; JAR / did:webvh RPs have no metadata.
+    // Only a registered client can opt in to outcome reporting; JAR / did:vh RPs have no metadata.
     let outcomeReporting = false;
     if (request.clientId.startsWith("redirect_uri:")) {
       clientName = request.clientDisplayName ?? request.clientDisplayHost;
-    } else if (request.clientId.startsWith("did:webvh:")) {
+    } else if (request.clientId.startsWith("did:vh:")) {
       clientName = request.clientId;
     } else {
       const response = await fetch(`${API}/v1/oauth/clients/${encodeURIComponent(request.clientId)}`, { cache: "no-store" });
@@ -4288,7 +4353,7 @@ async function approveAuthorization() {
   // didn't send one, whichever identity is already loaded in this tab is
   // the one being authorized, same as it always was for a conventional
   // (non-DPoP) client.
-  if (walletAuthorization.loginHost && !didIsHostedAt(did, walletAuthorization.loginHost)) throw new Error("The loaded identity does not match the authorization request.");
+  if (walletAuthorization.loginHost && !isHostedAt(did, loaded.entries.at(-1).state, walletAuthorization.loginHost)) throw new Error("The loaded identity does not match the authorization request.");
   const issuedAtMilliseconds = Date.now(); const issuedAt = new Date(issuedAtMilliseconds).toISOString();
   const edit = didDocumentEditDetail(walletAuthorization.authorizationDetails, did);
   const keyAuthorization = keyAuthorizationDetail(walletAuthorization.authorizationDetails);
@@ -4592,22 +4657,22 @@ query("#context-unload-confirm").addEventListener("click", async () => {
 // missing one opens the same dialog with intent "remove" and resumes.
 // Returns "removed" or "awaiting-credential" so callers do not flip the
 // status-dot before the write actually happened.
-async function disconnectHostedDataAt(did, signKey = loaded.sign) {
-  const host = hostForDid(did);
+async function disconnectHostedDataAt(did, signKey = loaded.sign, src = didSource(did)) {
+  const host = hostForDid(did, src);
   try {
-    await host.remove(did, signKey, currentGitHubPat() ?? undefined);
+    await host.remove(signKey, currentGitHubPat() ?? undefined);
     return "removed";
   } catch (error) {
     if (error instanceof CredentialRequiredError) {
       // A remembered token should have prevented this -- ask again.
-      pendingGitHubPublish = () => disconnectHostedDataAt(did, signKey);
+      pendingGitHubPublish = () => disconnectHostedDataAt(did, signKey, src);
       openGitHubHostCard({ intent: "remove" });
       return "awaiting-credential";
     }
     if ((error as { status?: number }).status === 401 || /rejected this token/i.test(String((error as Error).message))) {
       clearStoredGitHubPat();
       githubPatInMemory = null;
-      pendingGitHubPublish = () => disconnectHostedDataAt(did, signKey);
+      pendingGitHubPublish = () => disconnectHostedDataAt(did, signKey, src);
       openGitHubHostCard({ intent: "remove" });
       output("#loaded-identity-message", "Saved GitHub token was rejected. Paste a new one.", true);
       return "awaiting-credential";
@@ -4630,10 +4695,9 @@ async function disconnectHostedData() {
 
 // The disconnected-state counterpart to disconnectHostedData() --
 // republishes to the same host this identity is already configured for
-// (didHost of its own current DID), not a new one: reuses
+// (the location its own current document names), not a new one: reuses
 // connectHostedData()'s own PUT, which is a plain republish (not a move,
-// so none of its portable-import logic runs) whenever the target host
-// already matches. Provisional identities (no host yet) throw here instead
+// so no location entry is made) whenever the target host already matches. Provisional identities (no host yet) throw here instead
 // -- #connection-dot has no separate hidden state for those, see
 // updateConnectionStatus.
 async function republishHostedData() {
@@ -4645,7 +4709,7 @@ async function republishHostedData() {
     // (prompts for a PAT when needed).
     const status = await publishEntriesToCurrentHost(
       loaded.entries,
-      `Republish did:webvh ${loaded.entries.at(-1).versionId}`,
+      `Republish did:vh ${loaded.entries.at(-1).versionId}`,
       "replace",
       () => republishHostedData(),
     );
@@ -4761,7 +4825,7 @@ onClick("#wallet-backup-export", () => (loaded ? "#loaded-identity-message" : "#
 });
 
 // This tool is intentionally part of the same single-file app. It uses
-// WebCrypto and the already-bundled did:webvh implementation only; it does
+// WebCrypto and the already-bundled did:vh implementation only; it does
 // not rely on IndexedDB, a passkey, or an app.did.md session.
 function parsePortableEicForMove(value) {
   if (!value || typeof value !== "object" || value.format !== "did.md/identity-container" || (value.version !== 2 && value.version !== 3)
@@ -4783,47 +4847,6 @@ function parsePortableEicForMove(value) {
   return { source, entries, masterSeed, did: identity.did };
 }
 
-// The did:webvh DID-to-HTTPS transformation (see the method spec): strips
-// the did:webvh: prefix and SCID, decodes the domain (with its optional
-// %3A-encoded port) and any deployment path segments, and reconstructs the
-// HTTPS URL for the DID Log.
-function didWebvhToHttpsUrl(did) {
-  const prefix = "did:webvh:";
-  if (!did.startsWith(prefix)) throw new Error("Not a did:webvh identifier.");
-  const rest = did.slice(prefix.length);
-  const firstColon = rest.indexOf(":");
-  if (firstColon === -1) throw new Error("This did:webvh identifier has no domain.");
-  const scid = rest.slice(0, firstColon);
-  const segments = rest.slice(firstColon + 1).split(":");
-  const domainSegment = segments.shift();
-  const portMatch = /^(.*)%3A(\d{1,5})$/i.exec(domainSegment);
-  const domain = decodeURIComponent(portMatch ? portMatch[1] : domainSegment);
-  const host = portMatch ? `${domain}:${portMatch[2]}` : domain;
-  const path = segments.length ? `/${segments.map(segment => encodeURIComponent(decodeURIComponent(segment))).join("/")}` : "/.well-known";
-  return { url: `https://${host}${path}/did.jsonl`, scid };
-}
-
-async function loadFromOnlineDid(did, masterSeed, mnemonic) {
-  const { url } = didWebvhToHttpsUrl(did);
-  const username = await storageKeyForDid(did);
-  clearLoadedIdentitySession();
-  await clearBrowserIdentityState();
-  // Fetch and verify the Passphrase against the live log first; only a
-  // verified identity is persisted, matching the pattern used elsewhere for
-  // loading a real identity by its Passphrase.
-  await loadMasterIdentity(username, did, undefined, masterSeed, url);
-  loaded.record = await savePasswordStoredIdentity({
-    username, did: loaded.entries.at(-1).state.id, rootKey: loaded.root.multikey,
-    generation: loaded.entries.at(-1).versionId, masterSeed, password: mnemonic,
-  });
-  // loadMasterIdentity() only sets `loaded` -- unlike unlockIdentity(), it
-  // does not refresh the UI. Without this, `loaded` was already true (this
-  // identity really is loaded) while the screen kept showing the Load form,
-  // forever, since nothing ever told it to re-render.
-  await keepOnlyLoadedIdentityRecord();
-  void activateLoadedIdentity();
-}
-
 /** Saves the provisional identity's password-protected Master and a local
  * snapshot of its (unpublished) genesis log, so reloading this browser still
  * shows it as loaded. Without a password, nothing survives a reload -- the
@@ -4843,7 +4866,7 @@ async function persistProvisionalIdentity(entryOrEntries, masterSeed, protection
   } finally {
     wipe(root.privateKey);
   }
-  await saveDidLogSnapshot({
+  await saveSnapshot({
     username,
     did: entry.state.id,
     generation: entry.versionId,
@@ -4857,7 +4880,7 @@ async function loadProvisionalIdentityForMove(entryOrEntries, masterSeed, protec
   updateIdentityOptionsVisibility();
   try {
     await persistProvisionalIdentity(entryOrEntries, masterSeed, protection);
-    storedIdentityRecord = (await listStoredIdentities())[0] ?? null;
+    storedIdentityRecord = await readStoredRecord();
     return true;
   } catch (error) {
     output("#wallet-result", `Loaded in this tab, but could not save it locally: ${errorMessage(error)}`, true);
@@ -4981,7 +5004,7 @@ document.addEventListener("click", event => {
     .then(() => {
       copy.classList.add("copied");
       setTimeout(() => copy.classList.remove("copied"), 1500);
-      output("#loaded-identity-message", "Did:webvh copied to clipboard.");
+      output("#loaded-identity-message", "Did:vh copied to clipboard.");
     })
     .catch(() => {});
 });
@@ -5235,7 +5258,8 @@ function updateCreationDidSuffix() {
   const host = aliasEnabled
     ? (alias.endsWith(".did.md") ? alias : `${alias}.did.md`)
     : element.dataset.defaultSuffix;
-  suffix.textContent = `:${host ?? ""}`;
+  // The DID is the same either way; the alias is the place it will be published at.
+  suffix.textContent = host ? ` · ${host}` : "";
   suffix.classList.toggle("alias-active", aliasEnabled);
 }
 
@@ -5277,7 +5301,7 @@ function prepareMailAliasField() {
 
 function resetCreationAlias() {
   // The address is the local part ("@did.md" is drawn beside it); the landing starts with an alias (two fields:
-  // alias and Passphrase), the did:webvh without one is the other choice.
+  // alias and Passphrase), the DID without one is the other choice.
   query("#creation-alias").value = randomAlias().replace(/\.did\.md$/, "");
   prepareMailAliasField();
   setCreationAliasEnabled(!EMBED);
@@ -5304,10 +5328,10 @@ function checkCreationAlias() {
     const controller = new AbortController();
     creationAliasController = controller;
     try {
-      // The did:webvh Hosting Protocol's own availability rule (SPEC §6): a
+      // The did:vh Hosting Protocol's own availability rule (SPEC §6): a
       // location is free iff its did.jsonl is a 404 -- no did.md-only
       // /v1/availability endpoint (and no API server) needed.
-      const probe = await new WebvhHostingClient().probe(`${username}.${DOMAIN}`, { capabilities: false });
+      const probe = await probeHost(`${username}.${DOMAIN}`, { capabilities: false });
       if (controller.signal.aborted) return;
       if (probe.available === undefined) throw new Error("Availability unknown");
       setAliasStatusIcon(status, probe.available ? "available" : "unavailable", probe.available ? "Alias available" : "Alias unavailable");
@@ -5324,9 +5348,9 @@ query("#creation-alias-toggle").addEventListener("click", () => {
   const enabled = query("#creation-alias-toggle").getAttribute("aria-checked") !== "true";
   setCreationAliasEnabled(enabled);
 });
-// The same switch, in the did:webvh heading: back to the alias.
+// The same switch, in the did:vh heading: back to the alias.
 query("#creation-did-toggle").addEventListener("click", () => setCreationAliasEnabled(true));
-// Under Create: "Create without alias" switches the first field to the did:webvh, and back.
+// Under Create: "Create without alias" switches the first field to the did:vh, and back.
 query("#creation-without-alias").addEventListener("click", () => {
   setCreationAliasEnabled(query("#creation-alias-toggle").getAttribute("aria-checked") !== "true");
 });
@@ -5366,13 +5390,14 @@ function resetCreationLoadUrlStatus() {
 }
 
 function creationLoadLogUrl(value) {
-  if (/^did:webvh:/i.test(value)) {
-    // did:webvh:<SCID>:<host>[:<path>...] -> the host's log (spec: no path =
-    // /.well-known/did.jsonl, otherwise <path>/did.jsonl). A port is %3A-encoded.
-    const [, , , host, ...path] = value.split(":");
-    if (!host) throw new Error("Not a did:webvh identifier");
-    const base = `https://${decodeURIComponent(host)}`;
-    return new URL(path.length ? `${base}/${path.map(decodeURIComponent).join("/")}/did.jsonl` : `${base}/.well-known/did.jsonl`);
+  if (/^did:vh:/i.test(value)) {
+    // did:vh:<SCID>[?src=<location>] names no host: the log is at the location it says, else the host's watcher
+    // (`GET /log?scid=`, which did.md serves under any name).
+    const [didPart, query = ""] = value.split("?");
+    const { scid } = parseVhDid(didPart);
+    const src = new URLSearchParams(query).get("src");
+    if (src) return new URL(`${src.replace(/\/+$/, "")}/.well-known/did.jsonl`);
+    return new URL(`/log?scid=${scid}`, `https://${DOMAIN}`);
   }
   const withScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
   const url = new URL(withScheme);
@@ -5404,7 +5429,7 @@ function checkCreationLoadUrl() {
       const response = await fetch(url, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(`DID document returned ${response.status}`);
       const entries = parseLog(await response.text());
-      if (!entries.at(-1)?.state?.id?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log");
+      if (!entries.at(-1)?.state?.id?.startsWith("did:vh:")) throw new Error("Not a did:vh log");
       status.classList.add("reachable");
       status.setAttribute("aria-label", "DID document reachable");
     } catch (error) {
@@ -5489,7 +5514,7 @@ query("#master-mnemonic").addEventListener("mousedown", (event) => {
 });
 
 // "import" on the Load form: a `<scid>.jwe` plus its mnemonic (the one field
-// below the file row -- it is also the local password, as in loadFromOnlineDid).
+// below the file row -- it is also the local password).
 onClick("#creation-load-submit", "#wallet-result", async () => {
   const file = query("#creation-load-file").files?.[0];
   const sourceText = query("#creation-load-source").value.trim();
@@ -5502,7 +5527,7 @@ onClick("#creation-load-submit", "#wallet-result", async () => {
     const response = await fetchLog(logUrl);
     if (!response.ok) throw new Error(`DID document returned ${response.status}`);
     const did = parseLog(await response.text()).at(-1)?.state?.id;
-    if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+    if (!did?.startsWith("did:vh:")) throw new Error("Not a did:vh log.");
     await unlockIdentity(await storageKeyForDid(did), mnemonic, mnemonic, { did, logUrl: logUrl.toString() });
     return;
   }
@@ -5555,26 +5580,25 @@ query("#publish-create").addEventListener("click", async () => {
         throw new Error("Choose an available Alias before creating this identity.");
       }
       const targetHost = selectedCreationAliasHost();
-      const target = splitHostedTarget(targetHost);
+      const target = { ...splitHostedTarget(targetHost), src: `https://${targetHost}` };
       if (EMBED) {
         // biset's frame: the Alias is mandatory, so the identity is born at
-        // that address (no provisional `ex.alias` DID, no move entry).
-        entries = [await buildGenesis({
-          username: target.username, domain: target.domain, root: currentDraft.material.root, sign: currentDraft.material.sign,
+        // that address (its first document already names it).
+        entries = [await createGenesisEntry({
+          src: `https://${targetHost}`, root: currentDraft.material.root, sign: currentDraft.material.sign,
           nextSpare: currentDraft.material.nextSpare, api: walletAuthorizeUrl(),
         })];
       } else {
-        // dito itself: the Alias is optional, so the identity starts from the
-        // provisional DID (its SCID is already on screen) and is moved.
-        const move = await preparePortableImport({
-          entries: [await provisionalGenesisEntry()],
-          username: target.username,
-          domain: target.domain,
-          masterSeed: currentDraft.material.masterSeed,
+        // dito itself: the Alias is optional, so the identity starts without a
+        // host (its DID is already on screen) and one update entry gives it
+        // the place; the DID does not change.
+        const genesis = await provisionalGenesisEntry();
+        const move = await prepareLocationEntry({
+          entries: [genesis], src: target.src, masterSeed: currentDraft.material.masterSeed, currentSpareIndex: 0,
         });
-        entries = [await provisionalGenesisEntry(), move.entry];
+        entries = [genesis, move.entry];
       }
-      const body = `${entries.map(item => JSON.stringify(item)).join("\n")}\n`;
+      const body = serializeVhLog(entries);
       await publish(`https://${targetHost}/.well-known/did.jsonl`, "PUT", body);
     } else {
       entries = [await provisionalGenesisEntry()];
@@ -5624,7 +5648,7 @@ query("#publish-create").addEventListener("click", async () => {
         if (usernameField) usernameField.value = "";
       } else {
         // A frame never gets the save prompt (the tab goes to the Wallet's save page, ARC.md 9.4), and the
-        // landing makes an identity the same way: alias (or did:webvh) and Create, then "creating .", then
+        // landing makes an identity the same way: alias (or the DID alone) and Create, then "creating .", then
         // the Passphrase to save.
         startEmbedSave(finalEntry.state.id);
         embedNotify({ event: "created", did: finalEntry.state.id });
@@ -5720,9 +5744,10 @@ for (const eventName of ["beforeunload", "pagehide"]) {
 async function provisionalGenesisEntry() {
   if (!draft) throw new Error("Create a Passphrase first.");
   if (!draft.entry) {
-    draft.entry = await buildGenesis({
-      username: "ex", root: draft.material.root, sign: draft.material.sign,
-      nextSpare: draft.material.nextSpare, domain: "alias", api: walletAuthorizeUrl(),
+    // No host yet: the document names no place until the person gives the identity an alias.
+    draft.entry = await createGenesisEntry({
+      root: draft.material.root, sign: draft.material.sign,
+      nextSpare: draft.material.nextSpare, api: walletAuthorizeUrl(),
     });
   }
   return draft.entry;
@@ -5985,7 +6010,7 @@ async function preparePublication(state, kind) {
   if (state.id !== loaded.entries.at(-1).state.id) throw new Error("This UI publishes at the current did.md location; state.id cannot be changed here.");
   if (!rootIsPublished(state, loaded.root.multikey)) throw new Error("The Root Key verification method must remain in the DID Document.");
 
-  const prepared = await preparePreRotatedUpdate({
+  const prepared = await prepareUpdateEntry({
     entries: loaded.entries,
     state,
     masterSeed: loaded.masterSeed,
@@ -6163,7 +6188,7 @@ async function publishPreparedEntry() {
   // write after the PAT is entered still has the entry to publish.
   if (published !== "published") return;
   loaded.entries = nextEntries;
-  loaded.parameters = currentParameters(loaded.entries);
+  loaded.parameters = currentVhParameters(loaded.entries);
   publicApplicationState = loaded.entries.at(-1).state;
   if (loaded.record?.applicationMetadata) {
     const serviceIds = new Set((Array.isArray(publicApplicationState.service) ? publicApplicationState.service : []).map(service => service.id));
@@ -6198,7 +6223,7 @@ async function publishPreparedEntry() {
 async function publishEntriesToCurrentHost(entries, message, mode = "append", resumeAfterCredential) {
   const did = entries.at(-1)?.state?.id;
   if (!did) throw new Error("The DID log has no current DID Document.");
-  const host = hostForDid(did);
+  const host = hostForDid(did, sourceOfEntries(entries) ?? undefined);
   try {
     await host.publish({
       entries,
@@ -6330,7 +6355,7 @@ async function landingLogin() {
     const logResponse = await fetchLog(logUrl);
     if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
     const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
-    if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+    if (!did?.startsWith("did:vh:")) throw new Error("Not a did:vh log.");
     await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
   } catch (error) {
     output("#create-result", errorMessage(error), true);
@@ -6394,7 +6419,7 @@ if (EMBED) {
     }
     embedNotify({ event: "existing", did: storedIdentityRecord.did });
   });
-  // biset's frame says just "Create" (the landing keeps "Create your did:webvh").
+  // biset's frame says just "Create" (the landing keeps "Create your did:vh").
   query("#publish-create").textContent = "Create";
   setupMailCreateForm();
   embedLoginStart = () => {
@@ -6485,7 +6510,7 @@ async function checkEmbedAlias(currentHost, alias) {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(alias)) throw new Error("Use lowercase letters, digits and hyphens.");
   const target = `${alias}.${DOMAIN}`;
   if (target === currentHost) throw new Error("That is already your alias.");
-  if ((await new WebvhHostingClient().probe(target)).available !== true) throw new Error("That alias is taken.");
+  if ((await probeHost(target)).available !== true) throw new Error("That alias is taken.");
 }
 
 async function embedMoveAlias(currentHost, alias, passphrase) {
@@ -6495,7 +6520,7 @@ async function embedMoveAlias(currentHost, alias, passphrase) {
   const logResponse = await fetchLog(logUrl);
   if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
   const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
-  if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+  if (!did?.startsWith("did:vh:")) throw new Error("Not a did:vh log.");
   await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
   await connectHostedData(target, { keepPrevious: true });
   const movedDid = loaded.entries.at(-1).state.id;
@@ -6513,7 +6538,7 @@ async function embedApprovalFor(request, host) {
   const search = validEmbedLogin(request)?.replace(/^\/authorize/, "");
   if (!search) throw new Error("The sign-in request is invalid.");
   const parameters = await oauthAuthorizationParameters(search, { embedded: true });
-  if (!parameters || !(parameters.clientId.startsWith("did:webvh:") || parameters.clientId.startsWith("redirect_uri:"))) throw new Error("The sign-in request is invalid.");
+  if (!parameters || !(parameters.clientId.startsWith("did:vh:") || parameters.clientId.startsWith("redirect_uri:"))) throw new Error("The sign-in request is invalid.");
   if (!embedSignInTargetsPage(parameters.redirectUri, embedParentOrigin)) throw new Error("This sign-in is not for the page that asked for it.");
   walletAuthorization = { ...parameters, clientName: parameters.clientDisplayName ?? parameters.clientDisplayHost ?? parameters.clientId, outcomeReporting: false };
   const edit = didDocumentEditDetail(parameters.authorizationDetails, "");
@@ -6524,7 +6549,7 @@ async function embedApprovalFor(request, host) {
       const logResponse = await fetchLog(logUrl);
       if (!logResponse.ok) throw new Error(`The identity could not be read (${logResponse.status}).`);
       const did = parseLog(await logResponse.text()).at(-1)?.state?.id;
-      if (!did?.startsWith("did:webvh:")) throw new Error("Not a did:webvh log.");
+      if (!did?.startsWith("did:vh:")) throw new Error("Not a did:vh log.");
       await unlockIdentity(await storageKeyForDid(did), passphrase, passphrase, { did, logUrl });
       let plan = null;
       embedLoginDeliver = prepared => { plan = prepared; };
@@ -6657,7 +6682,7 @@ function askEmbedAliasName(currentHost, failure, initial) {
     setAliasStatusIcon(status, "checking", "Checking alias availability");
     timer = setTimeout(async () => {
       try {
-        const free = `${clean}.${DOMAIN}` !== currentHost && (await new WebvhHostingClient().probe(`${clean}.${DOMAIN}`, { capabilities: false })).available === true;
+        const free = `${clean}.${DOMAIN}` !== currentHost && (await probeHost(`${clean}.${DOMAIN}`, { capabilities: false })).available === true;
         if (mine === token) setAliasStatusIcon(status, free ? "available" : "unavailable", free ? "Alias available" : "Alias unavailable");
       } catch { if (mine === token) setAliasStatusIcon(status, "checking", "Alias availability unknown"); }
     }, 350);
@@ -6923,18 +6948,18 @@ function startEmbedSave(did) {
 
 // The relying party's signed sign-in request, handed over by the embedding page as the query
 // string of /authorize, is accepted only in the shape a JAR relying party sends (client_id,
-// request, response_type) for a did:webvh client; it is only ever opened on this origin.
+// request, response_type) for a did:vh client; it is only ever opened on this origin.
 function validEmbedLogin(value) {
   try {
     if (typeof value !== "string" || !value) return null;
     const url = new URL(`/authorize${value.startsWith("?") ? value : `?${value}`}`, location.origin);
     const keys = [...url.searchParams.keys()];
     const clientId = url.searchParams.get("client_id") ?? "";
-    // A did:webvh relying party sends a signed request (client_id, request, response_type) or its
+    // A did:vh relying party sends a signed request (client_id, request, response_type) or its
     // parameters plainly (oauthAuthorizationParameters checks them strictly, and the redirect against
     // the page that asked).
     const shaped = clientId.startsWith("redirect_uri:") ? new Set(keys).size === keys.length
-      : clientId.startsWith("did:webvh:") && new Set(keys).size === keys.length
+      : clientId.startsWith("did:vh:") && new Set(keys).size === keys.length
       && (keys.includes("request") ? keys.length === 3 && ["client_id", "request", "response_type"].every(key => keys.includes(key)) : true);
     return url.origin === location.origin && url.pathname === "/authorize" && shaped ? `${url.pathname}${url.search}` : null;
   } catch { return null; }

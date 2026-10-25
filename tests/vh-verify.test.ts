@@ -1,10 +1,10 @@
 // Verifying a did:vh signer (packages/did-verify): the log comes from the verifier's watchers, not from the token.
 import { afterEach, expect, test } from "vitest";
-import { InMemoryVersionMemory, StaleLogError } from "../packages/webvh/src/index.ts";
+import { InMemoryVersionMemory, StaleLogError } from "../packages/vh/src/index.ts";
 import { deactivateVhLog } from "../packages/vh/src/index.ts";
 import { clearDidDocumentCache, resolveDidVhDocument, stableSubject, verifyIdTokenSignature, verifyViaDidVh } from "../packages/did-verify/index.ts";
-import { createSelfIssuedIdToken } from "../packages/wallet/src/did-webvh.ts";
-import { VhIdentity } from "../packages/wallet/src/vh-identity.ts";
+import { createSelfIssuedIdToken } from "../packages/wallet/src/keys.ts";
+import { Identity } from "../packages/wallet/src/identity.ts";
 import { DitoClient } from "../server/oauth/src/dito-client.ts";
 import { freshHost, resetHost, viaHost } from "./helpers/vh-host.ts";
 
@@ -15,7 +15,7 @@ const claims = (did: string) => ({ iss: did, sub: did, aud: "https://rp.example"
 /** A hosted did:vh identity, its Root key (what signs an id_token), and a verifier's sources. */
 async function hosted(name = "alice") {
   freshHost();
-  const { identity } = await VhIdentity.create({ fetch: viaHost });
+  const { identity } = await Identity.create({ fetch: viaHost });
   await identity.connect({ username: name });
   const root = (identity as unknown as { _root: { privateKey: Uint8Array } })._root;
   return { identity, root, sources: () => ({ watchers: ["https://did.md"], fetch: viaHost, memory: new InMemoryVersionMemory() }) };
@@ -38,7 +38,7 @@ test("a did:vh signer cannot be verified without watchers: the token does not ge
 
 test("a token signed by another key is refused, and so is a kid that is not an authentication method", async () => {
   const { identity, sources } = await hosted();
-  const stranger = (await VhIdentity.create()).identity as unknown as { _root: { privateKey: Uint8Array } };
+  const stranger = (await Identity.create()).identity as unknown as { _root: { privateKey: Uint8Array } };
   const forged = createSelfIssuedIdToken(claims(identity.did), { privateKey: stranger._root.privateKey, did: identity.did });
   await expect(verifyIdTokenSignature(forged, "did.md", sources())).rejects.toThrow(/signature is invalid/);
   const { root } = await hosted("bob");
@@ -78,17 +78,16 @@ test("a log older than one already accepted is refused, so a watcher cannot roll
 test("a deactivated did:vh DID no longer signs anyone in", async () => {
   const { identity, root, sources } = await hosted("carol");
   const token = createSelfIssuedIdToken(claims(identity.did), { privateKey: root.privateKey, did: identity.did });
-  const spare = await (await import("../packages/wallet/src/did-webvh.ts")).spareFromMasterSeed((identity as any).masterSeed, (identity as any)._spareIndex);
+  const spare = await (await import("../packages/wallet/src/keys.ts")).spareFromMasterSeed((identity as any).masterSeed, (identity as any)._spareIndex);
   const done = await deactivateVhLog({ log: [...identity.entries], signer: spare, now: Date.now() + 5000 });
   const posted = await viaHost("https://carol.did.md/.well-known/did.jsonl", { method: "POST", body: `${JSON.stringify(done.log.at(-1))}\n` });
   expect(posted.status).toBe(204);
   await expect(verifyIdTokenSignature(token, "did.md", sources())).rejects.toThrow(/deactivated/);
 });
 
-test("stableSubject: a did:vh DID and a JWK thumbprint are already stable; a did:webvh DID loses its location", () => {
+test("stableSubject: a did:vh DID and a JWK thumbprint are already stable", () => {
   const scid = "Q".repeat(46);
   expect(stableSubject(`did:vh:${scid}`)).toBe(`did:vh:${scid}`);
-  expect(stableSubject(`did:webvh:${scid}:alice.did.md`)).toBe(`did:webvh:${scid}`);
   expect(stableSubject("5Kz1u3Vq0fMw9y2m4a7mQ0aVJ3d1x8Z6bq0wq2c3XyA")).toBe("5Kz1u3Vq0fMw9y2m4a7mQ0aVJ3d1x8Z6bq0wq2c3XyA");
   expect(stableSubject(`did:vh:${scid}#k`)).toBe(`did:vh:${scid}#k`);
 });

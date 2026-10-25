@@ -2,7 +2,8 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLog, serializeLog, keyFromPrivateKey, Ed25519Signer, nextKeyHash } from "../packages/webvh/src/index.ts";
+import { serializeVhLog } from "../packages/vh/src/index.ts";
+import { vhLogAt } from "./helpers/vh-log.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "./spawn.ts";
 import { Gate, HourlyCount, Refusal } from "../server/host/limits.ts";
@@ -40,14 +41,9 @@ const viaHost = ((input: RequestInfo | URL, init?: RequestInit) => {
   const headers = new Headers(init?.headers); headers.set("host", url.host);
   return fetch(`${base}${url.pathname}${url.search}`, { ...init, headers });
 }) as typeof fetch;
-const key = keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
-const next = keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));
 async function publish(name: string) {
-  const created = await createLog({
-    domain: `${name}.did.md`, signer: new Ed25519Signer(key), updateKeys: [key.multikey], nextKeyHashes: [await nextKeyHash(next.multikey)],
-    verificationMethods: [{ id: "#k", type: "Multikey", publicKeyMultibase: key.multikey }], authentication: ["#k"],
-  });
-  return viaHost(`https://${name}.did.md/.well-known/did.jsonl`, { method: "PUT", headers: { "content-type": "text/jsonl" }, body: serializeLog(created.log) });
+  const created = await vhLogAt(`${name}.did.md`);
+  return viaHost(`https://${name}.did.md/.well-known/did.jsonl`, { method: "PUT", headers: { "content-type": "text/jsonl" }, body: serializeVhLog(created.log) });
 }
 const unique = (prefix: string) => `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
 const admin = (path: string, init: RequestInit = {}, token: string | null = "operator-token") => fetch(`${base}${path}`, { ...init, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json", ...(init.headers as Record<string, string>) } });

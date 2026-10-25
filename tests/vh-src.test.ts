@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { keyFromPrivateKey } from "../packages/webvh/src/index.ts";
+import { keyFromPrivateKey } from "../packages/vh/src/index.ts";
 import {
   VhResolutionError, checkDidWebShadow, createVhLog, deriveDidWebDocument, didWebFor, fetchVhLog, logUrlOf, parseWebLocation, resolveVhLog,
   serializeVhLog,
@@ -147,5 +147,5 @@ test("a did:web document is accepted only when it is exactly the derivation of t
 });
 
 test("deriving refuses a document that is not a did:vh document", () => {
-  expect(() => deriveDidWebDocument({ id: "did:webvh:Qm:example.com" }, "did:web:example.com")).toThrow(/Not a did:vh/);
+  expect(() => deriveDidWebDocument({ id: "did:web:example.com" }, "did:web:example.com")).toThrow(/Not a did:vh/);
 });

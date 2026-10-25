@@ -11,7 +11,7 @@
     "start:bridge": "node server/oauth/src/server.ts",
     "test": "vitest run",
     "dito": "node packages/cli/dito.ts",
-    "conformance": "node packages/webvh/conformance-cli.ts",
+    "conformance": "node packages/vh/conformance-cli.ts",
     "start:identity": "node server/host/http-server.ts",
     "build:identity": "esbuild server/host/http-server.ts --bundle --platform=node --format=esm --banner:js=\"import{createRequire as __cr}from\\\"node:module\\\";const require=__cr(import.meta.url);\" --outfile=dist/did-md-server.mjs",
     "astro:dev": "astro dev",
@@ -27,7 +27,6 @@
     "@octokit/core": "^7.0.8",
     "@scure/bip39": "^2.4.0",
     "astro": "^7.3.8",
-    "didwebvh-ts": "^2.8.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
@@ -39,7 +38,7 @@
     "vitest": "^5.0.3"
   },
   "license": "AGPL-3.0-only",
-  "description": "A generic did:webvh wallet, a did:webvh hosting protocol, and a reference host.",
+  "description": "A generic did:vh wallet, a did:vh hosting protocol, and a host.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yno9/dito.git"

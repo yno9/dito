@@ -2,7 +2,7 @@
  * The did:vh log file and its hashes (VH-Log: The VH-Log File, SCID and Entry
  * Hash Generation and Verification). Pure functions; no signatures here.
  */
-import type { Proof } from "../../webvh/src/proof.ts";
+import type { Proof } from "./proof.ts";
 import { jcsHash } from "./hash.ts";
 import { SCID_PLACEHOLDER } from "./did.ts";
 

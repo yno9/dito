@@ -28,7 +28,7 @@ const ditoAuthEndpoint =
   process.env.DISPO_AUTHORIZATION_ENDPOINT ??
   "https://app.did.md/authorize";
 const walletIdentityDomain = (process.env.WALLET_IDENTITY_DOMAIN ?? "did.md").toLowerCase();
-// PLAN6: when set, oidc-bridge authenticates to dito as a did:webvh RP
+// PLAN6: when set, oidc-bridge authenticates to dito as a did:vh RP
 // (JAR) instead of a DCR-registered client. Unset by default -- existing
 // deployments keep working on the DCR path until this is explicitly
 // provisioned (see scripts/create-rp-did.ts in the did.md repo).
@@ -53,7 +53,7 @@ const dito = new DitoClient(ditoIssuer, `${issuer}/callback`, `${dataDir}/dito-r
 const APP_ORIGIN = "https://app.did.md";
 function directCallbackCors(): HeadersInit { return { "access-control-allow-origin": APP_ORIGIN, "access-control-allow-methods": "POST", "access-control-allow-headers": "content-type", vary: "origin" }; }
 // PLAN6: oidc-bridge.did.md is a single reverse-proxied Node process (unlike
-// t.biset.md's static file_server), so its own did:webvh log -- the public
+// t.biset.md's static file_server), so its own did:vh log -- the public
 // counterpart of rpDidKeyFile above, letting did.md's server resolve this
 // RP's identity -- has to be served by a route here rather than dropped in
 // as a static file. Unset (like rpDidKeyFile) until this RP DID is actually
@@ -186,7 +186,7 @@ async function handleRoute(request: Request): Promise<Response> {
     return Response.json(keys.jwks(), { headers: { "cache-control": "public, max-age=300" } });
   }
   if (url.pathname === "/.well-known/did.jsonl") {
-    // A did:webvh log is a public document meant to be resolved from any
+    // A did:vh log is a public document meant to be resolved from any
     // origin (see did.md's own server.ts publicDocumentCors) -- without
     // this, a browser fetch() of this URL from a different origin (e.g.
     // app.did.md verifying this RP's JAR signature) fails outright with a

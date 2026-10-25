@@ -1,6 +1,6 @@
 # dito
 
-**A generic `did:webvh` wallet, an open hosting protocol for `did:webvh` logs, and a reference host.**
+**A generic `did:vh` wallet, an open hosting protocol for `did:vh` logs, and a host.**
 
 Every identity is yours to dispose of: to use, or to walk away from. You keep the keys; hosts only
 publish a signed log, and any host can be swapped for another without asking anyone.
@@ -8,9 +8,9 @@ publish a signed log, and any host can be swapped for another without asking any
 | | what it is |
 |---|---|
 | **dito** (`client/`, `public/`) | The wallet: one self-contained `index.html` you can also open from disk. One 24-word passphrase, deterministic keys, permanent pre-rotation. Private keys never leave the browser. |
-| **webvh-hosting/1** ([SPEC-webvh-hosting.md](SPEC-webvh-hosting.md)) | A small HTTP convention for *writing* a `did:webvh` log to a host (`did:webvh` itself only specifies reading). No accounts, no tokens: the log's own validity is the authorization. |
-| **hosts** (`server/host/`, `packages/webvh/src/reference-host.ts`) | did.md's host, and an independent ~150-line reference host. Both pass the same conformance suite. |
-| **libraries and CLI** (`packages/`) | `Identity` (create, open, update, rotate, move, publish, unpublish) without a DOM, and `dito`, a CLI for people, scripts and agents. |
+| **vh-hosting/1** ([SPEC-vh-hosting.md](SPEC-vh-hosting.md)) | A small HTTP convention for *writing* a `did:vh` log to a host (`did:vh` itself only specifies reading). No accounts, no tokens: the log's own validity is the authorization. A `did:web` document is published beside every log, derived from it, for clients that only speak `did:web`. |
+| **hosts** (`server/host/`) | did.md's host (`identity-host.ts`), and `byo-host.ts`, an independent one-domain file host. Both pass the shared conformance core. |
+| **libraries and CLI** (`packages/`) | `Identity` (create, open, update, rotate, give it a place, publish, unpublish) without a DOM, and `dito`, a CLI for people, scripts and agents. |
 
 The wallet speaks only the protocol and the host only has to implement it, so either side can be a
 third party's.
@@ -21,7 +21,7 @@ Requires Node.js >= 26 and [pnpm](https://pnpm.io).
 
 ```sh
 pnpm install
-pnpm test                           # vitest, ~165 tests
+pnpm test                           # vitest
 pnpm build:home                     # -> dist/index.html (the whole wallet, one file)
 node scripts/dev-static-server.ts   # serve dist/ on http://127.0.0.1:8788
 pnpm astro:dev                      # the Astro + React site (web/), separate from the wallet build
@@ -34,11 +34,10 @@ manager; there is no other runtime.
 ### The CLI
 
 ```sh
-pnpm dito new                                   # creates ./did.jsonl, prints the mnemonic once
-pnpm dito new --method vh                        # a did:vh identity (no host in the DID); `connect` then gives it a place
-pnpm dito show                                  # DID, host, document (no secret needed)
-pnpm dito verify <did:webvh:…>                  # fetch and validate a published log
-pnpm dito forget <did:webvh:…>                  # forget the newest version verify/fetch remember (see `dito --help`)
+pnpm dito new                                   # creates ./did.jsonl (a did:vh with no host yet), prints the mnemonic once
+pnpm dito show                                  # DID, locations, document (no secret needed)
+pnpm dito verify <did:vh:…> --watcher https://did.md   # fetch and validate a published log (a did:vh names no host)
+pnpm dito forget <did:vh:…>                     # forget the newest version verify/fetch remember (see `dito --help`)
 DITO_MNEMONIC="…" pnpm dito connect alice       # host it at https://alice.did.md (or --domain)
 GITHUB_TOKEN=… DITO_MNEMONIC="…" pnpm dito github   # host it on <login>.github.io
 DITO_MNEMONIC="…" pnpm dito rotate
@@ -53,12 +52,12 @@ DITO_MNEMONIC="…" pnpm dito service add '#files' relativeRef https://alice.exa
 ```ts
 import { Identity } from "./packages/wallet/src/identity.ts";
 
-const { identity, mnemonic } = await Identity.create();   // provisional DID, no host yet
-await identity.connect({ username: "alice", domain: "did.md" });
+const { identity, mnemonic } = await Identity.create();   // a did:vh DID, no host yet
+await identity.connect({ username: "alice", domain: "did.md" });   // one update entry; the DID does not change
 await identity.rotate();
 
 // anywhere else: the mnemonic plus the public log are the whole identity
-const same = await Identity.fromDid({ did: identity.did, mnemonic });
+const same = await Identity.fromSource({ mnemonic, src: "https://alice.did.md" });
 ```
 
 Local state only advances after the host accepted the write.
@@ -79,7 +78,7 @@ passkey can optionally seal the phrase locally (a convenience copy, not a replac
 
 ## Hosting
 
-Any conforming host works; the wallet derives every URL from the DID.
+Any conforming host works; the wallet derives every URL from the location the identity's own document names.
 
 ```sh
 pnpm start:identity                                     # a did.md-style host on 127.0.0.1:8787
@@ -91,18 +90,18 @@ pnpm conformance --domain did.md --base http://127.0.0.1:8787   # a local host s
 - Public reads are ~all the traffic and cacheable, so the host sends
   `Cache-Control: public, max-age=0, s-maxage=30` on them (never on `404`s or writes); put a CDN in
   front and the origin only sees cache misses and writes.
-- To write a host of your own, start from `createReferenceHost()` in `packages/webvh/src/reference-host.ts`:
-  a complete `(Request) => Response` handler built only on `didwebvh-ts`.
+- To write a host of your own, start from `createByoHost()` in `server/host/byo-host.ts`:
+  a complete `(Request) => Response` handler for one domain, built only on `packages/vh`.
 
 ## Repository
 
 ```text
 client/, public/, build.ts   the wallet (single-file build, esbuild)
 web/, astro.config.mjs       Astro + React site (own srcDir/outDir; does not touch the wallet build)
-packages/webvh/              generic did:webvh layer over didwebvh-ts, hosting client, conformance, reference host
-packages/wallet/             the wallet profile: Master-seed keys, host adapters, Identity, backups
+packages/vh/                 did:vh: log verification and creation, signing keys and proofs, the hosting client, conformance, the did:web shadow
+packages/wallet/             the wallet profile: Master-seed keys, Identity, host adapters, GitHub Pages, backups
 packages/cli/                `dito`
-packages/did-verify/         JWT / id_token verification (embedded JWK or a did:webvh kid)
+packages/did-verify/         JWT / id_token verification (embedded JWK or a did:vh kid, from the verifier's watchers)
 server/host/                 the did.md host (identity-host.ts, http-server.ts) and byo-host.ts (one-domain file host)
 server/serve.ts              fetch-style HTTP server on node:http; host-fetch.ts: fetch that honors a Host header
 server/oauth/                OAuth 2.0 / OID4VP convenience layer and an OIDC bridge
@@ -119,10 +118,11 @@ to the VPS, where systemd units start them with `/usr/bin/node`.
 
 ## Notes
 
-- **`didwebvh-ts`** does all the `did:webvh` log work (create, update, portability, validation). We keep
-  a guard for one gap: version 2.8.0 accepts an entry whose `proof` is an empty array, so `resolveLog()`
-  and the host reject that themselves.
-- **Cryptography.** The v1.0 log proof is Ed25519 with `eddsa-jcs-2022`. Swapping in a post-quantum
+- **`did:vh`** (a pre-draft by Stephen Curran, built on VH-Log) is implemented in `packages/vh`, pinned by shared
+  test vectors (`packages/vh/vectors/`) that an independent verifier in another repository is checked against. A
+  `did:vh:<SCID>` names no host; the identity's own signed document says where its log is published (`alsoKnownAs`),
+  so the DID never changes when the log moves. Witnesses are not supported: a log that configures any is refused.
+- **Cryptography.** The log proof is Ed25519 with `eddsa-jcs-2022`. Swapping in a post-quantum
   signature would make logs non-conformant; PQ belongs in separately versioned DID Document use cases
   (for example an ML-KEM key agreement key) or in a future method version.
 - **OpenID Connect.** The optional `server/oauth/` layer turns a wallet's self-issued, DID-signed

@@ -18,12 +18,13 @@
  * ARC.md §3/§3.4 for the full reasoning this split makes structural.
  */
 import { join } from "node:path";
-import { parseWebvhDid, resolveDidWebvhDocument } from "../../packages/did-verify/index.ts";
+import { resolveDidVhDocument } from "../../packages/did-verify/index.ts";
+import { parseVhDid } from "../../packages/vh/src/index.ts";
 import {
   AUTH_PROOF_CLOCK_SKEW_MS, CORS_BASE, DATA_DIR, Invalid,
   asObj, atomicWrite, authenticationKeyFromState, b64url, b64urlBytes,
   exclusive, hostedAuthenticationKey, isLoopbackDevelopmentOrigin, isLocalFileRedirect,
-  isObj, isoAt, onlyKeys, opaqueId, own, parseDid, parseJsonl, read, requestBody,
+  isObj, isoAt, onlyKeys, opaqueId, own, parseJsonl, read, requestBody,
   sha256, sha256B64url, strictObjectKeys, validateLog, validTime, verifyAuthenticationProof,
   verifySelfIssuedIdToken,
   type AuthenticationAuthority, type Json, type Obj,
@@ -31,23 +32,21 @@ import {
 
 function randomB64url(bytes = 32) { return b64url(crypto.getRandomValues(new Uint8Array(bytes))); }
 
-// ── PLAN6: SSRF guard for did:webvh-authenticated (JAR) clients ────────────
-// A did:webvh-authenticated relying party's client_id names an arbitrary
-// domain, resolved by an unauthenticated caller of a public endpoint
-// (oauthAuthorizeComplete) -- without a bound, that is an SSRF primitive
-// letting anyone make this server fetch any HTTPS host it can reach
-// (internal services, cloud metadata endpoints, ...). Fail closed:
-// DID-scheme clients are accepted only from domains an operator explicitly
-// lists here (comma-separated suffixes, e.g. "biset.md,oidc-bridge.did.md").
-// Empty (the default) disables the DID-scheme path entirely -- every
-// deployment that has not provisioned an RP DID (see
-// scripts/create-rp-did.ts) keeps the DCR-only behavior it always had.
-const OAUTH_DID_RP_DOMAINS = (process.env.OAUTH_DID_RP_DOMAINS ?? "").toLowerCase().split(",").map(value => value.trim()).filter(Boolean);
-function oauthDidClientDomainAllowed(did: string): boolean {
-  let domain: string;
-  try { domain = parseWebvhDid(did).domain; } catch { return false; }
-  return OAUTH_DID_RP_DOMAINS.some(suffix => domain === suffix || domain.endsWith(`.${suffix}`));
+// ── PLAN6: SSRF guard for did:vh-authenticated (JAR) clients ───────────────
+// A did:vh-authenticated relying party's client_id names a DID, resolved by an
+// unauthenticated caller of a public endpoint (oauthAuthorizeComplete). A
+// did:vh DID names no host, so the log is asked for at the watchers an
+// operator explicitly lists here (comma-separated origins serving
+// `GET /log?scid=`, e.g. "https://did.md"): nothing in the request chooses
+// where this server fetches from, so there is no SSRF primitive. Empty (the
+// default) disables the DID-scheme path entirely -- every deployment that has
+// not provisioned an RP DID (see scripts/create-rp-did.ts) keeps the
+// DCR-only behavior it always had.
+const OAUTH_DID_RP_WATCHERS = (process.env.OAUTH_DID_RP_WATCHERS ?? "").split(",").map(value => value.trim()).filter(Boolean);
+function oauthDidClientAllowed(did: string): boolean {
+  return OAUTH_DID_RP_WATCHERS.length > 0 && isVhDid(did);
 }
+function isVhDid(did: string): boolean { try { parseVhDid(did); return true; } catch { return false; } }
 
 /** Dynamic client registration is intentionally available to arbitrary HTTPS
  * browser origins, loopback HTTP for local development, and the packaged
@@ -135,7 +134,7 @@ type OAuthCode = {
   // a non-DPoP client (a conventional OIDC relying party like Forgejo) has none.
   capabilityId: string; deviceJkt?: string; scope: string[]; codeChallenge: string; expiresAt: string;
   // The Wallet's own self-issued id_token (EdDSA, signed with the DID's own
-  // #pass-1 key -- see createSelfIssuedIdToken in client/did-webvh.ts), present
+  // #pass-1 key -- see createSelfIssuedIdToken in packages/wallet/src/keys.ts), present
   // only when "openid" was requested. Passed through verbatim at the token
   // endpoint; this server never signs an id_token itself.
   idToken?: string;
@@ -227,14 +226,14 @@ function cleanupOauthTokens(now = Date.now()) {
   for (const [key, token] of oauthTokens) if (Date.parse(token.expiresAt) <= now) oauthTokens.delete(key);
 }
 
-// PLAN6: a relying party may authenticate as a did:webvh DID (JAR,
+// PLAN6: a relying party may authenticate as a did:vh DID (JAR,
 // client_id_scheme=did) instead of a DCR-issued client_XXXX id. Both shapes
 // flow through every call site below unchanged; DID-scheme clients are
 // never looked up in state.clients (no DCR registration exists for them --
 // see oauthAuthorizeComplete's own branch, which resolves the DID document
 // directly instead).
 function oauthClientId(value: Json | undefined, label = "client_id") {
-  if (typeof value !== "string" || value.length > 256 || !(/^client_[A-Za-z0-9_-]{32,128}$/.test(value) || /^did:webvh:[A-Za-z0-9]{1,64}:[A-Za-z0-9.%-]{1,253}(?::[A-Za-z0-9._~%-]{1,128}){0,8}$/.test(value))) throw new Invalid(`${label} is invalid`);
+  if (typeof value !== "string" || value.length > 256 || !(/^client_[A-Za-z0-9_-]{32,128}$/.test(value) || /^did:vh:[1-9A-HJ-NP-Za-km-z]{46}$/.test(value))) throw new Invalid(`${label} is invalid`);
   return value;
 }
 function oauthCode(value: Json | undefined) {
@@ -347,17 +346,17 @@ async function verifiedOauthCapability(value: Json | undefined, state: OAuthStat
   // DPoP key at all -- its capability credential simply omits the field,
   // rather than the shape diverging by client kind.
   strictObjectKeys(subject, [...ordinaryCapabilityKeys, ...(own(subject, "deviceJkt") ? ["deviceJkt"] : []), ...(own(subject, "authorizationDetails") ? ["authorizationDetails"] : [])], "capability credential subject");
-  // PLAN6: a did:webvh-authenticated client has no DCR registration at all
+  // PLAN6: a did:vh-authenticated client has no DCR registration at all
   // (§0.3) -- its legitimacy was already established by DID resolution
   // (oauthAuthorizeComplete's own redirect_uri check, gated by
-  // OAUTH_DID_RP_DOMAINS), not by a state.clients lookup, so that lookup
+  // OAUTH_DID_RP_WATCHERS), not by a state.clients lookup, so that lookup
   // (and the registered-scope allowlist it would otherwise supply) does
   // not apply here. Its requested scope is instead just shape-validated
   // (oauthScope, the same check a DCR client's own /authorize request
   // parameter gets) -- there is no separate registration-time promise to
   // cross-check it against.
   const clientId = oauthClientId(subject.audience, "capability credential audience");
-  const isDidClient = clientId.startsWith("did:webvh:");
+  const isDidClient = clientId.startsWith("did:vh:");
   const client = isDidClient ? undefined : state.clients[clientId];
   if (!isDidClient && !client) throw new Invalid("device capability client is not registered");
   const deviceJkt = own(subject, "deviceJkt")
@@ -371,7 +370,7 @@ async function verifiedOauthCapability(value: Json | undefined, state: OAuthStat
   oauthAuthorizationDetails(subject.authorizationDetails);
   // Data Integrity Proof convention: the proof is computed over the
   // credential WITHOUT its own `proof` property (see
-  // client/did-webvh.ts's createDataIntegrityProof) -- strip it back off
+  // packages/vh's createDataIntegrityProof) -- strip it back off
   // before hashing, the same shape the Wallet actually signed.
   const { proof: vcProof, ...unsignedVc } = vc;
   await verifyAuthenticationProof(unsignedVc, vcProof, issuer, OAUTH_CAPABILITY_MAX_MS, suppliedAuthority);
@@ -401,7 +400,7 @@ function oauthMetadata(request: Request) {
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     subject_types_supported: ["public"],
-    subject_syntax_types_supported: ["did:webvh"],
+    subject_syntax_types_supported: ["did:vh"],
     id_token_signing_alg_values_supported: ["EdDSA"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
@@ -469,15 +468,9 @@ async function suppliedAuthorityFromDidLog(didLog: string, expectedDid: string) 
   if (new TextEncoder().encode(didLog).length > 32_768) throw new Invalid("provisional DID log is invalid");
   const entries = parseJsonl(didLog);
   if (entries.length !== 1) throw new Invalid("the supplied DID log must contain only its genesis entry");
-  const checked = await validateLog(entries, [], "", false);
-  // The genesis entry's OWN state.id is whatever placeholder/original
-  // domain it was created under -- not necessarily this identity's current
-  // one (a host move/connect changes the domain segment but keeps the
-  // SCID). #pass-1 is recorded as a relative reference specifically so it
-  // resolves the same regardless, so the authority is built against
-  // expectedDid (the capability's own issuer), only cross-checked here by
-  // SCID, not by the genesis's own literal DID string.
-  if (parseDid(checked.latest.state.id as string).scid !== parseDid(expectedDid).scid || checked.parameters.deactivated || checked.parameters.portable !== true) throw new Invalid("DID genesis does not authorize this SCID");
+  const checked = await validateLog(entries, "", false);
+  // The genesis entry's state.id is the DID itself (it names no location), so it must be the capability's own issuer.
+  if (checked.did !== expectedDid || checked.parameters.deactivated) throw new Invalid("DID genesis does not authorize this DID");
   return authenticationKeyFromState(expectedDid, checked.latest.state);
 }
 async function oauthAuthorizeComplete(request: Request) {
@@ -503,10 +496,10 @@ async function oauthAuthorizeComplete(request: Request) {
   // trust it, so the same check is repeated here).
   // Fail closed *before* any resolution is attempted: an unauthenticated
   // caller must not be able to make this server fetch an arbitrary domain
-  // of their choosing (SSRF -- see OAUTH_DID_RP_DOMAINS's own comment).
-  if (clientId.startsWith("did:webvh:") && !oauthDidClientDomainAllowed(clientId)) throw new Invalid("client_id's domain is not an accepted relying party domain");
-  const didRedirectCheck = clientId.startsWith("did:webvh:")
-    ? resolveDidWebvhDocument(clientId).then(document => {
+  // of their choosing (SSRF -- see OAUTH_DID_RP_WATCHERS's own comment).
+  if (clientId.startsWith("did:vh:") && !oauthDidClientAllowed(clientId)) throw new Invalid("did:vh relying parties are not accepted by this server");
+  const didRedirectCheck = clientId.startsWith("did:vh:")
+    ? resolveDidVhDocument(clientId, { watchers: OAUTH_DID_RP_WATCHERS }).then(document => {
         const service = Array.isArray(document.service) ? document.service : [];
         if (!service.some(entry => isObj(entry) && entry.serviceEndpoint === redirectUri)) throw new Invalid("authorization redirect URI is not published by the relying party's own DID document");
       })
@@ -610,7 +603,7 @@ async function oauthUserinfo(request: Request) {
   return exclusive("oauth", async () => {
     cleanupOauthTokens(); const token = oauthTokens.get(await sha256B64url(match[1]!));
     if (!token || token.deviceJkt) throw new Invalid("access token is invalid or expired");
-    const username = parseDid(token.did).scid;
+    const username = parseVhDid(token.did).scid;
     return oauthJson(request, {
       sub: token.did,
       ...(token.scope.includes("profile") ? { did: token.did, preferred_username: username, nickname: username, name: username } : {}),

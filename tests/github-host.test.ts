@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "vitest";
-import { buildGenesis, createIdentityMaterial, preparePortableImport } from "../packages/wallet/src/did-webvh.ts";
+import { createIdentityMaterial } from "../packages/wallet/src/keys.ts";
+import { createGenesisEntry, prepareLocationEntry } from "../packages/wallet/src/vh-ops.ts";
 import {
   buildDidJson,
   buildPublishFiles,
@@ -9,7 +10,6 @@ import {
   fromBase64Utf8,
   githubDidLocation,
   githubErrorMessage,
-  githubLogUrl,
   normalizeLogin,
   publishToGitHub,
   removeGitHubDidFiles,
@@ -19,8 +19,9 @@ import {
   waitForPagesBuild,
   waitForPublish,
 } from "../packages/wallet/src/github-host.ts";
-import { mirrorDocument, parseJsonl, serialise, validateLogAt } from "../packages/wallet/src/webvh-core.ts";
-import { didToLogUrl } from "../packages/webvh/src/index.ts";
+import { deriveDidWebDocument, parseVhLog, serializeVhLog } from "../packages/vh/src/index.ts";
+
+const serialise = serializeVhLog;
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -41,7 +42,7 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 }
 
-test("githubDidLocation builds a user-site location matching didToLogUrl and lowercases login", () => {
+test("githubDidLocation builds a user-site location and lowercases login", () => {
   const location = githubDidLocation("Alice");
   expect(location.login).toBe("alice");
   expect(location.repo).toBe("alice.github.io");
@@ -50,11 +51,9 @@ test("githubDidLocation builds a user-site location matching didToLogUrl and low
   expect(location.contentsPath).toBe(".well-known/did.jsonl");
   expect(location.nojekyllPath).toBe(".nojekyll");
   expect(location.didJsonPath).toBe(".well-known/did.json");
-  expect(githubLogUrl("Alice")).toBe("https://alice.github.io/.well-known/did.jsonl");
-  // The URL transformation must match did:webvh resolution exactly.
-  const scid = "QmNf4Y7DyYWTZcrMdQMwftYe5JmcKXfPrxpqwriHa3A7w5";
-  expect(didToLogUrl(`did:webvh:${scid}:alice.github.io`)).toBe(location.publicUrl);
-  expect(didToLogUrl(`did:webvh:${scid}:alice.github.io`)).toBe(githubLogUrl("alice"));
+  expect(location.src).toBe("https://alice.github.io");
+  expect(location.webDid).toBe("did:web:alice.github.io");
+  expect(location.publicUrl).toBe("https://alice.github.io/.well-known/did.jsonl");
 });
 
 test("normalizeLogin rejects names that are not GitHub account logins", () => {
@@ -64,8 +63,8 @@ test("normalizeLogin rejects names that are not GitHub account logins", () => {
   expect(() => normalizeLogin("-leading")).toThrow();
 });
 
-test("base64 UTF-8 round-trips did:webvh JSON", () => {
-  const sample = '{"state":{"id":"did:webvh:Qm:alice.github.io","name":"日本語 🎉"}}\n';
+test("base64 UTF-8 round-trips did:vh JSON", () => {
+  const sample = '{"state":{"id":"did:vh:Qm","name":"日本語 🎉"}}\n';
   expect(fromBase64Utf8(toBase64Utf8(sample))).toBe(sample);
   expect(fromBase64Utf8(toBase64Utf8("ascii only"))).toBe("ascii only");
 });
@@ -78,39 +77,28 @@ test("githubErrorMessage maps status codes to actionable wording", () => {
   expect(githubErrorMessage({ status: 409, message: "Conflict" })).toMatch(/Try Publish again/i);
 });
 
-test("mirrorDocument on a GitHub host omits #files and #whois, keeps the webvh DID in alsoKnownAs", () => {
-  const scid = "QmNf4Y7DyYWTZcrMdQMwftYe5JmcKXfPrxpqwriHa3A7w5";
-  const webvhDid = `did:webvh:${scid}:alice.github.io`;
+test("the did.json of a GitHub site is the did:web document derived from the log: the DID becomes did:web:<login>.github.io, alsoKnownAs only the did:vh", () => {
+  const did = `did:vh:${"Q".repeat(46)}`;
   const state = {
-    id: webvhDid,
-    verificationMethod: [{ id: "#pass-1", type: "Multikey", controller: webvhDid, publicKeyMultibase: "z6Mkf5rGMoatjnh5dBeMpxkTm1VJwGqLrH6kVzq3q3q3q3q3" }],
+    id: did,
+    verificationMethod: [{ id: "#pass-1", type: "Multikey", controller: did, publicKeyMultibase: "z6Mkf5rGMoatjnh5dBeMpxkTm1VJwGqLrH6kVzq3q3q3q3q3" }],
     authentication: ["#pass-1"],
     service: [],
-    alsoKnownAs: [`did:webvh:${scid}:old.did.md`],
+    alsoKnownAs: ["did:web:alice.github.io", `${did}?src=https://alice.github.io`],
   };
-  // Server default is unchanged (still adds hosted resources).
-  const server = mirrorDocument(state, webvhDid);
-  expect((server.service as any[]).some(s => s.id === "#files")).toBe(true);
-  expect((server.service as any[]).some(s => s.id === "#whois")).toBe(true);
-
-  const github = mirrorDocument(state, webvhDid, { hostedResources: false });
-  expect((github.service as any[]).some(s => s.id === "#files")).toBe(false);
-  expect((github.service as any[]).some(s => s.id === "#whois")).toBe(false);
-  expect(github.id).toBe(`did:web:alice.github.io`);
-  expect(github.alsoKnownAs).toContain(webvhDid);
-  expect(buildDidJson(state, webvhDid)).toContain("did:web:alice.github.io");
-  expect(buildDidJson(state, webvhDid)).not.toContain("#files");
+  const derived = JSON.parse(buildDidJson(state, "did:web:alice.github.io"));
+  expect(derived).toEqual(deriveDidWebDocument(state, "did:web:alice.github.io"));
+  expect(derived.id).toBe("did:web:alice.github.io");
+  expect(derived.verificationMethod[0].controller).toBe("did:web:alice.github.io");
+  expect(derived.alsoKnownAs).toEqual([did]);
+  expect(JSON.stringify(derived)).not.toContain("#files");
 });
 
 test("buildPublishFiles writes did.jsonl, empty .nojekyll and did.json in one list", async () => {
   const identity = await createIdentityMaterial();
-  const genesis = await buildGenesis({
-    username: "alice", domain: "github.io", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare,
-  });
-  // Force the genesis DID to the GitHub user-site location so validation of
-  // the publication URL matches (buildGenesis already used username.domain).
   const location = githubDidLocation("alice");
-  expect(genesis.state.id).toBe(`did:webvh:${genesis.parameters.scid}:alice.github.io`);
+  const genesis = await createGenesisEntry({ root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, src: location.src });
+  expect(genesis.state.alsoKnownAs).toContain(location.webDid);
   const files = buildPublishFiles([genesis], location);
   expect(files.map(f => f.path)).toEqual([".well-known/did.jsonl", ".nojekyll", ".well-known/did.json"]);
   expect(files[0]!.content.endsWith("\n")).toBe(true);
@@ -118,60 +106,52 @@ test("buildPublishFiles writes did.jsonl, empty .nojekyll and did.json in one li
   expect(files[1]!.content).toBe("");
   const mirror = JSON.parse(files[2]!.content);
   expect(mirror.id).toBe("did:web:alice.github.io");
-  expect(mirror.alsoKnownAs).toContain(genesis.state.id);
+  expect(mirror.alsoKnownAs).toEqual([genesis.state.id]);
 });
 
 test("validateBeforePublish accepts a correct log and rejects tampering before any network write", async () => {
   const identity = await createIdentityMaterial();
-  const genesis = await buildGenesis({
-    username: "alice", domain: "github.io", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare,
-  });
   const location = githubDidLocation("alice");
-  const ok = await validateBeforePublish([genesis], location.publicUrl);
+  const genesis = await createGenesisEntry({ root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, src: location.src });
+  const ok = await validateBeforePublish([genesis], location.webDid);
   expect(ok.versionId).toBe(genesis.versionId);
 
   // Entry hash / SCID mismatch.
   const forged = JSON.parse(JSON.stringify(genesis));
   forged.state = { ...forged.state, name: "tampered" };
-  await expect(validateBeforePublish([forged], location.publicUrl)).rejects.toThrow(/hash|SCID/i);
+  await expect(validateBeforePublish([forged], location.webDid)).rejects.toThrow(/hash|SCID/i);
 
   // Missing proof.
   const unsigned = { ...JSON.parse(JSON.stringify(genesis)), proof: [] };
-  await expect(validateBeforePublish([unsigned], location.publicUrl)).rejects.toThrow(/proof/i);
+  await expect(validateBeforePublish([unsigned], location.webDid)).rejects.toThrow(/proof/i);
 
-  // Wrong publication location.
-  await expect(validateBeforePublish([genesis], "https://other.example/.well-known/did.jsonl")).rejects.toThrow(/publication location/i);
+  // Another location: the document does not name it.
+  await expect(validateBeforePublish([genesis], "did:web:other.example")).rejects.toThrow(/must name did:web:other\.example/i);
 });
 
-test("a portable identity moves to <login>.github.io via preparePortableImport and the resulting log validates", async () => {
+test("an identity moves to <login>.github.io with one location entry, keeping its DID, and the resulting log validates", async () => {
   const identity = await createIdentityMaterial();
-  const genesis = await buildGenesis({
-    username: "alice", domain: "did.md", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare,
+  const genesis = await createGenesisEntry({ root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, src: "https://alice.did.md" });
+  const location = githubDidLocation("Alice");
+  const prepared = await prepareLocationEntry({
+    entries: [genesis], src: location.src, previousSrc: "https://alice.did.md", masterSeed: identity.masterSeed, currentSpareIndex: 0,
   });
-  // Second entry so pre-rotation index is exercised like a real identity.
-  const prepared = await preparePortableImport({
-    entries: [genesis], username: "alice", domain: "github.io", masterSeed: identity.masterSeed,
-  });
-  expect(prepared.did).toBe(`did:webvh:${genesis.parameters.scid}:alice.github.io`);
-  expect(prepared.state.alsoKnownAs).toContain(genesis.state.id);
+  expect(prepared.state.id).toBe(genesis.state.id);
+  expect(prepared.state.alsoKnownAs).toContain(location.webDid);
+  expect(prepared.state.alsoKnownAs).not.toContain("did:web:alice.did.md");
 
-  const logUrl = githubLogUrl("Alice");
-  const entries = [genesis, prepared.entry];
-  const latest = await validateBeforePublish(entries, logUrl);
+  const latest = await validateBeforePublish([genesis, prepared.entry], location.webDid);
   expect(latest.versionId).toBe(prepared.entry.versionId);
-  // alsoKnownAs keeps the prior DID (portable move rule).
-  expect((latest.state.alsoKnownAs as string[]).includes(genesis.state.id)).toBe(true);
 });
 
 async function sampleMove() {
   const identity = await createIdentityMaterial();
-  const genesis = await buildGenesis({
-    username: "alice", domain: "did.md", root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare,
+  const genesis = await createGenesisEntry({ root: identity.root, sign: identity.sign, nextSpare: identity.nextSpare, src: "https://alice.did.md" });
+  const location = githubDidLocation("alice");
+  const moved = await prepareLocationEntry({
+    entries: [genesis], src: location.src, previousSrc: "https://alice.did.md", masterSeed: identity.masterSeed, currentSpareIndex: 0,
   });
-  const moved = await preparePortableImport({
-    entries: [genesis], username: "alice", domain: "github.io", masterSeed: identity.masterSeed,
-  });
-  return { identity, genesis, moved, entries: [genesis, moved.entry], location: githubDidLocation("alice") };
+  return { identity, genesis, moved: { ...moved, did: genesis.state.id }, entries: [genesis, moved.entry], location };
 }
 
 test("commitFiles writes all paths in one Git Data commit and retries once on ref conflict", async () => {
@@ -349,7 +329,7 @@ test("publishToGitHub never writes to GitHub when local validation fails", async
       intervalMs: 1,
       timeoutMs: 10,
     }),
-  ).rejects.toThrow(/hash|verification/i);
+  ).rejects.toThrow(/hash|verification|SCID/i);
 
   const writes = calls.filter(call => call.method !== "GET");
   expect(writes).toEqual([]);
@@ -358,7 +338,7 @@ test("publishToGitHub never writes to GitHub when local validation fails", async
 test("publishToGitHub drives the full happy path against a mocked GitHub", async () => {
   const { entries, location, moved } = await sampleMove();
   const logBody = serialise(entries);
-  const mirrorBody = buildDidJson(entries.at(-1)!.state as any, entries.at(-1)!.state.id as string);
+  const mirrorBody = buildDidJson(entries.at(-1)!.state as any, location.webDid);
   const expectedVersionId = entries.at(-1)!.versionId;
   let pagesStatusReads = 0;
 
@@ -410,10 +390,10 @@ test("publishToGitHub drives the full happy path against a mocked GitHub", async
 test("verifyPublishedLog re-checks chain integrity and the last versionId", async () => {
   const { entries, location } = await sampleMove();
   const body = serialise(entries);
-  await expect(verifyPublishedLog(body, location.publicUrl, entries.at(-1)!.versionId)).resolves.toBeUndefined();
-  await expect(verifyPublishedLog(body, location.publicUrl, "1-wrong")).rejects.toThrow(/version/i);
+  await expect(verifyPublishedLog(body, location.webDid, entries.at(-1)!.versionId)).resolves.toBeUndefined();
+  await expect(verifyPublishedLog(body, location.webDid, "1-wrong")).rejects.toThrow(/version/i);
   const broken = body.replace(entries.at(-1)!.versionId, "9-fake");
-  await expect(verifyPublishedLog(broken, location.publicUrl, "9-fake")).rejects.toThrow();
+  await expect(verifyPublishedLog(broken, location.webDid, "9-fake")).rejects.toThrow();
 });
 
 test("publishToGitHub reports verifiedLive=false when Pages is not serving the log yet", async () => {

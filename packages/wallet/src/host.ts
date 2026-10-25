@@ -1,5 +1,6 @@
 /**
- * Publication-host adapters for a portable did:webvh log.
+ * Publication-host adapters for a did:vh log, by web location (`https://alice.did.md`,
+ * `https://alice.github.io`): the place the identity's own document names.
  *
  * The dashboard never branches on "is this did.md or GitHub" again: it asks
  * `hostForDid(did)` for an IdentityHost and calls the same three verbs
@@ -13,9 +14,7 @@
  * stored here. When an adapter needs one and none was supplied it throws
  * CredentialRequiredError so the UI can open the PAT dialog and retry.
  */
-import type { Entry } from "./webvh-core.ts";
-import { WebvhHostingClient } from "../../webvh/src/hosting.ts";
-import { didToLogUrl } from "../../webvh/src/url.ts";
+import { VhHostingClient, logUrlOf, serializeVhLog, type Ed25519Key, type VhLogEntry } from "../../vh/src/index.ts";
 import {
   githubErrorMessage,
   removeGitHubDidFiles,
@@ -24,9 +23,12 @@ import {
 
 export type HostKind = "http" | "github";
 
-export type SignKeyLike = { privateKey: Uint8Array; multikey: string };
+type Entry = VhLogEntry;
+export type SignKeyLike = Ed25519Key;
 
 export type PublishArgs = {
+  /** The location published to (`https://alice.did.md`). */
+  src: string;
   /** Full log including any entry being published now. */
   entries: Entry[];
   message?: string;
@@ -70,33 +72,27 @@ export interface IdentityHost {
   readonly kind: HostKind;
   /** Short label for the identity card / toasts. */
   readonly label: string;
-  /** True when this adapter is the DID's publication location. */
-  owns(did: string): boolean;
-  /** Public DID-log URL -- must match didToLogUrl / didWebvhLogUrl. */
-  logUrl(did: string): string;
+  /** True when this adapter is the publication location `src` (`https://alice.did.md`). */
+  owns(src: string): boolean;
+  /** Public DID-log URL of the location. */
+  logUrl(src: string): string;
   /** True if the host currently serves the log. */
-  isLive(did: string): Promise<boolean>;
+  isLive(src: string): Promise<boolean>;
   publish(args: PublishArgs): Promise<PublishResult>;
   /**
    * Un-host the DID at this adapter's location. did.md uses a signed
    * DELETE; GitHub deletes only the DID files (never the repository).
    * Throws CredentialRequiredError when a GitHub PAT is missing.
    */
-  remove(did: string, signKey: SignKeyLike, credential?: string): Promise<true>;
+  remove(src: string, did: string, signKey: SignKeyLike, credential?: string): Promise<true>;
 }
 
-function didHostOf(did: string): string {
-  const match = typeof did === "string" ? /^did:webvh:[^:]+:(.+)$/.exec(did) : null;
-  return match ? match[1] : "";
+function hostOfSrc(src: string): string {
+  try { return new URL(src).host.toLowerCase(); } catch { return ""; }
 }
 
-export function isGitHubHostedDid(did: string): boolean {
-  return /(?:^|:)[A-Za-z0-9-]+\.github\.io$/i.test(didHostOf(did));
-}
-
-/** JSONL body of a complete log, one compact entry per line. */
-export function serialiseEntries(entries: Entry[]): string {
-  return entries.map(entry => JSON.stringify(entry)).join("\n") + "\n";
+export function isGitHubSrc(src: string): boolean {
+  return /^[A-Za-z0-9-]+\.github\.io$/i.test(hostOfSrc(src));
 }
 
 async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
@@ -114,26 +110,25 @@ async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
 }
 
 /**
- * Any host that speaks the did:webvh Hosting Protocol (SPEC-webvh-hosting.md):
- * did.md, or a third party. Every URL comes from the DID itself, so nothing
- * here knows which server it is.
+ * Any host that speaks the did:vh Hosting Protocol (SPEC-vh-hosting.md): did.md, or a
+ * third party. Every URL comes from the location, so nothing here knows which server it is.
  */
 class HttpHost implements IdentityHost {
   readonly kind = "http" as const;
   readonly label = "web host";
-  private readonly client = new WebvhHostingClient();
+  private readonly client = new VhHostingClient();
 
-  owns(did: string): boolean {
-    return !isGitHubHostedDid(did);
+  owns(src: string): boolean {
+    return !isGitHubSrc(src);
   }
 
-  logUrl(did: string): string {
-    return didToLogUrl(did);
+  logUrl(src: string): string {
+    return logUrlOf(src);
   }
 
-  async isLive(did: string): Promise<boolean> {
+  async isLive(src: string): Promise<boolean> {
     try {
-      return (await this.client.read(did)) !== null;
+      return (await this.client.read(src)) !== null;
     } catch {
       return false;
     }
@@ -146,18 +141,18 @@ class HttpHost implements IdentityHost {
     }
     const did = latest.state.id as string;
     try {
-      if ((args.mode ?? "append") === "append") await this.client.append(did, `${JSON.stringify(latest)}\n`);
-      else await this.client.publish(did, serialiseEntries(args.entries));
+      if ((args.mode ?? "append") === "append") await this.client.append(args.src, `${JSON.stringify(latest)}\n`);
+      else await this.client.publish(args.src, serializeVhLog(args.entries));
     } catch (error) {
       throw new HostError(this.kind, error instanceof Error ? error.message : `Publication failed.`);
     }
-    return { kind: this.kind, did, logUrl: this.logUrl(did), versionId: latest.versionId, verifiedLive: true };
+    return { kind: this.kind, did, logUrl: this.logUrl(args.src), versionId: latest.versionId, verifiedLive: true };
   }
 
-  async remove(did: string, signKey: SignKeyLike, _credential?: string): Promise<true> {
+  async remove(src: string, did: string, signKey: SignKeyLike, _credential?: string): Promise<true> {
     try {
-      // Already gone counts as removed (the alias was removed earlier or never published).
-      await this.client.remove(did, signKey);
+      // Already gone counts as removed (the location was removed earlier or never published).
+      await this.client.remove(src, did, signKey);
     } catch (error) {
       throw new HostError(this.kind, error instanceof Error ? error.message : "Disconnect failed.");
     }
@@ -170,21 +165,21 @@ class GitHubHost implements IdentityHost {
   readonly kind = "github" as const;
   readonly label = "github";
 
-  owns(did: string): boolean {
-    return isGitHubHostedDid(did);
+  owns(src: string): boolean {
+    return isGitHubSrc(src);
   }
 
-  logUrl(did: string): string {
-    const host = didHostOf(did).toLowerCase();
+  logUrl(src: string): string {
+    const host = hostOfSrc(src);
     if (!/^[a-z0-9-]+\.github\.io$/.test(host)) {
       throw new HostError(this.kind, "This identity is not hosted on GitHub Pages.");
     }
     return `https://${host}/.well-known/did.jsonl`;
   }
 
-  async isLive(did: string): Promise<boolean> {
+  async isLive(src: string): Promise<boolean> {
     try {
-      return (await fetchOk(this.logUrl(did))).ok;
+      return (await fetchOk(this.logUrl(src))).ok;
     } catch {
       return false;
     }
@@ -221,7 +216,7 @@ class GitHubHost implements IdentityHost {
    * `.well-known/did.json`. The repository and any other Pages content
    * stay -- `<login>.github.io` is the user's site, not just this DID.
    */
-  async remove(_did: string, _signKey: SignKeyLike, credential?: string): Promise<true> {
+  async remove(_src: string, _did: string, _signKey: SignKeyLike, credential?: string): Promise<true> {
     const token = credential?.trim();
     if (!token) throw new CredentialRequiredError(this.kind);
     try {
@@ -241,12 +236,8 @@ export function hostForKind(kind: HostKind): IdentityHost {
   return kind === "github" ? gitHubHost : httpHost;
 }
 
-/** The adapter that currently owns this DID's publication location. */
-export function hostForDid(did: string): IdentityHost {
-  if (gitHubHost.owns(did)) return gitHubHost;
+/** The adapter that owns a publication location. */
+export function hostForSrc(src: string): IdentityHost {
+  if (gitHubHost.owns(src)) return gitHubHost;
   return httpHost;
-}
-
-export function isProvisionalHostlessDid(did: string): boolean {
-  return typeof did === "string" && did.endsWith(":ex.alias");
 }

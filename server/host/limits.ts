@@ -8,7 +8,6 @@ import type { SettingDef } from "./v2-admin-settings.ts";
 export interface HostLimits {
   /** The largest did.jsonl a host takes (a normal identity's log is a few KB; each rotation adds a few hundred bytes). */
   maxLogBytes: number
-  maxWitnessBytes: number
   /** routing.json and the other small JSON bodies. */
   maxJsonBytes: number
   /** How many identities this host keeps; a new one over it is refused. */
@@ -23,7 +22,6 @@ export interface HostLimits {
 
 export const DEFAULT_LIMITS: HostLimits = {
   maxLogBytes: 256 << 10,
-  maxWitnessBytes: 256 << 10,
   maxJsonBytes: 64 << 10,
   maxIdentities: 20_000,
   maxConcurrentValidations: 4,
@@ -35,7 +33,6 @@ export const DEFAULT_LIMITS: HostLimits = {
  * a test keeps the two together). */
 export const LIMIT_SETTINGS: Record<string, SettingDef> = {
   "limits.maxLogBytes": { type: "integer", default: DEFAULT_LIMITS.maxLogBytes, min: 4096, max: 16777216 },
-  "limits.maxWitnessBytes": { type: "integer", default: DEFAULT_LIMITS.maxWitnessBytes, min: 1024, max: 4194304 },
   "limits.maxJsonBytes": { type: "integer", default: DEFAULT_LIMITS.maxJsonBytes, min: 1024, max: 1048576 },
   "limits.maxIdentities": { type: "integer", default: DEFAULT_LIMITS.maxIdentities, min: 1, max: 1000000 },
   "limits.maxConcurrentValidations": { type: "integer", default: DEFAULT_LIMITS.maxConcurrentValidations, min: 1, max: 64 },

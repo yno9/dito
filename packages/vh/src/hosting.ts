@@ -1,14 +1,37 @@
 /**
- * The client side of webvh-hosting/1 for did:vh logs. The URLs come from a web
- * location (`src`, see src.ts), not from the DID, which names none; the verbs
- * are the same as for a did:webvh log (SPEC-webvh-hosting.md §3), plus
+ * The client side of the did:vh Hosting Protocol (SPEC-vh-hosting.md). The URLs
+ * come from a web location (`src`, see src.ts), not from the DID, which names
+ * none; the verbs are PUT/POST/DELETE/GET on `did.jsonl` (§3) and
  * `GET /log?scid=` (§11).
  */
-import { createDataIntegrityProof } from "../../webvh/src/proof.ts";
-import type { Ed25519Key } from "../../webvh/src/signer.ts";
-import { uncachedUrl } from "../../webvh/src/url.ts";
-import { HostingError } from "../../webvh/src/hosting.ts";
+import { createDataIntegrityProof } from "./proof.ts";
+import type { Ed25519Key } from "./signer.ts";
 import { logUrlOf, parseWebLocation, type SrcOptions } from "./src.ts";
+
+export class HostingError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "HostingError";
+  }
+}
+
+/**
+ * `url` with a query that no cache has seen. A host's log is cached by its CDN for 30 seconds
+ * (`s-maxage`); a read that is followed by a write must not be handed a copy older than the
+ * last write, or the new entry is numbered from the old log and the host refuses it
+ * (`version '4' in log doesn't match expected '5'`). `cache: "no-store"` only bypasses the
+ * browser's own cache.
+ */
+export function uncachedUrl(url: string | URL, now: number = Date.now()): string {
+  const target = new URL(url);
+  target.searchParams.set("_", String(now));
+  return target.toString();
+}
+
+/** `https://<host>/.well-known/did-hosting.json` (all members optional but `protocol`). */
+export type HostingCapabilities = { protocol: string; writes?: boolean; delete?: boolean; maxLogBytes?: number; methods?: string[] };
 
 export class VhHostingClient {
   private readonly doFetch: typeof fetch;
@@ -82,14 +105,28 @@ export class VhHostingClient {
     } catch { return undefined; }
   }
 
-  /** Does the host at `src` publish did:vh? (`methods` in its capability document.) */
-  async publishesVh(src: string): Promise<boolean> {
+  /** The host's capability document, or null if it does not serve one. */
+  async capabilities(src: string): Promise<HostingCapabilities | null> {
     try {
       const where = parseWebLocation(src, this.options);
       const response = await this.doFetch(`${where.origin}/.well-known/did-hosting.json`, { cache: "no-store" });
-      if (!response.ok) return false;
-      const caps = await response.json() as { methods?: unknown };
-      return Array.isArray(caps.methods) && caps.methods.includes("did:vh");
-    } catch { return false; }
+      if (!response.ok) return null;
+      const body = await response.json();
+      return body && typeof body === "object" && typeof body.protocol === "string" && body.protocol.startsWith("vh-hosting/") ? body : null;
+    } catch { return null; }
+  }
+
+  /**
+   * Can this location host a DID, and is it free? `declared` says whether the host advertises the protocol (unknown hosts may
+   * still work). One request when only availability matters (each request costs the host).
+   */
+  async probe(src: string, options: { capabilities?: boolean } = {}): Promise<{ declared: boolean; capabilities: HostingCapabilities | null; available: boolean | undefined }> {
+    const capabilities = options.capabilities === false ? null : await this.capabilities(src);
+    return { declared: capabilities !== null, capabilities, available: await this.isFree(src) };
+  }
+
+  /** Does the host at `src` speak the protocol? (A capability document that names it.) */
+  async publishesVh(src: string): Promise<boolean> {
+    return (await this.capabilities(src)) !== null;
   }
 }

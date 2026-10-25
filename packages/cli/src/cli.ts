@@ -1,5 +1,5 @@
 /**
- * dito CLI: manage a did:webvh identity from a terminal, a script or an
+ * dito CLI: manage a did:vh identity from a terminal, a script or an
  * agent. Thin shell over packages/wallet's `Identity`.
  *
  * Files:    the public log lives in `--log` (default ./did.jsonl).
@@ -12,11 +12,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { buildDidJson } from "../../wallet/src/github-host.ts";
-import { hostForDid } from "../../wallet/src/host.ts";
 import { Identity } from "../../wallet/src/identity.ts";
-import { ForkedLogError, StaleLogError, didToLogUrl, parseLog, resolveDidWebvh, resolveLog } from "../../webvh/src/index.ts";
+import { VhHostingClient, locationsOf, parseVhDid, parseVhLog, resolveVhLog, serializeVhLog, type VhLogEntry } from "../../vh/src/index.ts";
 import { FileVersionMemory, versionMemoryPath } from "./version-memory.ts";
-import { VhUsageError, vhCommand } from "./vh.ts";
 
 export type IO = {
   out: (text: string) => void;
@@ -26,45 +24,42 @@ export type IO = {
   prompt?: (question: string) => Promise<string>;
 };
 
-const HELP = `dito -- did:webvh identities from the command line
+const HELP = `dito -- did:vh identities from the command line
 
 Usage: dito <command> [options]
 
-  new                       Create an identity (provisional DID) and write the log   (--method vh: a did:vh identity, no host yet)
-  show                      Print the DID, host and DID Document (no secret needed)
-  verify [file|url|did]     Validate a log (default: --log); a did:webvh DID is fetched with its witness file
+  new                       Create an identity (a did:vh DID, no host yet) and write the log
+  show                      Print the DID, its locations and DID Document (no secret needed)
+  verify [file|url|did]     Validate a log (default: --log); a did:vh DID is fetched from --watcher or --src
   fetch <did>               Download a published log to --log (public; no secret needed)
   forget <did>              Forget the newest version of a DID that verify/fetch remember (see below)
   export                    Write .well-known/did.jsonl + did.json from the log (no secret needed)
   export --jwe              Write <scid>.jwe: log + keyring wrapped by the mnemonic (needs the mnemonic)
-  publish                   PUT the whole log to the host its DID names (no secret; GitHub hosts need $GITHUB_TOKEN)
+  publish                   PUT the whole log to the location its document names (no secret needed)
   import <scid>.jwe         Restore the log from a .jwe with the mnemonic
-  domain <host>             Re-home on your own domain/apex, write .well-known/did.jsonl + did.json
+  domain <host>             Name your own domain/apex as the location, write .well-known/did.jsonl + did.json
   connect <username>        Host on <username>.did.md   (--domain to change)
   github                    Host on <login>.github.io   (token from $GITHUB_TOKEN)
   rotate                    Rotate the Sign key
   service add <id> <type> <endpoint>
   service remove <id>       Edit DID Document services
-  unpublish                 Take the DID down from its host
+  unpublish                 Take the log down from its host (this does not deactivate the DID)
 
 Options
   --log <file>              DID log (default ./did.jsonl)
   --mnemonic-file <file>    Read the 24-word mnemonic from a file ($DITO_MNEMONIC also works)
   --json                    Machine-readable output
-  --api <url>               new: wallet API for the #udi-wallet-issuer service
+  --api <url>               new: wallet API for the #wallet service
   --local                   rotate/service: update the log only, never contact the host (use with export)
   --out <dir>               domain/export: output directory (default .)
   --domain <domain>         connect: hosting domain (default did.md)
-  --token-env <NAME>        github/rotate/...: env var holding the GitHub token
+  --token-env <NAME>        github: env var holding the GitHub token
   --no-memory               verify/fetch <did>: do not read or write the version memory
-  --method <vh|webvh>       new: the DID method (default webvh; vh = did:vh, see "did:vh" below)
-  --watcher <origin>        did:vh verify/fetch <did>: a host serving GET /log?scid= (a did:vh DID names no location)
-  --src <location>          did:vh verify/fetch <did>: the web location of the log (https://alice.did.md)
+  --watcher <origin>        verify/fetch <did>: a host serving GET /log?scid= (a did:vh DID names no location)
+  --src <location>          verify/fetch <did>: the web location of the log (https://alice.did.md)
 
-did:vh
-  A log whose first entry says did:vh:1.0 gets the same commands (show, verify, connect, publish, rotate, service, unpublish,
-  export, import, fetch, forget). \`connect <username>\` is one update entry that makes the document name its place; the DID does
-  not change. There is no \`domain\`/\`github\`. unpublish takes the log down; it does not deactivate the DID.
+A did:vh DID names no host. \`connect <username>\` is one update entry that makes the document name its place; the DID
+does not change, and moving later is another entry. The log of someone else's DID is found with --watcher or --src.
 
 Version memory
   verify <did> and fetch <did> remember the newest version they have seen of each DID, in
@@ -75,6 +70,8 @@ Version memory
 `;
 
 class UsageError extends Error {}
+
+const isVhDid = (value: unknown): value is string => typeof value === "string" && value.startsWith("did:vh:");
 
 export async function run(argv: string[], io: IO): Promise<number> {
   let parsed;
@@ -90,7 +87,6 @@ export async function run(argv: string[], io: IO): Promise<number> {
         out: { type: "string" },
         local: { type: "boolean" },
         "no-memory": { type: "boolean" },
-        method: { type: "string" },
         src: { type: "string" },
         watcher: { type: "string" },
         jwe: { type: "boolean" },
@@ -121,23 +117,31 @@ export async function run(argv: string[], io: IO): Promise<number> {
     const open = async () => Identity.open({ mnemonic: await mnemonic(), log: readLog() });
     const token = () => io.env[values["token-env"]!];
     const memory = () => values["no-memory"] ? undefined : new FileVersionMemory(versionMemoryPath(io.env));
-    /** A refusal from the version memory, with the way out. */
-    const remembered = async <T>(did: string, task: (memory: FileVersionMemory | undefined) => Promise<T>): Promise<T> => {
-      try { return await task(memory()); }
+    const client = new VhHostingClient();
+    const save = (identity: Identity) => { mkdirSync(dirname(logFile), { recursive: true }); writeFileSync(logFile, identity.logText(), { mode: 0o644 }); };
+    const summary = (identity: Identity) => ({ did: identity.did, method: "did:vh", provisional: identity.isProvisional, entries: identity.entries.length, locations: identity.locations.map(location => location.src) });
+
+    /** Where the log of a did:vh DID is fetched from, as the user said. */
+    const fetchLogFor = async (did: string): Promise<string> => {
+      const { scid } = parseVhDid(did);
+      let text: string | null;
+      if (values.src) text = await client.read(values.src);
+      else if (values.watcher) text = await client.readByScid(values.watcher, scid);
+      else throw new UsageError("A did:vh DID names no location: say where its log is, with --watcher <origin> (a host serving /log?scid=) or --src <location>.");
+      if (text === null) throw new Error("No DID log found there.");
+      return text;
+    };
+    /** Verifies the log against the version memory; a refusal comes with the way out. */
+    const resolveRemembered = async (did: string, log: VhLogEntry[]) => {
+      try { return await resolveVhLog(did, log, { memory: memory() }); }
       catch (error) {
-        if (error instanceof StaleLogError || error instanceof ForkedLogError) {
-          throw new Error(`${error.message} ${error instanceof StaleLogError ? "This copy is older than one verified before." : "This log forks the one verified before."} If that is expected (a restored host, a recovered log), run \`dito forget ${did}\` or use --no-memory.`);
+        const name = (error as Error).name;
+        if (name === "StaleLogError" || name === "ForkedLogError") {
+          throw new Error(`${(error as Error).message} ${name === "StaleLogError" ? "This copy is older than one verified before." : "This log forks the one verified before."} If that is expected (a restored host, a recovered log), run \`dito forget ${did}\` or use --no-memory.`);
         }
         throw error;
       }
     };
-    const save = (identity: Identity) => { mkdirSync(dirname(logFile), { recursive: true }); writeFileSync(logFile, identity.logText(), { mode: 0o644 }); };
-    const summary = (identity: Identity) => ({ did: identity.did, provisional: identity.isProvisional, entries: identity.entries.length, host: identity.isProvisional ? null : identity.host.kind });
-
-    // A did:vh identity (a log whose first entry says so, or `new --method vh`) has its own commands; they hand back what is not theirs.
-    if (values.method !== undefined && values.method !== "vh" && values.method !== "webvh") throw new UsageError(`--method is vh or webvh, not "${values.method}".`);
-    const handled = await vhCommand(command, { values, rest, emit, mnemonic, memory, logFile }).catch(error => { throw error instanceof VhUsageError ? new UsageError(error.message) : error; });
-    if (handled !== undefined) return handled;
 
     switch (command) {
       case "new": {
@@ -145,45 +149,47 @@ export async function run(argv: string[], io: IO): Promise<number> {
         const { identity, mnemonic: words } = await Identity.create({ api: values.api });
         save(identity);
         emit({ ...summary(identity), log: logFile, mnemonic: words },
-          `Created ${identity.did}\nLog written to ${logFile}\n\nMnemonic -- write it down, it is the ONLY way to recover this identity:\n${words}`);
+          `Created ${identity.did}\nLog written to ${logFile}\n\nMnemonic -- write it down, it is the ONLY way to recover this identity:\n${words}\n\nNo host yet: dito connect <username> gives it one.`);
         return 0;
       }
       case "show": {
-        const log = parseLog(readLog());
-        const resolved = await resolveLog(log);
-        const did = resolved.did;
-        emit({ did, versionId: resolved.meta.versionId, entries: log.length, deactivated: resolved.meta.deactivated, document: resolved.doc },
+        const log = parseVhLog(readLog());
+        const did = log[0]!.state.id as string;
+        const resolved = await resolveVhLog(did, log);
+        emit({ did, method: "did:vh", versionId: resolved.meta.versionId, entries: log.length, deactivated: resolved.meta.deactivated, locations: locationsOf(did, log.at(-1)!.state).map(location => location.src), document: resolved.doc },
           `${did}\nentries: ${log.length}   version: ${resolved.meta.versionId}   deactivated: ${resolved.meta.deactivated}\n${JSON.stringify(resolved.doc, null, 2)}`);
         return 0;
       }
       case "fetch": {
-        if (!rest[0]?.startsWith("did:webvh:")) throw new UsageError("Usage: dito fetch <did:webvh:…>");
+        if (!isVhDid(rest[0])) throw new UsageError("Usage: dito fetch <did:vh:…> --watcher <origin> | --src <location>");
         if (existsSync(logFile)) throw new UsageError(`${logFile} already exists; refusing to overwrite.`);
-        const resolved = await remembered(rest[0], memory => resolveDidWebvh(rest[0]!, { memory }));
-        const text = await (await fetch(didToLogUrl(rest[0]), { cache: "no-store" })).text();
+        const text = await fetchLogFor(rest[0]);
+        const resolved = await resolveRemembered(rest[0], parseVhLog(text));
         mkdirSync(dirname(logFile), { recursive: true });
-        writeFileSync(logFile, text, { mode: 0o644 });
-        emit({ did: resolved.did, log: logFile, versionId: resolved.meta.versionId }, `Saved ${resolved.did} to ${logFile}`);
+        writeFileSync(logFile, text.endsWith("\n") ? text : `${text}\n`, { mode: 0o644 });
+        emit({ did: rest[0], log: logFile, versionId: resolved.meta.versionId }, `Saved ${rest[0]} to ${logFile}`);
         return 0;
       }
       case "verify": {
-        if (rest[0]?.startsWith("did:webvh:")) {
-          const resolved = await remembered(rest[0], memory => resolveDidWebvh(rest[0]!, { memory }));
-          emit({ ok: true, did: resolved.did, versionId: resolved.meta.versionId }, `OK  ${resolved.did}  (${resolved.meta.versionId})`);
+        const arg = rest[0];
+        if (isVhDid(arg)) {
+          const resolved = await resolveRemembered(arg, parseVhLog(await fetchLogFor(arg)));
+          emit({ ok: true, did: arg, versionId: resolved.meta.versionId }, `OK  ${arg}  (${resolved.meta.versionId})`);
           return 0;
         }
-        const source = rest[0] ?? logFile;
+        const source = arg ?? logFile;
         const text = /^https?:\/\//.test(source) ? await (await fetch(source, { cache: "no-store" })).text() : readFileSync(source, "utf8");
-        const log = parseLog(text);
-        const resolved = await resolveLog(log);
-        emit({ ok: true, did: resolved.did, entries: log.length, versionId: resolved.meta.versionId }, `OK  ${resolved.did}  (${log.length} entries, ${resolved.meta.versionId})`);
+        const log = parseVhLog(text);
+        const did = log[0]!.state.id as string;
+        const resolved = await resolveVhLog(did, log);
+        emit({ ok: true, did, entries: log.length, versionId: resolved.meta.versionId }, `OK  ${did}  (${log.length} entries, ${resolved.meta.versionId})`);
         return 0;
       }
       case "forget": {
-        if (!rest[0]?.startsWith("did:webvh:")) throw new UsageError("Usage: dito forget <did:webvh:…>");
-        const store = new FileVersionMemory(versionMemoryPath(io.env));
-        const scid = /^did:webvh:([^:]+)/.exec(rest[0])![1]!;
-        const forgotten = store.forget(`did:webvh:${scid}`);
+        if (!isVhDid(rest[0])) throw new UsageError("Usage: dito forget <did:vh:…>");
+        const store = memory();
+        if (!store) throw new UsageError("--no-memory leaves nothing to forget.");
+        const forgotten = store.forget(`did:vh:${parseVhDid(rest[0]).scid}`);
         emit({ did: rest[0], forgotten }, forgotten ? `Forgot ${rest[0]}. The next verify or fetch accepts any valid log.` : `Nothing remembered for ${rest[0]}.`);
         return 0;
       }
@@ -193,7 +199,7 @@ export async function run(argv: string[], io: IO): Promise<number> {
         const result = await identity.connect({ username: rest[0], domain: values.domain });
         save(identity);
         emit({ ...summary(identity), logUrl: result.logUrl, ...(result.cleanupError ? { warning: result.cleanupError.message } : {}) },
-          `Published ${identity.did}\n${result.logUrl}${result.cleanupError ? `\nwarning: previous host not cleaned up: ${result.cleanupError.message}` : ""}`);
+          `Published ${identity.did}\n${result.logUrl}${result.cleanupError ? `\nwarning: previous location not cleaned up: ${result.cleanupError.message}` : ""}`);
         return 0;
       }
       case "domain": {
@@ -205,8 +211,8 @@ export async function run(argv: string[], io: IO): Promise<number> {
         mkdirSync(out, { recursive: true });
         writeFileSync(join(out, "did.jsonl"), identity.logText());
         writeFileSync(join(out, "did.json"), moved.didJson);
-        emit({ ...summary(identity), didWeb: moved.didWeb, previousDid: moved.previousDid, wrote: out },
-          `${moved.did}\n${moved.didWeb}\nWrote did.jsonl and did.json to ${out}/\nServe them at https://${rest[0].toLowerCase()}/.well-known/ (CORS: Access-Control-Allow-Origin: *), then: dito verify ${moved.did}`);
+        emit({ ...summary(identity), didWeb: moved.didWeb, previousSrc: moved.previousSrc, wrote: out },
+          `${moved.did}\n${moved.didWeb}\nWrote did.jsonl and did.json to ${out}/\nServe them at ${moved.src}/.well-known/ (CORS: Access-Control-Allow-Origin: *), then: dito verify ${moved.did} --src ${moved.src}`);
         return 0;
       }
       case "export": {
@@ -218,25 +224,29 @@ export async function run(argv: string[], io: IO): Promise<number> {
           emit({ scid, wrote: file }, `Wrote ${file} (open it with the same mnemonic: dito import ${file})`);
           return 0;
         }
-        const text = readLog();
-        const log = parseLog(text);
-        const resolved = await resolveLog(log);
+        const log = parseVhLog(readLog());
+        const did = log[0]!.state.id as string;
+        const resolved = await resolveVhLog(did, log);
         const out = join(values.out ?? ".", ".well-known");
         mkdirSync(out, { recursive: true });
-        writeFileSync(join(out, "did.jsonl"), text.endsWith("\n") ? text : `${text}\n`);
-        writeFileSync(join(out, "did.json"), buildDidJson(resolved.doc, resolved.did));
-        emit({ did: resolved.did, versionId: resolved.meta.versionId, wrote: out }, `Wrote did.jsonl and did.json for ${resolved.did} (${resolved.meta.versionId}) to ${out}/`);
+        writeFileSync(join(out, "did.jsonl"), serializeVhLog(log));
+        // The did:web document of the first location is derived from the log, never written by hand.
+        const here = locationsOf(did, log.at(-1)!.state)[0];
+        if (here && resolved.doc) writeFileSync(join(out, "did.json"), buildDidJson(resolved.doc, here.didWeb));
+        emit({ did, versionId: resolved.meta.versionId, wrote: out }, `Wrote did.jsonl${here ? " and did.json" : ""} for ${did} (${resolved.meta.versionId}) to ${out}/${here ? "" : "\n(no location yet, so no did.json: dito connect or dito domain first)"}`);
         return 0;
       }
       case "publish": {
-        // Needs no secret: PUT of the full log, which the host validates itself.
-        const entries = parseLog(readLog());
-        const did = (await resolveLog(entries)).did;
-        const result = await hostForDid(did).publish({ entries: entries as never, mode: "replace", credential: token(), message: `Publish ${entries.at(-1)!.versionId}` });
-        // Read it back from the DID's own location and verify, as the protocol asks.
-        const live = await resolveDidWebvh(did);
-        emit({ did, logUrl: result.logUrl, versionId: live.meta.versionId, verified: live.meta.versionId === entries.at(-1)!.versionId },
-          `Published ${did}\n${result.logUrl}\nverified: ${live.meta.versionId}`);
+        // Needs no secret: PUT of the full log to the location its own document names, which the host validates itself.
+        const log = parseVhLog(readLog());
+        const did = log[0]!.state.id as string;
+        await resolveVhLog(did, log);
+        const here = locationsOf(did, log.at(-1)!.state)[0];
+        if (!here) throw new UsageError("This identity names no location yet: dito connect <username> first.");
+        await client.publish(here.src, serializeVhLog(log));
+        const live = await client.read(here.src);
+        emit({ did, logUrl: `${client.baseUrl(here.src)}did.jsonl`, versionId: log.at(-1)!.versionId, verified: live === serializeVhLog(log) },
+          `Published ${did}\n${client.baseUrl(here.src)}did.jsonl\nverified: ${live === serializeVhLog(log) ? log.at(-1)!.versionId : "NOT confirmed"}`);
         return 0;
       }
       case "import": {
@@ -269,20 +279,19 @@ export async function run(argv: string[], io: IO): Promise<number> {
             edit = state => ({ ...state, service: (state.service ?? []).filter((s: any) => s.id !== id) });
           } else throw new UsageError("Usage: dito service add <id> <type> <endpoint> | dito service remove <id>");
         }
-        if (identity.isProvisional || values.local) {
-          // No host yet, or a self-hosted domain (`--local`): the change stays in the log; `dito export` writes the files to serve.
-          await identity.commit(await identity.prepareUpdate(edit ? edit(JSON.parse(JSON.stringify(identity.state))) : identity.state));
-        } else {
-          await identity.publishUpdate(edit, { credential: token() });
-        }
+        if (values.local) {
+          // The log only; the host is not contacted (use with `export` or `publish` later).
+          const draft = JSON.parse(JSON.stringify(identity.state));
+          await identity.commit(await identity.prepareUpdate(edit ? edit(draft) : draft));
+        } else await identity.publishUpdate(edit);
         save(identity);
         emit({ ...summary(identity) }, `Updated ${identity.did} (${identity.entries.length} entries)`);
         return 0;
       }
       case "unpublish": {
         const identity = await open();
-        await identity.unpublish({ credential: token() });
-        emit({ ...summary(identity), unpublished: true }, `Removed ${identity.did} from its host.`);
+        await identity.unpublish();
+        emit({ ...summary(identity), unpublished: true }, `Removed ${identity.did} from its host. (This does not deactivate the DID.)`);
         return 0;
       }
       default:

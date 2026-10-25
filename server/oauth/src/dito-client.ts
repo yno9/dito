@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { stableSubject, verifyIdTokenSignature, type VhSources } from "../../../packages/did-verify/index.ts";
-import { createSelfIssuedIdToken } from "../../../packages/wallet/src/did-webvh.ts";
+import { createSelfIssuedIdToken } from "../../../packages/wallet/src/keys.ts";
 
 export type DitoRegistration = { client_id: string; registration_access_token?: string };
 type RpDidKey = { did: string; verificationMethod: string; privateKey: string };
@@ -18,7 +18,7 @@ export class DitoClient {
   private rpDidKey?: RpDidKey;
   // PLAN6: rpDidKeyFile, when set, switches this client from the DCR
   // client_id/secret model to a JAR (RFC 9101) Authorization Request
-  // signed by this RP's own did:webvh key (see
+  // signed by this RP's own did:vh key (see
   // PLAN6-rp-did-authentication §0.5, §0.1). oidc-bridge holds
   // a real backend process and its own secret storage (DATA_DIR, same as
   // dito-registration.json today), so -- unlike biset's serverless
@@ -46,7 +46,7 @@ export class DitoClient {
   async initialize() {
     if (this.rpDidKeyFile) {
       const key = JSON.parse(readFileSync(this.rpDidKeyFile, "utf8")) as RpDidKey;
-      if (!key.did?.startsWith("did:webvh:") || !key.verificationMethod?.startsWith(`${key.did}#`) || typeof key.privateKey !== "string") throw new Error(`${this.rpDidKeyFile} does not contain a valid RP DID key`);
+      if (!key.did?.startsWith("did:vh:") || !key.verificationMethod?.startsWith(`${key.did}#`) || typeof key.privateKey !== "string") throw new Error(`${this.rpDidKeyFile} does not contain a valid RP DID key`);
       this.rpDidKey = key;
       this.registration = { client_id: key.did };
       return this.registration;
@@ -143,5 +143,5 @@ export class DitoClient {
 // not the DID string, so an account survives a move to another host; the DID as it
 // is now travels in `did`.
 function bridgeClaims(claims: Record<string, unknown>, signer: { sub: string; method: string }): Record<string, unknown> {
-  return { ...claims, sub: stableSubject(signer.sub), ...(signer.method === "did-webvh" || signer.method === "did-vh" ? { did: signer.sub } : {}) };
+  return { ...claims, sub: stableSubject(signer.sub), ...(signer.method === "did-vh" ? { did: signer.sub } : {}) };
 }

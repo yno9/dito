@@ -3,7 +3,7 @@
 // (see verifiedOauthCapability in server/server.ts), and wraps it in the
 // OID4VP DCQL vp_token response shape. Centralized here so the wire shape
 // only needs to change in one place if it changes again.
-import { createDataIntegrityProof } from "../../packages/wallet/src/did-webvh.ts";
+import { createDataIntegrityProof } from "../../packages/wallet/src/keys.ts";
 
 export async function buildCapabilityCredential(args: {
   privateKey: Uint8Array; did: string; verificationMethod: string; capabilityType: string;

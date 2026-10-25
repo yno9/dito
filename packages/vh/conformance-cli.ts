@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Run the did:webvh Hosting Protocol conformance suite against a server.
+ * Run the did:vh Hosting Protocol conformance suite against a server.
  *
  *   pnpm conformance --domain did.md
  *       hosts throwaway identities at conf-*.did.md (real DNS, real TLS)
@@ -13,8 +13,7 @@
  */
 import { fetchWithHost } from "../../server/host-fetch.ts";
 import { parseArgs } from "node:util";
-import { formatReport, runConformance } from "./src/conformance.ts";
-import { advertisesVh, runVhConformance } from "../vh/src/conformance.ts";
+import { formatReport, runVhConformance } from "./src/conformance.ts";
 
 const { values } = parseArgs({ options: { domain: { type: "string" }, base: { type: "string" } }, strict: true });
 if (!values.domain) {
@@ -34,9 +33,7 @@ const target = {
     return fetchWithHost(`${base}${url.pathname}${url.search}`, { ...init, headers });
   }) as typeof fetch,
 };
-const results = await runConformance(target);
-// A host that advertises did:vh (`methods` in its capability document) is also held to the did:vh checks.
-if (await advertisesVh(target)) results.push(...await runVhConformance(target));
+const results = await runVhConformance(target);
 const report = formatReport(results);
 console.log(report.text);
 process.exit(report.ok ? 0 : 1);

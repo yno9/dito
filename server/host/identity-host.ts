@@ -1,15 +1,15 @@
 /**
- * did.md did:webvh v1.0 host.
+ * did.md did:vh host.
  *
  * This is the essential, non-optional part of did.md: it publishes and
- * verifies did:webvh identities (did.jsonl/did.json/did-witness.json/
- * routing.json) and resolves/verifies signatures against a DID's own
+ * verifies did:vh identities (did.jsonl, and the did:web document did.json
+ * it derives) and resolves/verifies signatures against a DID's own
  * published authentication key. It stores no controller secret: browsers
  * create and sign entries; this process only verifies and atomically
  * publishes valid public artefacts.
  *
  * ARC.md §3/§3.4 (2026-09-21 rewrite): an OAuth/OID4VP "authorization
- * server" is NOT part of what a did:webvh host, or a SIOPv2/OID4VP self-
+ * server" is NOT part of what a did:vh host, or a SIOPv2/OID4VP self-
  * issued wallet, fundamentally requires -- the canonical SIOPv2 shape has
  * no third-party authorization server at all (a wallet self-issues an
  * id_token straight back to the RP's own response_uri). did.md's
@@ -22,23 +22,25 @@
  */
 import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { validateLogAt, MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, serialise, parseWitnessFile, mirrorDocument, type Json, type Obj, type Entry, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
-import { didToLogUrl as webvhDidToLogUrl, maySignIn, parseDid as webvhParseDid, verifyDataIntegrityProof as verifyProof, verifyProofSignature } from "../../packages/webvh/src/index.ts";
-import { multibaseDecode } from "didwebvh-ts";
-import { VhResolutionError, deriveDidWebDocument, isScid, parseVhDid, validateVhLogAt } from "../../packages/vh/src/index.ts";
+import { maySignIn, decodeBase58btc, isScid, parseVhDid, parseVhLog, serializeVhLog, validateVhLogAt, verifyDataIntegrityProof as verifyProof, verifyProofSignature, VhResolutionError, deriveDidWebDocument, type Proof, type VhLogEntry } from "../../packages/vh/src/index.ts";
 import { fetchWithHost } from "../host-fetch.ts";
 import { isReservedName } from "./reserved-names.ts";
 import { counters, Gate, HourlyCount, hostLimits, Refusal } from "./limits.ts";
-export { MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, parseWitnessFile, type Json, type Obj, type Entry, type Proof, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
+import { Invalid, isObj, asObj, onlyKeys, own, type Json, type Obj } from "./shapes.ts";
+export { Invalid, isObj, asObj, onlyKeys, own, type Json, type Obj, type Proof };
+export type Entry = VhLogEntry;
 
-// Small helpers this host (and oauth-server.ts) use around the did:webvh log.
-// The did:webvh mechanics themselves live in packages/webvh (didwebvh-ts).
-/** A malformed DID is a client error (400), not a server fault. */
-function invalidOnError<T>(fn: () => T): T { try { return fn(); } catch (error) { throw new Invalid(error instanceof Error ? error.message : "invalid DID"); } }
-export function parseDid(did: string) { return invalidOnError(() => webvhParseDid(did)); }
-export function didToLogUrl(did: string) { return invalidOnError(() => webvhDidToLogUrl(did)); }
+// Small helpers this host (and oauth-server.ts) use around the did:vh log.
+// The did:vh mechanics themselves live in packages/vh.
+/** Strict `did.jsonl` body -> entries (newline-terminated, one JSON entry per line). */
+export function parseJsonl(input: string): Entry[] {
+  try { return parseVhLog(input); } catch (error) { throw new Invalid(error instanceof Error ? error.message : "invalid did.jsonl"); }
+}
+export const serialise = serializeVhLog;
+/** A malformed value is a client error (400), not a server fault. */
+function invalidOnError<T>(fn: () => T): T { try { return fn(); } catch (error) { throw new Invalid(error instanceof Error ? error.message : "invalid value"); } }
 export async function sha256(value: string) { return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))); }
-export function b58decode(value: string): Uint8Array { return invalidOnError(() => multibaseDecode(`z${value}`).bytes); }
+export function b58decode(value: string): Uint8Array { return invalidOnError(() => decodeBase58btc(value)); }
 export function strictTime(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$/.test(value) || Number.isNaN(Date.parse(value))) throw new Invalid("timestamp must be an ISO-8601 UTC timestamp");
   return Date.parse(value);
@@ -48,7 +50,7 @@ export function proofObject(value: unknown, label: string) {
   const proof = asObj(value, label); onlyKeys(proof, ["type", "cryptosuite", "proofPurpose", "verificationMethod", "proofValue", "created"], label);
   for (const key of ["type", "cryptosuite", "proofPurpose", "verificationMethod", "proofValue"] as const) if (typeof proof[key] !== "string") throw new Invalid(`${label}.${key} must be a string`);
   if (proof.created !== undefined) strictTime(proof.created as string);
-  return proof as unknown as import("../../packages/wallet/src/webvh-core.ts").Proof;
+  return proof as unknown as Proof;
 }
 
 // PLAN9: `process` does not exist on a Cloudflare Worker -- a bare
@@ -67,7 +69,7 @@ export const DATA_DIR = env.DATA_DIR ?? "./data";
 export const IDENTITY_DOMAIN = (env.IDENTITY_DOMAIN ?? "did.md").toLowerCase();
 /** The defaults; the live values come from hostLimits() (v2 admin can change them while the host runs). */
 export const MAX_LOG_BYTES = 256 << 10;
-/** Public reads may be served from a CDN for this long (SPEC-webvh-hosting.md §2).
+/** Public reads may be served from a CDN for this long (SPEC-vh-hosting.md §2).
  * Reads are ~all the traffic and never need this host; only writes do. Browsers
  * still revalidate (max-age=0); a CDN in front (Cloudflare) keeps a copy. A
  * writer that needs its own write back at once appends `?_=<time>` (the client
@@ -75,7 +77,6 @@ export const MAX_LOG_BYTES = 256 << 10;
 export const PUBLIC_READ_CACHE_SECONDS = 30;
 const PUBLIC_READ_CACHE_CONTROL = `public, max-age=0, s-maxage=${PUBLIC_READ_CACHE_SECONDS}`;
 export const MAX_REQUEST_BYTES = 64 << 10;
-export const MAX_WITNESS_BYTES = 256 << 10;
 export const CORS_BASE = {
   "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
   "access-control-allow-headers": "authorization, content-type, dpop",
@@ -108,7 +109,7 @@ export function cors(request: Request) {
   const allowed = origin === "https://app.did.md" || origin === "https://client.did.md" || origin === "null" || loopback;
   return { ...CORS_BASE, ...(allowed ? { "access-control-allow-origin": origin } : {}) };
 }
-/** DID documents and did:webvh logs are public verification artefacts.  They
+/** DID documents and did:vh logs are public verification artefacts.  They
  * must be readable by a relying party that verifies a DID locally, including
  * an origin not known when this host was deployed.  This is intentionally
  * used only for GET responses from the public document routes. */
@@ -120,20 +121,15 @@ export function isLocalFileRedirect(parsed: URL) { return parsed.protocol === "f
 export function json(request: Request, body: Json, status = 200) { return new Response(JSON.stringify(body), { status, headers: { ...cors(request), "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } }); }
 export function text(request: Request, body: string, status: number) { return new Response(`${body}\n`, { status, headers: { ...cors(request), "content-type": "text/plain; charset=utf-8" } }); }
 export function identityOrigin(username: string) { return `https://${username}.${IDENTITY_DOMAIN}`; }
-function sameLocation(did: string, username: string) { return didToLogUrl(did) === `${identityOrigin(username)}/.well-known/did.jsonl`; }
 /** The did:web DID of a hosted location: `alice.did.md` is `did:web:alice.did.md`. */
 export function didWebOf(username: string) { return `did:web:${username}.${IDENTITY_DOMAIN}`; }
-/** A did:vh log says so in the `method` of its first entry (a did:webvh log says `did:webvh:1.0`). */
-export function isVhLog(entries: Entry[]) { const method = entries[0]?.parameters?.method; return typeof method === "string" && method.startsWith("did:vh:"); }
-export async function validateLog(entries: Entry[], witnessFile: WitnessFile, username: string, enforcePublicationLocation = true) {
-  if (isVhLog(entries)) {
-    // A did:vh DID names no location, so the location is bound the other way round: the log's own current document
-    // must list this location's did:web DID (packages/vh/src/policy.ts).
-    if (witnessFile.length) throw new Invalid("witnesses are not supported for did:vh yet");
-    try { return await validateVhLogAt(entries as never, { webDid: enforcePublicationLocation ? didWebOf(username) : undefined }) as unknown as Awaited<ReturnType<typeof validateLogAt>>; }
-    catch (error) { if (error instanceof VhResolutionError) throw new Invalid(error.message); throw error; }
-  }
-  return validateLogAt(entries, witnessFile, enforcePublicationLocation ? `${identityOrigin(username)}/.well-known/did.jsonl` : undefined);
+/**
+ * A did:vh DID names no location, so the location is bound the other way round: the log's own current document
+ * must list this location's did:web DID (packages/vh/src/policy.ts).
+ */
+export async function validateLog(entries: Entry[], username: string, enforcePublicationLocation = true) {
+  try { return await validateVhLogAt(entries, { webDid: enforcePublicationLocation ? didWebOf(username) : undefined }); }
+  catch (error) { if (error instanceof VhResolutionError) throw new Invalid(error.message); throw error; }
 }
 
 export function safeName(value: string, label: string) { if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Invalid(`${label} must be a 1–63 character lowercase DNS-label-like identifier`); return value; }
@@ -144,7 +140,7 @@ export function atomicWrite(path: string, content: string) { mkdirSync(dirname(p
 export async function exclusive<T>(key: string, task: () => Promise<T>): Promise<T> { const before = locks.get(key) ?? Promise.resolve(); let release!: () => void; const after = new Promise<void>(resolve => { release = resolve; }); locks.set(key, before.then(() => after)); await before; try { return await task(); } finally { release(); if (locks.get(key) === after) locks.delete(key); } }
 
 // PLAN9: the per-username
-// did:webvh storage surface -- 4 named slots, read/write/remove, plus a
+// did:vh storage surface -- named slots, read/write/remove, plus a
 // per-username critical section -- pulled behind an interface so a cloud
 // worker deployment (Durable-Object-backed, one DO per username, whose
 // single-threaded execution model replaces `exclusive` outright) can
@@ -153,8 +149,8 @@ export async function exclusive<T>(key: string, task: () => Promise<T>): Promise
 // uses them directly for its own, unrelated single-file state (DCR client
 // registrations under a fixed "oauth" key, not a per-username slot) and has
 // no reason to route through this abstraction.
-export type IdentitySlot = "log" | "witness" | "web" | "routing" | "disabled";
-const SLOT_FILENAME: Record<IdentitySlot, string> = { log: "did.jsonl", witness: "did-witness.json", web: "did.json", routing: "routing.json", disabled: "disabled.json" };
+export type IdentitySlot = "log" | "web" | "disabled";
+const SLOT_FILENAME: Record<IdentitySlot, string> = { log: "did.jsonl", web: "did.json", disabled: "disabled.json" };
 export interface IdentityStore {
   read(username: string, slot: IdentitySlot): Promise<string | null>;
   write(username: string, slot: IdentitySlot, content: string): Promise<void>;
@@ -164,9 +160,9 @@ export interface IdentityStore {
   list?(): Promise<string[]>;
   /**
    * Which name holds the log of a SCID. A did:vh DID has no host, so a log is found by its SCID (`GET /log?scid=`), and a SCID
-   * is published under one name only. A backend without it does not publish did:vh.
+   * is published under one name only.
    */
-  scids?: ScidIndex;
+  scids: ScidIndex;
 }
 export interface ScidIndex {
   get(scid: string): Promise<string | null>;
@@ -202,17 +198,10 @@ export async function requestBody(request: Request, max: number) {
   const body = await request.text(); if (new TextEncoder().encode(body).byteLength > max) throw new Invalid("request body is too large"); return body;
 }
 function resourceRoute(pathname: string) {
-  // `routing.json` is a did:webvh DID Resource. The implicit `#files`
-  // service maps a DID URL path `/routing.json` to this origin-root path;
-  // `.well-known` is deliberately excluded by the method's transformation.
-  if (pathname === "/routing.json") return "routing.json";
-  // Keep the historical pre-#files location as an alias while
-  // `/routing.json` remains the canonical did:webvh DID Resource URL.
-  if (pathname === "/.well-known/routing.json") return "routing.json";
-  // atproto handle resolution: plaintext account DID (did:web mirror).
+  // atproto handle resolution: plaintext account DID (the did:web DID of this location).
   // Derived from the published log — not a writable resource.
   if (pathname === "/.well-known/atproto-did") return "atproto-did";
-  const matched = /^\/\.well-known\/(did\.jsonl|did-witness\.json|did\.json)$/.exec(pathname);
+  const matched = /^\/\.well-known\/(did\.jsonl|did\.json)$/.exec(pathname);
   return matched?.[1] ?? null;
 }
 function usernameFor(request: Request) {
@@ -221,7 +210,7 @@ function usernameFor(request: Request) {
   if (!host.endsWith(suffix)) throw new Invalid("identity host is required");
   return safeName(host.slice(0, -suffix.length), "username");
 }
-const RESOURCE_SLOT: Record<string, IdentitySlot> = { "did.jsonl": "log", "did-witness.json": "witness", "did.json": "web", "routing.json": "routing" };
+const RESOURCE_SLOT: Record<string, IdentitySlot> = { "did.jsonl": "log", "did.json": "web" };
 // ── What this host will take (limits.ts): how many identities, how fast new ones come, how many logs are checked at once ──
 const createdThisHour = new HourlyCount();
 const validations = new Gate();
@@ -259,18 +248,17 @@ export async function setIdentityStopped(username: string, reason: string | null
   });
 }
 
-/** `GET /log?scid=<SCID>` and `GET /witness?scid=<SCID>`: the log (or witness file) of a did:vh identity this host publishes. */
+/** `GET /log?scid=<SCID>`: the log of a did:vh identity this host publishes, whatever name it is published under. */
 async function serveByScid(request: Request, url: URL) {
   const notFound = () => new Response("not found\n", { status: 404, headers: { ...publicDocumentCors(), "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   const scid = url.searchParams.get("scid") ?? "";
   if (!isScid(scid)) return text(request, "scid must be a SCID", 400);
-  const username = await identityStore.scids?.get(scid) ?? null;
+  const username = await identityStore.scids.get(scid) ?? null;
   if (username === null) return notFound();
   if ((await identityStore.read(username, "disabled")) !== null) return notFound();
-  const log = url.pathname === "/log";
-  const body = await identityStore.read(username, log ? "log" : "witness");
+  const body = await identityStore.read(username, "log");
   if (body === null) return notFound();
-  return new Response(body, { headers: { ...publicDocumentCors(), "content-type": log ? "text/jsonl; charset=utf-8" : "application/json; charset=utf-8", "cache-control": PUBLIC_READ_CACHE_CONTROL } });
+  return new Response(body, { headers: { ...publicDocumentCors(), "content-type": "text/jsonl; charset=utf-8", "cache-control": PUBLIC_READ_CACHE_CONTROL } });
 }
 
 async function serveLog(request: Request, username: string, resource: string) {
@@ -281,8 +269,8 @@ async function serveLog(request: Request, username: string, resource: string) {
   if (request.method === "GET") {
     if (resource === "atproto-did") {
       // atproto handle resolution reads a single plaintext account DID.
-      // atproto only understands did:plc / did:web, so publish the parallel
-      // did:web mirror of this did:webvh identity (not the webvh form).
+      // atproto only understands did:plc / did:web, so publish the did:web DID
+      // of this location (the shadow of the did:vh identity).
       const logBody = await identityStore.read(username, "log");
       if (logBody === null) return new Response("not found\n", { status: 404, headers: { ...publicDocumentCors(), "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
       const accountDid = `did:web:${username}.${IDENTITY_DOMAIN}`;
@@ -291,38 +279,17 @@ async function serveLog(request: Request, username: string, resource: string) {
     const body = await identityStore.read(username, RESOURCE_SLOT[resource]!);
     if (body === null) return new Response("not found\n", { status: 404, headers: { ...publicDocumentCors(), "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
     const contentType = resource === "did.jsonl" ? "text/jsonl; charset=utf-8" : "application/json; charset=utf-8";
-    return new Response(body, { headers: { ...publicDocumentCors(), "content-type": contentType, "cache-control": resource === "routing.json" ? "no-store" : PUBLIC_READ_CACHE_CONTROL } });
+    return new Response(body, { headers: { ...publicDocumentCors(), "content-type": contentType, "cache-control": PUBLIC_READ_CACHE_CONTROL } });
   }
   if (resource === "atproto-did") return text(request, "method not allowed", 405);
   if (resource === "did.json") return text(request, "did.json is derived from did.jsonl and cannot be written directly", 405);
-  if (resource === "routing.json") {
-    if (request.method !== "PUT") return text(request, "method not allowed", 405);
-    return identityStore.exclusive(username, async () => {
-      // This DID Resource is intentionally outside the did:webvh event log:
-      // it holds mutable service discovery metadata, not DID controller state.
-      // It still must be authenticated by the current Sign/update key.  The
-      // proof is transport-only and is never served back as routing data.
-      const incoming = asObj(JSON.parse(await requestBody(request, hostLimits().maxJsonBytes)), "routing document");
-      const proof = proofObject(incoming.proof, "routing document.proof");
-      const document: Obj = { ...incoming }; delete document.proof;
-      const source = await identityStore.read(username, "log"); if (source === null) throw new Invalid("routing.json requires a published did.jsonl");
-      const witnesses = await identityStore.read(username, "witness"); const witness = witnesses === null ? [] : parseWitnessFile(witnesses);
-      const checked = await validated(() => validateLog(parseJsonl(source), witness, username));
-      if (!(await verifyProof(document, proof, checked.parameters.updateKeys))) throw new Invalid("routing.json has no valid current update-key proof");
-      await identityStore.write(username, "routing", `${JSON.stringify(document)}\n`);
-      return new Response(null, { status: 204, headers: cors(request) });
-    });
-  }
   if (request.method === "DELETE") {
     // "Disconnect": remove this identity's published files from this host.
-    // The did:webvh spec explicitly permits removing the published DID Log
-    // as a way to signal deactivation, so this is not purely cosmetic --
-    // resolvers will see a 404 until the same controller republishes here.
+    // Resolvers see a 404 until the same controller republishes here.
     if (resource !== "did.jsonl") return text(request, "method not allowed", 405);
     return identityStore.exclusive(username, async () => {
       const source = await identityStore.read(username, "log"); if (source === null) return text(request, "not found", 404);
-      const witnesses = await identityStore.read(username, "witness"); const witness = witnesses === null ? [] : parseWitnessFile(witnesses);
-      const checked = await validated(() => validateLog(parseJsonl(source), witness, username));
+      const checked = await validated(() => validateLog(parseJsonl(source), username));
       const incoming = asObj(JSON.parse(await requestBody(request, hostLimits().maxJsonBytes)), "disconnect request");
       const proof = proofObject(incoming.proof, "disconnect request.proof");
       const document: Obj = { ...incoming }; delete document.proof;
@@ -331,26 +298,16 @@ async function serveLog(request: Request, username: string, resource: string) {
       const created = Date.parse(proof.created);
       if (Number.isNaN(created) || Math.abs(Date.now() - created) > 5 * 60_000) throw new Invalid("disconnect proof is outside its accepted time window");
       if (!(await verifyProof(document, proof, checked.parameters.updateKeys))) throw new Invalid("disconnect request has no valid current update-key proof");
-      for (const slot of ["log", "witness", "web", "routing"] as const) await identityStore.remove(username, slot);
+      for (const slot of ["log", "web"] as const) await identityStore.remove(username, slot);
       // Only if the SCID is still this name's: after a move it belongs to the new name, and taking the old copy down leaves that alone.
-      if (isVhLog(parseJsonl(source)) && await identityStore.scids?.get(checked.parameters.scid!) === username) await identityStore.scids!.remove(checked.parameters.scid!);
+      if (await identityStore.scids.get(checked.parameters.scid) === username) await identityStore.scids.remove(checked.parameters.scid);
       return new Response(null, { status: 204, headers: cors(request) });
     });
   }
   if (request.method !== "PUT" && !(resource === "did.jsonl" && request.method === "POST")) return text(request, "method not allowed", 405);
   return identityStore.exclusive(username, async () => {
-    if (resource === "did-witness.json") {
-      const body = await requestBody(request, hostLimits().maxWitnessBytes); const witness = parseWitnessFile(body);
-      const existingLog = await identityStore.read(username, "log");
-      // Future proofs are intentionally accepted before publishing the entry;
-      // when a current log exists it must remain valid after this replacement.
-      if (existingLog !== null) await validated(() => validateLog(parseJsonl(existingLog), witness, username));
-      await identityStore.write(username, "witness", JSON.stringify(witness));
-      return new Response(null, { status: 204, headers: cors(request) });
-    }
-    // A complete portable history may be up to the log limit.  Ordinary JSON
-    // resources remain limited to 1 MiB.
-    const incoming = parseJsonl(await requestBody(request, resource === "did.jsonl" ? hostLimits().maxLogBytes : hostLimits().maxJsonBytes));
+    // A complete history may be up to the log limit.
+    const incoming = parseJsonl(await requestBody(request, hostLimits().maxLogBytes));
     const existingText = await identityStore.read(username, "log"); const existing = existingText === null ? [] : parseJsonl(existingText);
     // A name that sounds like the service itself is not given out (an identity already published under one keeps working).
     if (!existing.length && isReservedName(username)) { counters.refusedReserved += 1; throw new Invalid("this name is reserved"); }
@@ -373,25 +330,21 @@ async function serveLog(request: Request, username: string, resource: string) {
       combined = incoming;
     }
     const full = serialise(combined); if (new TextEncoder().encode(full).byteLength > hostLimits().maxLogBytes) throw new Invalid(`log exceeds its ${hostLimits().maxLogBytes} byte limit`);
-    const witnesses = await identityStore.read(username, "witness"); const witness = witnesses === null ? [] : parseWitnessFile(witnesses);
-    const checked = await validated(() => validateLog(combined, witness, username));
-    const vh = isVhLog(combined);
+    const checked = await validated(() => validateLog(combined, username));
     const write = async () => {
       await identityStore.write(username, "log", full);
       if (!existing.length) { createdThisHour.add(); counters.created += 1; if (knownIdentities) knownIdentities.count += 1; }
-      if (!vh) { await identityStore.write(username, "web", `${JSON.stringify(mirrorDocument(checked.latest.state, checked.latest.state.id as string))}\n`); return; }
       // The did:web document of a did:vh identity is derived from its latest document (packages/vh/src/didweb.ts), never written
       // by anyone; a deactivated DID has none.
       if (checked.parameters.deactivated) await identityStore.remove(username, "web");
-      else await identityStore.write(username, "web", `${JSON.stringify(deriveDidWebDocument(checked.latest.state as never, didWebOf(username)))}\n`);
+      else await identityStore.write(username, "web", `${JSON.stringify(deriveDidWebDocument(checked.latest.state, didWebOf(username)))}\n`);
     };
-    if (vh) {
+    {
       const index = identityStore.scids;
-      if (!index) throw new Invalid("this host does not publish did:vh logs");
       // `/log?scid=` has to find one log, so a SCID belongs to one name. It changes name only by a move: a log that extends the one
       // the holder publishes (the move entry on top) takes the SCID over, and the holder's copy is then stale until it is taken
       // down. Any other log of this SCID under another name (an older copy, say) is refused. Checked under the SCID's own lock.
-      const scid = checked.parameters.scid!;
+      const scid = checked.parameters.scid;
       await identityStore.exclusive(`scid:${scid}`, async () => {
         const holder = await index.get(scid);
         if (holder !== null && holder !== username) {
@@ -401,7 +354,7 @@ async function serveLog(request: Request, username: string, resource: string) {
         await write();
         await index.put(scid, username);
       });
-    } else await write();
+    }
     return new Response(null, { status: existing.length ? 204 : 201, headers: cors(request) });
   });
 }
@@ -444,7 +397,7 @@ export type AuthenticationAuthority = { did: string; verificationMethod: string;
 // Decodes a multikey from a DID Document's own verificationMethod entries
 // (authentication, assertionMethod, ...). This is distinct from publicKey(),
 // which decodes DID *log* control keys (updateKeys/witnesses) under
-// did.md's log-signing policy -- did:webvh:1.0 itself does not constrain a
+// did.md's log-signing policy -- did:vh itself does not constrain a
 // published DID Document's verificationMethod to any particular key type
 // (ordinary DID Core "multikey" content), so this decoder is free to grow
 // beyond Ed25519 without touching log verification at all.
@@ -462,11 +415,11 @@ export function jwtAlgForKeyType(keyType: AuthenticationKeyType): string {
 }
 // PLAN10: resolves over HTTPS, not
 // identityStore (a VPS-local FsIdentityStore snapshot) -- PLAN9 moved
-// did.md's own did:webvh CRUD to a Cloudflare Worker + Durable Object in
+// did.md's own CRUD to a Cloudflare Worker + Durable Object in
 // production, so identityStore's local copy is a frozen point-in-time
 // snapshot from the migration, not a live source of truth, for any
 // identity created or updated since. Full chain validation (validateLog)
-// is kept, unlike the lighter resolveDidWebvhDocument (packages/did-verify)
+// is kept, unlike the lighter resolveDidVhDocument (packages/did-verify)
 // external RPs get -- did.md's own hosted identities get the same
 // verification strength this always had, just fetched instead of read
 // locally.
@@ -479,31 +432,10 @@ export function jwtAlgForKeyType(keyType: AuthenticationKeyType): string {
 // on the Cloudflare Worker (PLAN9), not this process.
 const IDENTITY_FETCH_BASE_URL = env.IDENTITY_FETCH_BASE_URL;
 export async function hostedAuthenticationKey(did: string, expectedVerificationMethod?: string) {
-  if (did.startsWith("did:vh:")) return hostedVhAuthenticationKey(did, expectedVerificationMethod);
-  const parsed = parseDid(did);
-  const suffix = `.${IDENTITY_DOMAIN}`;
-  if (parsed.port || parsed.segments.length || !parsed.domain.endsWith(suffix)) throw new Invalid("authenticated issuer must be a hosted did.md identity");
-  const username = safeName(parsed.domain.slice(0, -suffix.length), "authenticated issuer");
-  const origin = IDENTITY_FETCH_BASE_URL ?? `https://${parsed.domain}`;
-  const fetchInit = IDENTITY_FETCH_BASE_URL ? { headers: { host: parsed.domain } } : undefined;
-  const logResponse = await fetchWithHost(`${origin}/.well-known/did.jsonl`, fetchInit);
-  if (!logResponse.ok) throw new Invalid("authenticated issuer was not found");
-  const source = await logResponse.text();
-  const entries = parseJsonl(source);
-  // The witness file only matters when the log configures witnesses; asking for
-  // it unconditionally doubled the requests every verification sent to the host.
-  const usesWitnesses = entries.some(entry => Array.isArray((entry.parameters.witness as { witnesses?: unknown } | undefined)?.witnesses) && ((entry.parameters.witness as { witnesses: unknown[] }).witnesses.length > 0));
-  let witnesses: string | null = null;
-  if (usesWitnesses) {
-    const witnessResponse = await fetchWithHost(`${origin}/.well-known/did-witness.json`, fetchInit);
-    witnesses = witnessResponse.ok ? await witnessResponse.text() : null;
-  }
-  const checked = await validateLog(entries, witnesses === null ? [] : parseWitnessFile(witnesses), username);
-  if (checked.latest.state.id !== did) throw new Invalid("authenticated issuer does not match its current DID document");
-  return authenticationKeyFromState(did, checked.latest.state, expectedVerificationMethod);
+  return hostedVhAuthenticationKey(did, expectedVerificationMethod);
 }
 /**
- * The did:vh counterpart: a did:vh DID names no host, so the log is fetched by its SCID from this identity domain's own watcher
+ * A did:vh DID names no host, so the log is fetched by its SCID from this identity domain's own watcher
  * endpoint (`/log?scid=`, which serves any name), verified in full, and the DID must be a hosted identity: its document names a
  * did:web DID under this domain (the location rule the host enforced when it took the log).
  */
@@ -563,7 +495,7 @@ export async function verifyAuthenticationProof(document: Obj, proofValue: Json 
 }
 
 // Verifies a Wallet-self-issued id_token (see createSelfIssuedIdToken in
-// client/did-webvh.ts): a JWT signed with the DID's own authentication key,
+// packages/wallet/src/keys.ts): a JWT signed with the DID's own authentication key,
 // never with any key this server holds. This server only sanity-checks it
 // before handing it to a relying party (defense in depth); the relying
 // party is expected to independently resolve `kid` and verify it too --
@@ -615,12 +547,12 @@ export async function verifySelfIssuedIdToken(idToken: string, expectedIssuer: s
   return payload;
 }
 
-/** Every non-OAuth route this host serves: did:webvh log CRUD,
+/** Every non-OAuth route this host serves: did:vh log CRUD,
  * computation, username availability. Returns undefined for any path it
  * does not own, so the caller (server.ts) can fall through to oauth-server.ts. */
 export async function identityFetch(request: Request, url: URL): Promise<Response | undefined> {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: resourceRoute(url.pathname) || url.pathname === "/log" || url.pathname === "/witness" ? publicDocumentCors() : cors(request) });
+    return new Response(null, { status: 204, headers: resourceRoute(url.pathname) || url.pathname === "/log" ? publicDocumentCors() : cors(request) });
   }
   if (url.pathname === "/v1/availability" && request.method === "GET") {
     const username = safeName(url.searchParams.get("username") ?? "", "username");
@@ -628,21 +560,21 @@ export async function identityFetch(request: Request, url: URL): Promise<Respons
     const reserved = !taken && isReservedName(username);
     return json(request, { available: !taken && !reserved, ...(reserved ? { reserved: true } : {}), didLog: `${identityOrigin(username)}/.well-known/did.jsonl` });
   }
-  // did:webvh Hosting Protocol capability document (SPEC-webvh-hosting.md §5):
+  // did:vh Hosting Protocol capability document (SPEC-vh-hosting.md §5):
   // lets a client tell "this host speaks the protocol" from "unknown".
   if (url.pathname === "/.well-known/did-hosting.json" && request.method === "GET") {
-    return new Response(`${JSON.stringify({ protocol: "webvh-hosting/1", writes: true, delete: true, witness: true, maxLogBytes: hostLimits().maxLogBytes, methods: identityStore.scids ? ["did:webvh", "did:vh"] : ["did:webvh"] })}\n`, {
+    return new Response(`${JSON.stringify({ protocol: "vh-hosting/1", writes: true, delete: true, maxLogBytes: hostLimits().maxLogBytes, methods: ["did:vh"] })}\n`, {
       headers: { ...publicDocumentCors(), "content-type": "application/json; charset=utf-8", "cache-control": "no-cache" },
     });
   }
   // The watcher read API of VH-Log: a log by its SCID, whatever name it is published under.
-  if ((url.pathname === "/log" || url.pathname === "/witness") && request.method === "GET") return serveByScid(request, url);
+  if (url.pathname === "/log" && request.method === "GET") return serveByScid(request, url);
   const resource = resourceRoute(url.pathname);
   if (!resource) return undefined;
   // Protocol resources: authorization is the log's own validity, never the
   // caller's origin or a cookie (SPEC §4), so reads, writes AND errors are
   // readable from any origin -- a third-party browser wallet must work.
-  if (resource === "did.jsonl" || resource === "did-witness.json") {
+  if (resource === "did.jsonl") {
     let response: Response;
     try { response = await serveLog(request, usernameFor(request), resource); }
     catch (error) {

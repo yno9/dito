@@ -5,10 +5,10 @@
 // assumed (PLAN1): any authentication key signs in.
 import { expect, test } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { maySignIn, multikeyFromPublicKey } from "../packages/webvh/src/index.ts";
+import { maySignIn, multikeyFromPublicKey } from "../packages/vh/src/index.ts";
 import { authenticationKeyFromState } from "../server/host/identity-host.ts";
 
-const did = "did:webvh:QmScid:alice.did.md";
+const did = `did:vh:${"Q".repeat(46)}`;
 const key = () => multikeyFromPublicKey(ed25519.getPublicKey(ed25519.utils.randomSecretKey()));
 const dito = {
   id: did,

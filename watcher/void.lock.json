@@ -1,23 +1,8 @@
 {
   "version": 1,
-  "source": {
-    "d1_databases": [
-      {
-        "binding": "DB",
-        "database_name": "did-vh-watcher",
-        "database_id": "create-with-wrangler-d1-create"
-      }
-    ]
-  },
+  "source": {},
   "resolved": {
-    "d1_databases": [
-      {
-        "binding": "DB",
-        "database_name": "did-vh-watcher",
-        "database_id": "create-with-wrangler-d1-create"
-      }
-    ],
     "compatibility_date": "2026-02-24"
   },
-  "text": "{\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_name\": \"did-vh-watcher\",\n      \"database_id\": \"create-with-wrangler-d1-create\"\n    }\n  ],\n  \"compatibility_date\": \"2026-02-24\"\n}\n"
+  "text": "{\n  \"compatibility_date\": \"2026-02-24\"\n}\n"
 }

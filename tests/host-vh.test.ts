@@ -70,7 +70,7 @@ test("a did:vh log naming this location is published, and its did:web document i
   expect(web.status).toBe(200);
   const document = await web.json();
   expect(document.id).toBe("did:web:alice.did.md");
-  expect(document.alsoKnownAs).toEqual([did]);
+  expect(document.alsoKnownAs).toEqual([`${did}?src=https://alice.did.md`]);
   expect(checkDidWebShadow(log[0]!.state, "did:web:alice.did.md", document)).toEqual({ ok: true });
   // The atproto handle file is the did:web DID of the location.
   expect((await (await call("alice", "/.well-known/atproto-did")).text()).trim()).toBe("did:web:alice.did.md");

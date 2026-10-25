@@ -35,7 +35,7 @@ test("dito's wallet hosts an identity on a third-party server: connect, update, 
   expect(other.did).toBe(identity.did);
   const didWeb = await (await fetch("https://alice.example.org/.well-known/did.json")).json();
   expect(didWeb.id).toBe("did:web:alice.example.org");
-  expect(didWeb.alsoKnownAs).toEqual([identity.did]);
+  expect(didWeb.alsoKnownAs).toEqual([`${identity.did}?src=https://alice.example.org`]);
 
   // move to a different third-party domain; the DID stays and the old copy is removed
   const moved = await identity.connect({ username: "alice", domain: "example.net" });

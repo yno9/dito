@@ -179,7 +179,7 @@ test("domain: name an apex (BYO domain) offline, emitting did.jsonl + the did:we
 
   const didJson = JSON.parse(readFileSync(join(d, ".well-known", "did.json"), "utf8"));
   expect(didJson.id).toBe("did:web:digitalcommons.jp");
-  expect(didJson.alsoKnownAs).toEqual([info.did]);
+  expect(didJson.alsoKnownAs).toEqual([`${info.did}?src=https://digitalcommons.jp`]);
   expect(await run(["verify", join(d, ".well-known", "did.jsonl")], harness().io)).toBe(0);
   expect(await run(["domain", "not a host", "--log", log, "--out", d], harness(env).io)).not.toBe(0);
 });

@@ -77,7 +77,7 @@ test("githubErrorMessage maps status codes to actionable wording", () => {
   expect(githubErrorMessage({ status: 409, message: "Conflict" })).toMatch(/Try Publish again/i);
 });
 
-test("the did.json of a GitHub site is the did:web document derived from the log: the DID becomes did:web:<login>.github.io, alsoKnownAs only the did:vh", () => {
+test("the did.json of a GitHub site is the did:web document derived from the log: the DID becomes did:web:<login>.github.io, alsoKnownAs only the did:vh with its src", () => {
   const did = `did:vh:${"Q".repeat(46)}`;
   const state = {
     id: did,
@@ -90,7 +90,7 @@ test("the did.json of a GitHub site is the did:web document derived from the log
   expect(derived).toEqual(deriveDidWebDocument(state, "did:web:alice.github.io"));
   expect(derived.id).toBe("did:web:alice.github.io");
   expect(derived.verificationMethod[0].controller).toBe("did:web:alice.github.io");
-  expect(derived.alsoKnownAs).toEqual([did]);
+  expect(derived.alsoKnownAs).toEqual([`${did}?src=https://alice.github.io`]);
   expect(JSON.stringify(derived)).not.toContain("#files");
 });
 
@@ -106,7 +106,7 @@ test("buildPublishFiles writes did.jsonl, empty .nojekyll and did.json in one li
   expect(files[1]!.content).toBe("");
   const mirror = JSON.parse(files[2]!.content);
   expect(mirror.id).toBe("did:web:alice.github.io");
-  expect(mirror.alsoKnownAs).toEqual([genesis.state.id]);
+  expect(mirror.alsoKnownAs).toEqual([`${genesis.state.id}?src=https://alice.github.io`]);
 });
 
 test("validateBeforePublish accepts a correct log and rejects tampering before any network write", async () => {

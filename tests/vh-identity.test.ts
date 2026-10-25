@@ -205,7 +205,7 @@ test("moveToDomain (bring your own domain) names the host locally and derives th
   expect(identity.locations.map(location => location.src)).toEqual(["https://digitalcommons.jp"]);
   const web = JSON.parse(result.didJson);
   expect(web.id).toBe("did:web:digitalcommons.jp");
-  expect(web.alsoKnownAs).toEqual([identity.did]);
+  expect(web.alsoKnownAs).toEqual([`${identity.did}?src=https://digitalcommons.jp`]);
   expect(checkDidWebShadow(identity.state, "did:web:digitalcommons.jp", web).ok).toBe(true);
   expect(store.files.size).toBe(0);
   await expect(identity.moveToDomain("not a host")).rejects.toThrow(/fully-qualified/);

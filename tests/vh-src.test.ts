@@ -108,7 +108,7 @@ async function identityWithShadow() {
   return { ...created, webDid, doc: created.log[0]!.state };
 }
 
-test("the did:web document is the did:vh document with the DID replaced and alsoKnownAs reduced to the did:vh DID", async () => {
+test("the did:web document is the did:vh document with the DID replaced and alsoKnownAs reduced to the did:vh DID with its src", async () => {
   const { did, webDid, doc } = await identityWithShadow();
   const shadow = deriveDidWebDocument(doc, webDid);
   expect(shadow.id).toBe(webDid);
@@ -118,8 +118,8 @@ test("the did:web document is the did:vh document with the DID replaced and also
   expect(shadow.assertionMethod).toEqual(["#k"]);
   expect(shadow.service[0].id).toBe(`${webDid}#wallet`);
   expect(shadow.service[0].serviceEndpoint).toBe("https://dito.did.md/authorize");
-  expect(shadow.alsoKnownAs).toEqual([did]);
-  expect(JSON.stringify(shadow)).not.toContain("?src=");
+  expect(shadow.alsoKnownAs).toEqual([`${did}?src=https://alice.did.md`]);
+  expect(JSON.stringify({ ...shadow, alsoKnownAs: [] })).not.toContain("?src="); // the src alias of the did:vh document is not carried over
   // The original is untouched.
   expect(doc.id).toBe(did);
   expect(doc.alsoKnownAs).toHaveLength(2);

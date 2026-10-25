@@ -137,7 +137,7 @@ the approvals it needs. A verifier fails closed the same way.
   `did:vh:<SCID>?src=https://alice.did.md` (the `src` of didvh-spec), which is how a reader holding only the
   document learns where to ask again.
 * **`did.json` is derived, never written.** Whenever the log changes, the host regenerates it from the latest
-  document: every `did:vh:<SCID>` becomes the location's did:web DID, and `alsoKnownAs` becomes `["did:vh:<SCID>"]` and
+  document: every `did:vh:<SCID>` becomes the location's did:web DID, and `alsoKnownAs` becomes `["did:vh:<SCID>?src=<the location>"]` and
   nothing else. A deactivated DID has no `did.json` (`404`). A verifier takes the did:vh document as the truth and
   accepts a `did.json` only if it equals that derivation (`checkDidWebShadow`) and the did:vh document names the
   did:web DID: a link in both directions. A client that only speaks did:web reads `did.json` and is none the wiser.

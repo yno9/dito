@@ -61,7 +61,7 @@ function shadowVectors(): ShadowVector[] {
   const out: ShadowVector[] = [];
   const add = (name: string, note: string, webDocument: unknown, ok: boolean, options: { vhDocument?: Record<string, unknown>; didWeb?: string } = {}) =>
     out.push({ name, note, vhDocument: options.vhDocument ?? vh, didWeb: options.didWeb ?? webDid, webDocument, ok });
-  add("valid/derived", "The derivation: the DID replaced in ids, controllers and references (also followed by #, ? or /), alsoKnownAs reduced to the did:vh DID, relative references and other strings untouched.", shadow, true);
+  add("valid/derived", "The derivation: the DID replaced in ids, controllers and references (also followed by #, ? or /), alsoKnownAs reduced to the did:vh DID with the location as its src, relative references and other strings untouched.", shadow, true);
   add("invalid/extra-member", "A member the derivation does not give.", { ...shadow, extra: 1 }, false);
   add("invalid/missing-member", "A member the derivation gives is missing.", (({ name: _name, ...rest }) => rest)(shadow as any), false);
   add("invalid/other-key", "A verification key that is not the did:vh document's.", { ...shadow, verificationMethod: [{ ...shadow.verificationMethod[0], publicKeyMultibase: "z6MkuDdJdKLCgwZuQuEi9xG6LVgJJ9Tebr74CXPYPSumqgJs" }, shadow.verificationMethod[1]] }, false);

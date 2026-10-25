@@ -79,7 +79,7 @@ What dito is today and how the parts fit. (Protocol details: [SPEC-vh-hosting.md
   query, no redirects, a bounded body) used by every fetcher, which is also the SSRF guard. A server-side verifier
   fetches only from watchers its operator chose, never from a location a token or a request names.
 - **The did:web shadow.** `did.json` is derived from the latest did:vh document and never written by hand: every
-  `did:vh:<SCID>` becomes the location's did:web DID, and `alsoKnownAs` becomes `[did:vh:<SCID>]`. A verifier takes the
+  `did:vh:<SCID>` becomes the location's did:web DID, and `alsoKnownAs` becomes `[did:vh:<SCID>?src=<the location>]`. A verifier takes the
   did:vh document as the truth and accepts a did:web document only if it equals that derivation *and* the did:vh
   document names the did:web DID. The atproto `at://` alias is not in the derived document yet.
 - **Where a log is published** is said by the document: `alsoKnownAs` lists the location's did:web DID and a

@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { stableSubject, verifyIdTokenSignature } from "../../../packages/did-verify/index.ts";
+import { stableSubject, verifyIdTokenSignature, type VhSources } from "../../../packages/did-verify/index.ts";
 import { createSelfIssuedIdToken } from "../../../packages/wallet/src/did-webvh.ts";
 
 export type DitoRegistration = { client_id: string; registration_access_token?: string };
@@ -40,6 +40,8 @@ export class DitoClient {
     this.rpDidKeyFile = rpDidKeyFile;
     this.responseUri = responseUri;
   }
+  /** Where a did:vh wallet identity's log comes from: the wallet's own identity host, under any name (`GET /log?scid=`). */
+  get vhSources(): VhSources { return { watchers: [`https://${this.walletIdentityDomain}`] }; }
   get isRpDid(): boolean { return !!this.rpDidKey; }
   async initialize() {
     if (this.rpDidKeyFile) {
@@ -117,7 +119,7 @@ export class DitoClient {
     if (!response.ok) throw new Error(`dito token exchange failed: ${response.status} ${await response.text()}`);
     const tokens = await response.json() as { id_token?: string };
     if (!tokens.id_token) throw new Error("dito did not return an id_token");
-    const signer = await verifyIdTokenSignature(tokens.id_token, this.walletIdentityDomain); const claims = JSON.parse(Buffer.from(tokens.id_token.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
+    const signer = await verifyIdTokenSignature(tokens.id_token, this.walletIdentityDomain, this.vhSources); const claims = JSON.parse(Buffer.from(tokens.id_token.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
     if (claims.aud !== this.registration.client_id) throw new Error("dito id_token audience mismatch");
     return { claims: bridgeClaims(claims, signer), signer, idToken: tokens.id_token };
   }
@@ -129,7 +131,7 @@ export class DitoClient {
   // replayed one.
   async verifyDirectPost(idToken: string, expectedNonce: string) {
     if (!this.rpDidKey) throw new Error("direct_post verification requires an RP DID key");
-    const signer = await verifyIdTokenSignature(idToken, this.walletIdentityDomain);
+    const signer = await verifyIdTokenSignature(idToken, this.walletIdentityDomain, this.vhSources);
     const claims = JSON.parse(Buffer.from(idToken.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
     if (claims.aud !== this.rpDidKey.did) throw new Error("dito id_token audience mismatch");
     if (claims.nonce !== expectedNonce) throw new Error("dito id_token nonce mismatch");
@@ -141,5 +143,5 @@ export class DitoClient {
 // not the DID string, so an account survives a move to another host; the DID as it
 // is now travels in `did`.
 function bridgeClaims(claims: Record<string, unknown>, signer: { sub: string; method: string }): Record<string, unknown> {
-  return { ...claims, sub: stableSubject(signer.sub), ...(signer.method === "did-webvh" ? { did: signer.sub } : {}) };
+  return { ...claims, sub: stableSubject(signer.sub), ...(signer.method === "did-webvh" || signer.method === "did-vh" ? { did: signer.sub } : {}) };
 }

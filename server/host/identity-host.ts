@@ -25,7 +25,7 @@ import { dirname, join } from "node:path";
 import { validateLogAt, MAX_ENTRIES, Invalid, isObj, asObj, own, onlyKeys, parseJsonl, serialise, parseWitnessFile, mirrorDocument, type Json, type Obj, type Entry, type WitnessFile } from "../../packages/wallet/src/webvh-core.ts";
 import { didToLogUrl as webvhDidToLogUrl, maySignIn, parseDid as webvhParseDid, verifyDataIntegrityProof as verifyProof, verifyProofSignature } from "../../packages/webvh/src/index.ts";
 import { multibaseDecode } from "didwebvh-ts";
-import { VhResolutionError, deriveDidWebDocument, isScid, validateVhLogAt } from "../../packages/vh/src/index.ts";
+import { VhResolutionError, deriveDidWebDocument, isScid, parseVhDid, validateVhLogAt } from "../../packages/vh/src/index.ts";
 import { fetchWithHost } from "../host-fetch.ts";
 import { isReservedName } from "./reserved-names.ts";
 import { counters, Gate, HourlyCount, hostLimits, Refusal } from "./limits.ts";
@@ -479,6 +479,7 @@ export function jwtAlgForKeyType(keyType: AuthenticationKeyType): string {
 // on the Cloudflare Worker (PLAN9), not this process.
 const IDENTITY_FETCH_BASE_URL = env.IDENTITY_FETCH_BASE_URL;
 export async function hostedAuthenticationKey(did: string, expectedVerificationMethod?: string) {
+  if (did.startsWith("did:vh:")) return hostedVhAuthenticationKey(did, expectedVerificationMethod);
   const parsed = parseDid(did);
   const suffix = `.${IDENTITY_DOMAIN}`;
   if (parsed.port || parsed.segments.length || !parsed.domain.endsWith(suffix)) throw new Invalid("authenticated issuer must be a hosted did.md identity");
@@ -500,6 +501,28 @@ export async function hostedAuthenticationKey(did: string, expectedVerificationM
   const checked = await validateLog(entries, witnesses === null ? [] : parseWitnessFile(witnesses), username);
   if (checked.latest.state.id !== did) throw new Invalid("authenticated issuer does not match its current DID document");
   return authenticationKeyFromState(did, checked.latest.state, expectedVerificationMethod);
+}
+/**
+ * The did:vh counterpart: a did:vh DID names no host, so the log is fetched by its SCID from this identity domain's own watcher
+ * endpoint (`/log?scid=`, which serves any name), verified in full, and the DID must be a hosted identity: its document names a
+ * did:web DID under this domain (the location rule the host enforced when it took the log).
+ */
+async function hostedVhAuthenticationKey(did: string, expectedVerificationMethod?: string) {
+  let scid: string;
+  try { scid = parseVhDid(did).scid; } catch { throw new Invalid("authenticated issuer is not a valid did:vh DID"); }
+  const origin = IDENTITY_FETCH_BASE_URL ?? `https://${IDENTITY_DOMAIN}`;
+  const fetchInit = IDENTITY_FETCH_BASE_URL ? { headers: { host: IDENTITY_DOMAIN } } : undefined;
+  const logResponse = await fetchWithHost(`${origin}/log?scid=${scid}`, fetchInit);
+  if (!logResponse.ok) throw new Invalid("authenticated issuer was not found");
+  let checked;
+  try { checked = await validateVhLogAt(parseJsonl(await logResponse.text()) as never); }
+  catch (error) { if (error instanceof VhResolutionError) throw new Invalid(error.message); throw error; }
+  if (checked.parameters.deactivated) throw new Invalid("authenticated issuer is deactivated");
+  if (checked.did !== did) throw new Invalid("authenticated issuer does not match its current DID document");
+  const names: unknown[] = Array.isArray(checked.latest.state.alsoKnownAs) ? checked.latest.state.alsoKnownAs : [];
+  const suffix = `.${IDENTITY_DOMAIN}`;
+  if (!names.some(name => typeof name === "string" && /^did:web:[a-z0-9-]+\.[a-z0-9.-]+$/.test(name) && name.slice("did:web:".length).endsWith(suffix))) throw new Invalid("authenticated issuer must be a hosted did.md identity");
+  return authenticationKeyFromState(did, checked.latest.state as never, expectedVerificationMethod);
 }
 // Resolves an `authentication` verification method from a DID Document
 // state. When `expectedVerificationMethod` is supplied (a proof's own

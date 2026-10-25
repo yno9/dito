@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { resolveVhLog, type VhLogEntry } from "../packages/vh/src/index.ts";
+import { checkDidWebShadow, resolveVhLog, type VhLogEntry } from "../packages/vh/src/index.ts";
 import { vectors } from "../packages/vh/vectors/generate.ts";
 
 const FILE = new URL("../packages/vh/vectors/vectors.json", import.meta.url);
@@ -30,5 +30,19 @@ for (const vector of shared.vectors) {
       // Not just any failure: the one the vector is about.
       await expect(result).rejects.toMatchObject({ name: "VhResolutionError", code: vector.expect.code, message: expect.stringContaining(vector.expect.reason) });
     }
+  });
+}
+
+// ---- the did:web shadow ----------------------------------------------------------------------------------------------
+
+test("the shadow vectors cover the derivation and the ways a did:web document can be wrong", () => {
+  expect(shared.shadows.filter(v => v.ok).length).toBeGreaterThanOrEqual(1);
+  expect(shared.shadows.filter(v => !v.ok).length).toBeGreaterThanOrEqual(10);
+  expect(new Set(shared.shadows.map(v => v.name)).size).toBe(shared.shadows.length);
+});
+
+for (const vector of shared.shadows) {
+  test(`shadow ${vector.name}: ${vector.note}`, () => {
+    expect(checkDidWebShadow(vector.vhDocument as never, vector.didWeb, vector.webDocument).ok).toBe(vector.ok);
   });
 }

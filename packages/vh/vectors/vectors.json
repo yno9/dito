@@ -53,6 +53,75 @@
    }
   },
   {
+   "name": "valid/key-agreement",
+   "note": "A document with an X25519 keyAgreement key and a DIDComm service (what a mediator reads).",
+   "did": "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp",
+   "log": [
+    {
+     "versionId": "1-QmYtRtpdRmvrynw7AXLk9HfLNvRy5yFo9L7giwsxvuEGW1",
+     "versionTime": "2026-01-01T00:00:00Z",
+     "parameters": {
+      "method": "did:vh:1.0",
+      "scid": "QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp",
+      "updateKeys": [
+       "z6MktTxHZ4hxSK41USQtnrsi816sFiQLx361tACky8Z3bJhm"
+      ]
+     },
+     "state": {
+      "@context": [
+       "https://www.w3.org/ns/did/v1",
+       "https://w3id.org/security/multikey/v1"
+      ],
+      "id": "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp",
+      "verificationMethod": [
+       {
+        "id": "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp#k",
+        "type": "Multikey",
+        "controller": "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp",
+        "publicKeyMultibase": "z6MktTxHZ4hxSK41USQtnrsi816sFiQLx361tACky8Z3bJhm"
+       },
+       {
+        "id": "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp#ka",
+        "type": "Multikey",
+        "controller": "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp",
+        "publicKeyMultibase": "z6LSc5P8RANd2LzwAtFQHwHkr1GJvZXTz1cBgegqhdHd5Kac"
+       }
+      ],
+      "authentication": [
+       "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp#k"
+      ],
+      "keyAgreement": [
+       "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp#ka"
+      ],
+      "service": [
+       {
+        "id": "did:vh:QmRyRBtGATetzVbMnLSvcWqGBv2xMvxpctaeCe7CizkDxp#didcomm",
+        "type": "DIDCommMessaging",
+        "serviceEndpoint": {
+         "uri": "https://mediator.example/"
+        }
+       }
+      ]
+     },
+     "proof": [
+      {
+       "type": "DataIntegrityProof",
+       "cryptosuite": "eddsa-jcs-2022",
+       "proofPurpose": "assertionMethod",
+       "verificationMethod": "did:key:z6MktTxHZ4hxSK41USQtnrsi816sFiQLx361tACky8Z3bJhm#z6MktTxHZ4hxSK41USQtnrsi816sFiQLx361tACky8Z3bJhm",
+       "created": "2026-01-01T00:00:00Z",
+       "proofValue": "z5uHe4vVLUBC8Ls6NxBZ66zUjWtuLreDFNwGuY3A1zxpXecrkx2d3hKR3tNzJbSEP8j4g4DhYZaA6RtMDLgAytjyM"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "versionNumber": 1,
+    "deactivated": false
+   }
+  },
+  {
    "name": "valid/rotation-without-prerotation",
    "note": "Entry 2 is signed by the keys of entry 1 and introduces k1; entry 3 is signed by k1.",
    "did": "did:vh:QmQpTjS8RFQks4DWbhnYD58jLsJb1e46wL2nQYKBe6tS5U",
@@ -2762,6 +2831,1538 @@
     "code": "notFound",
     "reason": "No entry"
    }
+  }
+ ],
+ "shadows": [
+  {
+   "name": "valid/derived",
+   "note": "The derivation: the DID replaced in ids, controllers and references (also followed by #, ? or /), alsoKnownAs reduced to the did:vh DID, relative references and other strings untouched.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+    ]
+   },
+   "ok": true
+  },
+  {
+   "name": "invalid/extra-member",
+   "note": "A member the derivation does not give.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+    ],
+    "extra": 1
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/missing-member",
+   "note": "A member the derivation gives is missing.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/other-key",
+   "note": "A verification key that is not the did:vh document's.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkuDdJdKLCgwZuQuEi9xG6LVgJJ9Tebr74CXPYPSumqgJs"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/extra-service",
+   "note": "A service the did:vh document does not have.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     },
+     {
+      "id": "#x",
+      "type": "X",
+      "serviceEndpoint": "https://evil.example"
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/also-known-as-extra",
+   "note": "alsoKnownAs names more than the did:vh DID.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+     "https://evil.example"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/also-known-as-keeps-vh-document-names",
+   "note": "alsoKnownAs copied from the did:vh document instead of reduced.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/also-known-as-another-did",
+   "note": "alsoKnownAs names another did:vh.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:1111111111111111111111111111111111111111111111"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/id-not-the-web-did",
+   "note": "The document's id is another did:web.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:evil.example",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/vh-id-left-in-place",
+   "note": "The did:vh DID was not replaced.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/vh-document-does-not-name-the-web-did",
+   "note": "The did:vh document does not list this did:web DID: the link is one-way.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:bob.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/vh-document-names-nothing",
+   "note": "The did:vh document lists no alias at all.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:web:alice.did.md",
+    "controller": "did:web:alice.did.md",
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:web:alice.did.md#k",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:web:alice.did.md",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:web:alice.did.md#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:web:alice.did.md#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:web:alice.did.md"
+       ]
+      }
+     }
+    ],
+    "alsoKnownAs": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "invalid/not-an-object",
+   "note": "Not a document.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": "did:web:alice.did.md",
+   "ok": false
+  },
+  {
+   "name": "invalid/null",
+   "note": "null.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": null,
+   "ok": false
+  },
+  {
+   "name": "invalid/array",
+   "note": "An array.",
+   "vhDocument": {
+    "@context": [
+     "https://www.w3.org/ns/did/v1",
+     "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+    "alsoKnownAs": [
+     "did:web:alice.did.md",
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ?src=https://alice.did.md",
+     "https://example.org/alice"
+    ],
+    "name": "Alice",
+    "verificationMethod": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     },
+     {
+      "id": "#rel",
+      "type": "Multikey",
+      "controller": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+     }
+    ],
+    "authentication": [
+     "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#k",
+     "#rel"
+    ],
+    "assertionMethod": [
+     "#rel"
+    ],
+    "service": [
+     {
+      "id": "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ#wallet",
+      "type": "SelfIssuedOPAuthorizationEndpoint",
+      "serviceEndpoint": "https://dito.did.md/authorize"
+     },
+     {
+      "id": "#files",
+      "type": "relativeRef",
+      "serviceEndpoint": {
+       "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+       "accept": [
+        "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+       ]
+      }
+     }
+    ]
+   },
+   "didWeb": "did:web:alice.did.md",
+   "webDocument": [
+    {
+     "@context": [
+      "https://www.w3.org/ns/did/v1",
+      "https://w3id.org/security/multikey/v1"
+     ],
+     "id": "did:web:alice.did.md",
+     "controller": "did:web:alice.did.md",
+     "name": "Alice",
+     "verificationMethod": [
+      {
+       "id": "did:web:alice.did.md#k",
+       "type": "Multikey",
+       "controller": "did:web:alice.did.md",
+       "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+      },
+      {
+       "id": "#rel",
+       "type": "Multikey",
+       "controller": "did:web:alice.did.md",
+       "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+      }
+     ],
+     "authentication": [
+      "did:web:alice.did.md#k",
+      "#rel"
+     ],
+     "assertionMethod": [
+      "#rel"
+     ],
+     "service": [
+      {
+       "id": "did:web:alice.did.md#wallet",
+       "type": "SelfIssuedOPAuthorizationEndpoint",
+       "serviceEndpoint": "https://dito.did.md/authorize"
+      },
+      {
+       "id": "#files",
+       "type": "relativeRef",
+       "serviceEndpoint": {
+        "uri": "https://alice.did.md/x/did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ/y",
+        "accept": [
+         "did:web:alice.did.md"
+        ]
+       }
+      }
+     ],
+     "alsoKnownAs": [
+      "did:vh:QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+     ]
+    }
+   ],
+   "ok": false
   }
  ]
 }

@@ -5,12 +5,15 @@
  *
  *   node packages/vh/vectors/generate.ts > packages/vh/vectors/vectors.json
  *
- * tests/vh-vectors.test.ts fails if the file and this script disagree.
+ * tests/vh-vectors.test.ts fails if the file and this script disagree. biset keeps a copy that its own tests run against:
+ *
+ *   cp packages/vh/vectors/vectors.json ../biset/test/fixtures/did-vh-vectors.json
  */
 import { sha256 } from "@noble/hashes/sha2.js";
+import { MultibaseEncoding, multibaseEncode } from "didwebvh-ts";
 import { createDataIntegrityProof } from "../../webvh/src/proof.ts";
 import { keyFromPrivateKey } from "../../webvh/src/signer.ts";
-import { createVhLog, deactivateVhLog, entryHash, keyHash, updateVhLog, type VhLogEntry } from "../src/index.ts";
+import { createVhLog, deactivateVhLog, deriveDidWebDocument, entryHash, keyHash, updateVhLog, type VhLogEntry } from "../src/index.ts";
 
 const key = (label: string) => keyFromPrivateKey(sha256(new TextEncoder().encode(`did:vh test vector key ${label}`)));
 const [k0, k1, k2, k3] = [key("0"), key("1"), key("2"), key("3")] as const;
@@ -39,7 +42,44 @@ async function append(log: VhLogEntry[], signer: typeof k0, seconds: number, par
   return [...log, { ...entry, proof: [proof] }];
 }
 
-export async function vectors(): Promise<{ now: string; vectors: Vector[] }> {
+/** A did:web document offered for a did:vh document, and whether a verifier must accept it as that document's shadow. */
+type ShadowVector = { name: string; note: string; vhDocument: Record<string, unknown>; didWeb: string; webDocument: unknown; ok: boolean };
+
+function shadowVectors(): ShadowVector[] {
+  const scid = "Q".repeat(46);
+  const did = `did:vh:${scid}`;
+  const webDid = "did:web:alice.did.md";
+  const key = "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const vh: Record<string, any> = {
+    "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"], id: did, controller: did,
+    alsoKnownAs: [webDid, `${did}?src=https://alice.did.md`, "https://example.org/alice"], name: "Alice",
+    verificationMethod: [{ id: `${did}#k`, type: "Multikey", controller: did, publicKeyMultibase: key }, { id: "#rel", type: "Multikey", controller: did, publicKeyMultibase: key }],
+    authentication: [`${did}#k`, "#rel"], assertionMethod: ["#rel"],
+    service: [{ id: `${did}#wallet`, type: "SelfIssuedOPAuthorizationEndpoint", serviceEndpoint: "https://dito.did.md/authorize" }, { id: "#files", type: "relativeRef", serviceEndpoint: { uri: `https://alice.did.md/x/${did}/y`, accept: [did] } }],
+  };
+  const shadow = deriveDidWebDocument(vh, webDid);
+  const out: ShadowVector[] = [];
+  const add = (name: string, note: string, webDocument: unknown, ok: boolean, options: { vhDocument?: Record<string, unknown>; didWeb?: string } = {}) =>
+    out.push({ name, note, vhDocument: options.vhDocument ?? vh, didWeb: options.didWeb ?? webDid, webDocument, ok });
+  add("valid/derived", "The derivation: the DID replaced in ids, controllers and references (also followed by #, ? or /), alsoKnownAs reduced to the did:vh DID, relative references and other strings untouched.", shadow, true);
+  add("invalid/extra-member", "A member the derivation does not give.", { ...shadow, extra: 1 }, false);
+  add("invalid/missing-member", "A member the derivation gives is missing.", (({ name: _name, ...rest }) => rest)(shadow as any), false);
+  add("invalid/other-key", "A verification key that is not the did:vh document's.", { ...shadow, verificationMethod: [{ ...shadow.verificationMethod[0], publicKeyMultibase: "z6MkuDdJdKLCgwZuQuEi9xG6LVgJJ9Tebr74CXPYPSumqgJs" }, shadow.verificationMethod[1]] }, false);
+  add("invalid/extra-service", "A service the did:vh document does not have.", { ...shadow, service: [...shadow.service, { id: "#x", type: "X", serviceEndpoint: "https://evil.example" }] }, false);
+  add("invalid/also-known-as-extra", "alsoKnownAs names more than the did:vh DID.", { ...shadow, alsoKnownAs: [did, "https://evil.example"] }, false);
+  add("invalid/also-known-as-keeps-vh-document-names", "alsoKnownAs copied from the did:vh document instead of reduced.", { ...shadow, alsoKnownAs: vh.alsoKnownAs }, false);
+  add("invalid/also-known-as-another-did", "alsoKnownAs names another did:vh.", { ...shadow, alsoKnownAs: [`did:vh:${"1".repeat(46)}`] }, false);
+  add("invalid/id-not-the-web-did", "The document's id is another did:web.", { ...shadow, id: "did:web:evil.example" }, false);
+  add("invalid/vh-id-left-in-place", "The did:vh DID was not replaced.", vh, false);
+  add("invalid/vh-document-does-not-name-the-web-did", "The did:vh document does not list this did:web DID: the link is one-way.", shadow, false, { didWeb: "did:web:bob.did.md" });
+  add("invalid/vh-document-names-nothing", "The did:vh document lists no alias at all.", shadow, false, { vhDocument: { ...vh, alsoKnownAs: [] } });
+  add("invalid/not-an-object", "Not a document.", "did:web:alice.did.md", false);
+  add("invalid/null", "null.", null, false);
+  add("invalid/array", "An array.", [shadow], false);
+  return out;
+}
+
+export async function vectors(): Promise<{ now: string; vectors: Vector[]; shadows: ShadowVector[] }> {
   const plain = await createVhLog({ signer: k0, updateKeys: [k0.multikey], document: did => document(did), now: at(0) });
   const pre = await createVhLog({ signer: k0, updateKeys: [k0.multikey], nextKeyHashes: [keyHash(k1.multikey)], document: did => document(did), now: at(0) });
   const out: Vector[] = [];
@@ -47,6 +87,17 @@ export async function vectors(): Promise<{ now: string; vectors: Vector[] }> {
 
   // ---- valid ----------------------------------------------------------------------------------------------------
   add("valid/single-entry", "A created log.", plain.did, plain.log, { ok: true, versionNumber: 1, deactivated: false });
+
+  // A DIDComm-capable document: an X25519 key agreement key (multicodec 0xec01), a service. Its keys are fixed, so other implementations can check what they read from it.
+  const agreementKey = multibaseEncode(new Uint8Array([0xec, 0x01, ...sha256(new TextEncoder().encode("did:vh test vector key agreement"))]), MultibaseEncoding.BASE58_BTC);
+  const withAgreement = await createVhLog({
+    signer: k0, updateKeys: [k0.multikey], document: did => document(did, {
+      verificationMethod: [{ id: `${did}#k`, type: "Multikey", controller: did, publicKeyMultibase: k0.multikey }, { id: `${did}#ka`, type: "Multikey", controller: did, publicKeyMultibase: agreementKey }],
+      keyAgreement: [`${did}#ka`],
+      service: [{ id: `${did}#didcomm`, type: "DIDCommMessaging", serviceEndpoint: { uri: "https://mediator.example/" } }],
+    }), now: at(0),
+  });
+  add("valid/key-agreement", "A document with an X25519 keyAgreement key and a DIDComm service (what a mediator reads).", withAgreement.did, withAgreement.log, { ok: true, versionNumber: 1, deactivated: false });
 
   const rotated = await updateVhLog({ log: plain.log, signer: k0, parameters: { updateKeys: [k1.multikey] }, now: at(10) });
   const rotated2 = await updateVhLog({ log: rotated.log, signer: k1, document: { ...rotated.log[1]!.state, service: [{ id: `${plain.did}#s`, type: "S", serviceEndpoint: "https://s.example" }] }, now: at(20) });
@@ -95,7 +146,7 @@ export async function vectors(): Promise<{ now: string; vectors: Vector[] }> {
   bad("witness-not-supported", "A witness configuration is refused rather than ignored.", await append(plain.log, k0, 10, { witness: { threshold: 1, witnesses: [{ id: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK" }] } }), "witnesses", { code: "featureNotSupported" });
   bad("two-version-selectors", "More than one of versionId, versionTime and versionNumber.", plain.log, "At most one", { code: "invalidOptions", options: { versionNumber: 1, versionId: plain.log[0]!.versionId } });
   bad("version-not-found", "A version the log does not have.", plain.log, "No entry", { code: "notFound", options: { versionNumber: 2 } });
-  return { now: NOW, vectors: out };
+  return { now: NOW, vectors: out, shadows: shadowVectors() };
 }
 
 if (process.argv[1]?.endsWith("vectors/generate.ts")) {

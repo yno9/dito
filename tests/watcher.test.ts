@@ -127,6 +127,29 @@ test("a notification that names no place, for a log the watcher has never held, 
   expect((await notify("did:vh:short")).status).toBe(400);
 });
 
+test("a notification without a src carries the complete log (text/jsonl): it is verified, must extend the one held, and is held only for a place the operator listed", async () => {
+  const { call, world } = setup();
+  const alice = await identity();
+  const scid = alice.did.slice(7);
+  const push = (log: VhLogEntry[], id = alice.did) => call(`/log?id=${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "text/jsonl" }, body: serializeVhLog(log) });
+  expect(await (await push(alice.log)).json()).toMatchObject({ status: "stored", versionNumber: 1 });
+  expect(world.asked).toEqual([]); // nothing was fetched
+  const longer = (await alice.extend(alice.log, "A")).log;
+  expect(await (await push(longer)).json()).toMatchObject({ status: "updated", versionNumber: 2 });
+  expect(await (await push(alice.log)).json()).toMatchObject({ status: "stale" });
+  const other = (await alice.extend(alice.log, "B")).log;
+  expect((await push(other)).status).toBe(409);
+  expect(await (await call(`/log?scid=${scid}`)).text()).toBe(serializeVhLog(longer));
+  // forged, someone else's, or for a place nobody listed
+  const tampered = structuredClone(alice.log); (tampered[0]!.state as { name?: string }).name = "x";
+  expect((await push(tampered)).status).toBe(422);
+  const mallory = await identity();
+  expect((await push(mallory.log, alice.did)).status).toBe(422);
+  const eve = await identity("eve.example.org");
+  expect((await push(eve.log, eve.did)).status).toBe(403);
+  expect((await call(`/log?id=${encodeURIComponent(alice.did)}`, { method: "POST" })).status).toBe(400); // pushed, so no place to follow up: say where, or send the log
+});
+
 test("only the operator's token deletes; witness files and resources are not supported", async () => {
   const { world, call, notify } = setup();
   const alice = await identity();

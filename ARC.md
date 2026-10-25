@@ -72,6 +72,28 @@ What dito is today and how the parts fit. (Protocol details: [SPEC-webvh-hosting
   SSRF guard.
 - The did:web mirror (`did.json`) is `generateParallelDidWeb` plus an atproto-shaped post-process.
 
+### 4.1 Identity is the SCID, and a log is only as new as the newest one accepted
+
+- An identity is its **method and SCID** (`did:webvh:<SCID>`, `did:vh:<SCID>`); the rest of a did:webvh DID is where
+  the log currently is, and changes when it moves. Local stores key on the SCID; wires (DIDComm, id_tokens, DID documents)
+  carry the full DID. A did:webvh SCID and a did:vh SCID are never equal: two identities are one person only when each
+  document names the other in `alsoKnownAs` and both logs verify.
+- A log that verifies may still be old, or the other half of a fork. `packages/webvh/src/freshness.ts` keeps the newest
+  `versionId` accepted per identity (`VersionMemory`) and refuses a log that is shorter (`StaleLogError`) or does not
+  contain it (`ForkedLogError`). `resolveDidWebvh` and `resolveVhLog` take a `memory`.
+- **The cost of that protection is that a rollback you meant to make is refused too**: a host restored from a backup, or a
+  log recovered from an old copy, serves a version older than the one remembered, and every party that remembers the newer
+  one will keep refusing it (they must forget the DID by hand), however valid the log is. So: restore by *extending* the
+  log (a new entry on top of the newest one anyone may have seen), not by republishing an old copy; and offer a way to
+  forget (`dito forget <did>`; `--no-memory` for a single check).
+- Where a memory lives: the CLI keeps one file, `$XDG_STATE_HOME/dito/versions.json` (default `~/.local/state/dito/versions.json`),
+  used by `dito verify <did>` and `dito fetch <did>`; a damaged file is an error, never an empty memory. An `Identity`
+  needs none for its own log: its container already holds the log, whose newest entry is what it remembers. The browser
+  wallet, biset and the host are still to do.
+- did:vh logs (`did:vh:<SCID>`, no host in the DID) are handled by `packages/vh`, not didwebvh-ts, which refuses a
+  `state.id` that is not a did:webvh. It follows didvh-spec.md (a pre-draft: expect it to move) and is pinned by
+  `packages/vh/vectors/vectors.json`. Witnesses are refused (`featureNotSupported`), not ignored.
+
 ## 5. Keys and the wallet
 
 - **One phrase, deterministic keys.** 24-word BIP-39 → SLIP-0010 Ed25519: `m/0'` Root (and genesis Sign key),

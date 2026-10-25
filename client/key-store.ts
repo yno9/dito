@@ -165,10 +165,10 @@ export async function readStoredIdentity(username: string): Promise<StoredIdenti
   return transaction<StoredIdentity | undefined>("readonly", store => store.get(username));
 }
 
-/** Lists local records without unlocking or exposing any sealed secret. */
+/** Lists local records without unlocking or exposing any sealed secret. Records of an earlier DID method (did:webvh) are not listed: they cannot be opened any more. */
 export async function listStoredIdentities(): Promise<StoredIdentity[]> {
   const records = await transaction<StoredIdentity[]>("readonly", store => store.getAll());
-  return records.filter(record => record && (record.v === 4 || record.v === 5)).sort((a, b) => a.username.localeCompare(b.username));
+  return records.filter(record => record && (record.v === 4 || record.v === 5) && typeof record.did === "string" && record.did.startsWith("did:vh:")).sort((a, b) => a.username.localeCompare(b.username));
 }
 
 /**

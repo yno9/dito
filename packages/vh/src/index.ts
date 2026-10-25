@@ -8,3 +8,5 @@ export * from "./src.ts";
 export * from "./didweb.ts";
 export * from "./policy.ts";
 export * from "./conformance.ts";
+export * from "./hosting.ts";
+export * from "./aliases.ts";

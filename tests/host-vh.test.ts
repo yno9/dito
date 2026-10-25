@@ -151,18 +151,29 @@ test("the log is found by its SCID, from any name's host, with public CORS", asy
   expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
 });
 
-test("a SCID is published under one name only", async () => {
+test("a SCID belongs to one name: a log that extends the published one (a move) takes it over, another copy is refused", async () => {
   fresh();
-  const { log, did, k0, k1, k2 } = await identity("alice");
+  const { log, did, k1, k2 } = await identity("alice");
   await put("alice", log);
-  // The same identity, renamed in a later entry, cannot also be put under the new name from scratch...
-  const renamed = await updateVhLog({ log, signer: k1, now: Date.now() + 2000, document: { ...log[0]!.state, alsoKnownAs: ["did:web:alice.did.md", "did:web:alice2.did.md"] }, parameters: { updateKeys: [k1.multikey], nextKeyHashes: [keyHash(k2.multikey)] } });
-  const again = await put("alice2", renamed.log);
-  expect(again.status).toBe(400);
-  expect(await again.text()).toMatch(/already published under another name/);
-  expect(k0.multikey).toBeTruthy();
-  expect(did).toBeTruthy();
-  expect(store.index.size).toBe(1);
+  // The same first entry with another second entry that names alice2: valid, but it does not extend what alice holds.
+  const grown = await updateVhLog({ log, signer: k1, now: Date.now() + 2000, document: { ...log[0]!.state, service: [{ id: "#s", type: "S", serviceEndpoint: "https://s.example" }] }, parameters: { updateKeys: [k1.multikey], nextKeyHashes: [keyHash(k2.multikey)] } });
+  await post("alice", [grown.log[1]!]);
+  const fork = await updateVhLog({ log, signer: k1, now: Date.now() + 2000, document: { ...log[0]!.state, alsoKnownAs: ["did:web:alice2.did.md"] }, parameters: { updateKeys: [k1.multikey], nextKeyHashes: [keyHash(k2.multikey)] } });
+  const refused = await put("alice2", fork.log);
+  expect(refused.status).toBe(400);
+  expect(await refused.text()).toMatch(/already published under another name.*does not extend/);
+  expect(store.index.get(did.slice(7))).toBe("alice");
+  // The move extends it: alice2 takes the SCID, alice's copy is stale but untouched until it is taken down.
+  const moved = await updateVhLog({ log: grown.log, signer: k2, now: Date.now() + 4000, document: { ...grown.log[1]!.state, alsoKnownAs: ["did:web:alice2.did.md"] }, parameters: { updateKeys: [k2.multikey], nextKeyHashes: [] } });
+  expect((await put("alice2", moved.log)).status).toBe(201);
+  expect(store.index.get(did.slice(7))).toBe("alice2");
+  expect(await (await call("anywhere", `/log?scid=${did.slice(7)}`)).text()).toBe(serializeVhLog(moved.log));
+  expect(await (await call("alice", "/.well-known/did.jsonl")).text()).toBe(serializeVhLog(grown.log));
+  // Taking the old copy down leaves the SCID with alice2.
+  const proof = await createDataIntegrityProof({ did }, { privateKey: k1.privateKey, verificationMethod: `did:key:${k1.multikey}#${k1.multikey}`, proofPurpose: "assertionMethod", created: new Date().toISOString() });
+  expect((await call("alice", "/.well-known/did.jsonl", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ did, proof }) })).status).toBe(204);
+  expect(store.index.get(did.slice(7))).toBe("alice2");
+  expect((await call("anywhere", `/log?scid=${did.slice(7)}`)).status).toBe(200);
 });
 
 test("deactivating removes the did:web document; the log, with its last entry, stays readable", async () => {

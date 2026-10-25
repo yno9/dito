@@ -209,8 +209,12 @@ and a host tells the two kinds of log apart by `parameters.method` in the first 
   document: every `did:vh:<SCID>` becomes the location's did:web DID, and `alsoKnownAs` becomes `["did:vh:<SCID>"]` and
   nothing else. A deactivated DID has no `did.json` (`404`). A verifier takes the did:vh document as the truth and
   accepts a `did.json` only if it equals that derivation (`checkDidWebShadow`): a link in both directions.
-* **One SCID, one location.** A host MUST NOT publish the same SCID at two locations (`400`), so that a log can be
-  found by its SCID.
+* **One SCID, one location.** `/log?scid=` has to find one log, so a SCID belongs to one location at a time. It changes
+  location only by a *move*: a `PUT` at another location of a log that **extends** the one the holder publishes (the
+  published entries unchanged, a new entry on top, typically one that names the new location instead) takes the SCID
+  over. Any other log of that SCID at a second location (an older copy, or another continuation of the same history) is
+  refused (`400`). The holder's copy is stale after a move and is to be taken down; doing so (`DELETE`) leaves the SCID
+  with the new location.
 * **`GET /log?scid=<SCID>`** (VH-Log's watcher read API) returns the log, and **`GET /witness?scid=<SCID>`** the witness
   file, of a SCID published on this host, whatever name it is under, with the same CORS as the other reads. `404`
   when unknown or taken down; `400` when `scid` is not a SCID.

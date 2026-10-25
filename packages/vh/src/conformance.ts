@@ -24,6 +24,13 @@ export async function advertisesVh(target: ConformanceTarget): Promise<boolean> 
   } catch { return false; }
 }
 
+/** A disconnect request for `did`, signed by `signer`. */
+async function deleteBody(did: string, signer: Ed25519Key): Promise<string> {
+  const document = { did };
+  const proof = await createDataIntegrityProof(document, { privateKey: signer.privateKey, verificationMethod: `did:key:${signer.multikey}#${signer.multikey}`, proofPurpose: "assertionMethod", created: new Date().toISOString() });
+  return JSON.stringify({ ...document, proof });
+}
+
 export async function runVhConformance(target: ConformanceTarget): Promise<ConformanceResult[]> {
   const results: ConformanceResult[] = [];
   const check = async (name: string, fn: () => Promise<void>) => {
@@ -115,15 +122,40 @@ export async function runVhConformance(target: ConformanceTarget): Promise<Confo
     expect(await (await target.fetch(logUrl(host))).text() === serializeVhLog(log), "the published log changed");
   });
 
-  await check("V7. a SCID is published under one location only", async () => {
-    const other = target.newLocation();
-    const both = await updateVhLog({
-      log, signer: alice.k2, now: Date.now() + 6000,
-      document: { ...log.at(-1)!.state, alsoKnownAs: [didWebFor(`https://${host}`), didWebFor(`https://${other}`)] },
-      parameters: { updateKeys: [alice.k2.multikey], nextKeyHashes: [] },
+  await check("V7. a SCID is published under one location: another continuation of its log at a second location is refused; a log that extends the published one (a move) takes it over", async () => {
+    const from = target.newLocation(), to = target.newLocation();
+    const carol = await identity(from);
+    expect((await put(from, carol.log)).status === 201, "could not publish");
+    const held = await updateVhLog({
+      log: carol.log, signer: carol.k1, now: Date.now() + 2000,
+      document: { ...carol.log[0]!.state, service: [{ id: "#s", type: "S", serviceEndpoint: "https://s.example" }] },
+      parameters: { updateKeys: [carol.k1.multikey], nextKeyHashes: [keyHash(carol.k2.multikey)] },
     });
-    expect(refused((await put(other, both.log)).status), "the same SCID was accepted at a second location");
-    expect(await status(logUrl(other)) === 404, "nothing may be stored");
+    const posted = await target.fetch(logUrl(from), { method: "POST", headers: { "content-type": "text/jsonl" }, body: `${JSON.stringify(held.log.at(-1))}\n` });
+    expect(posted.status === 204, `expected 204, got ${posted.status}: ${await posted.text()}`);
+    // The same first entry, another second entry that names the other location: valid, but it does not extend what the host holds.
+    const fork = await updateVhLog({
+      log: carol.log, signer: carol.k1, now: Date.now() + 2000,
+      document: { ...carol.log[0]!.state, alsoKnownAs: [didWebFor(`https://${to}`)] },
+      parameters: { updateKeys: [carol.k1.multikey], nextKeyHashes: [keyHash(carol.k2.multikey)] },
+    });
+    expect(refused((await put(to, fork.log)).status), "another continuation of the log was accepted at a second location");
+    expect(await status(logUrl(to)) === 404, "nothing may be stored");
+    // The move: the published log plus one entry that names the new location instead.
+    const moved = await updateVhLog({
+      log: held.log, signer: carol.k2, now: Date.now() + 4000,
+      document: { ...held.log.at(-1)!.state, alsoKnownAs: [didWebFor(`https://${to}`)] },
+      parameters: { updateKeys: [carol.k2.multikey], nextKeyHashes: [] },
+    });
+    const response = await put(to, moved.log);
+    expect(response.status === 201, `expected 201, got ${response.status}: ${await response.text()}`);
+    const scidOfCarol = carol.did.slice("did:vh:".length);
+    expect(await (await target.fetch(scidUrl(to, scidOfCarol))).text() === serializeVhLog(moved.log), "the SCID must now find the moved log");
+    // Taking the old copy down (signed by a key of the log it holds) leaves the SCID with the new location.
+    const gone = await target.fetch(logUrl(from), { method: "DELETE", headers: { "content-type": "application/json" }, body: await deleteBody(carol.did, carol.k1) });
+    expect(gone.status === 204, `expected 204, got ${gone.status}: ${await gone.text()}`);
+    expect(await (await target.fetch(scidUrl(to, scidOfCarol))).text() === serializeVhLog(moved.log), "taking the old copy down must not unindex the new one");
+    await target.fetch(logUrl(to), { method: "DELETE", headers: { "content-type": "application/json" }, body: await deleteBody(carol.did, carol.k2) }).catch(() => undefined);
   });
 
   await check("V8. a did:vh log is not replaced by another log: PUT must keep the published log as a prefix", async () => {
@@ -144,11 +176,7 @@ export async function runVhConformance(target: ConformanceTarget): Promise<Confo
   });
 
   await check("V10. DELETE signed by a current update key takes the log, did.json and the SCID down (204); the location is free again", async () => {
-    const request = async (signer: Ed25519Key) => {
-      const document = { did: alice.did };
-      const proof = await createDataIntegrityProof(document, { privateKey: signer.privateKey, verificationMethod: `did:key:${signer.multikey}#${signer.multikey}`, proofPurpose: "assertionMethod", created: new Date().toISOString() });
-      return JSON.stringify({ ...document, proof });
-    };
+    const request = (signer: Ed25519Key) => deleteBody(alice.did, signer);
     expect(refused(await status(logUrl(host), { method: "DELETE", headers: { "content-type": "application/json" }, body: await request(key()) })), "a DELETE signed by a stranger was accepted");
     const response = await target.fetch(logUrl(host), { method: "DELETE", headers: { "content-type": "application/json" }, body: await request(alice.k1) });
     expect(response.status === 204, `expected 204, got ${response.status}: ${await response.text()}`);

@@ -332,7 +332,8 @@ async function serveLog(request: Request, username: string, resource: string) {
       if (Number.isNaN(created) || Math.abs(Date.now() - created) > 5 * 60_000) throw new Invalid("disconnect proof is outside its accepted time window");
       if (!(await verifyProof(document, proof, checked.parameters.updateKeys))) throw new Invalid("disconnect request has no valid current update-key proof");
       for (const slot of ["log", "witness", "web", "routing"] as const) await identityStore.remove(username, slot);
-      if (isVhLog(parseJsonl(source))) await identityStore.scids?.remove(checked.parameters.scid!);
+      // Only if the SCID is still this name's: after a move it belongs to the new name, and taking the old copy down leaves that alone.
+      if (isVhLog(parseJsonl(source)) && await identityStore.scids?.get(checked.parameters.scid!) === username) await identityStore.scids!.remove(checked.parameters.scid!);
       return new Response(null, { status: 204, headers: cors(request) });
     });
   }
@@ -387,11 +388,16 @@ async function serveLog(request: Request, username: string, resource: string) {
     if (vh) {
       const index = identityStore.scids;
       if (!index) throw new Invalid("this host does not publish did:vh logs");
-      // A SCID is published under one name: `/log?scid=` has to find one log. Checked and claimed under the SCID's own lock.
+      // `/log?scid=` has to find one log, so a SCID belongs to one name. It changes name only by a move: a log that extends the one
+      // the holder publishes (the move entry on top) takes the SCID over, and the holder's copy is then stale until it is taken
+      // down. Any other log of this SCID under another name (an older copy, say) is refused. Checked under the SCID's own lock.
       const scid = checked.parameters.scid!;
       await identityStore.exclusive(`scid:${scid}`, async () => {
         const holder = await index.get(scid);
-        if (holder !== null && holder !== username) throw new Invalid("this DID is already published under another name on this host");
+        if (holder !== null && holder !== username) {
+          const held = await identityStore.read(holder, "log");
+          if (held !== null && !(full.startsWith(held) && full.length > held.length)) throw new Invalid("this DID is already published under another name on this host, and this log does not extend that copy");
+        }
         await write();
         await index.put(scid, username);
       });

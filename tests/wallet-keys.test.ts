@@ -13,7 +13,7 @@ import { createGenesisEntry, currentVhParameters, prepareLocationEntry, prepareU
 import {
   createVhLog, keyFromPrivateKey, keyHash, locationsOf, resolveVhLog, serializeVhLog, verifyProofSignature, withLocation, type VhLogEntry,
 } from "../packages/vh/src/index.ts";
-import { resolveRpDocument, verifyRequestObjectJws } from "../client/request-object.ts";
+import { isRpDid, resolveRpDocument, verifyRequestObjectJws } from "../client/request-object.ts";
 
 test("one Master mnemonic deterministically derives Root and every hardened pre-rotation key", async () => {
   const identity = await createIdentityMaterial();
@@ -231,6 +231,36 @@ test("without a src in the kid, the wallet's own watchers are asked", async () =
   expect(seen[0]).toContain(`https://did.md/log?scid=${created.did.slice("did:vh:".length)}`);
 });
 
+test("a did:web relying party is read from the did.json at its host, and must name that DID", async () => {
+  const privateKey = ed25519.utils.randomSecretKey();
+  const key = keyFromPrivateKey(privateKey);
+  const did = "did:web:mail.did.md";
+  const document = {
+    "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"], id: did,
+    verificationMethod: [{ id: "#key-1", type: "Multikey", controller: did, publicKeyMultibase: key.multikey }], authentication: ["#key-1"],
+    service: [{ id: "#redirect", type: "SIOPRedirectTarget", serviceEndpoint: "https://mail.did.md/wallet/callback" }],
+  };
+  const seen: string[] = [];
+  globalThis.fetch = (async (url: string | URL) => { seen.push(String(url)); return Response.json(document); }) as typeof fetch;
+  const jwt = signedRequestObject(privateKey, `${did}#key-1`, { hello: "world" });
+  const result = await verifyRequestObjectJws(jwt);
+  expect(result.rpDid).toBe(did);
+  expect(result.service).toEqual(document.service);
+  expect(seen).toEqual(["https://mail.did.md/.well-known/did.json"]);
+  // a document that names another DID, a signature by another key, and a host that is not a plain one are refused
+  globalThis.fetch = (async () => Response.json({ ...document, id: "did:web:evil.example" })) as typeof fetch;
+  await expect(resolveRpDocument(did)).rejects.toThrow(/does not name its DID/);
+  globalThis.fetch = (async () => Response.json(document)) as typeof fetch;
+  await expect(verifyRequestObjectJws(signedRequestObject(ed25519.utils.randomSecretKey(), `${did}#key-1`, {}))).rejects.toThrow("signature is invalid");
+  for (const bad of ["did:web:localhost", "did:web:127.0.0.1", "did:web:mail.did.md%3A8443", "did:web:mail.did.md:path", "did:web:mail.did.md?x=1"]) {
+    expect(isRpDid(bad), bad).toBe(false);
+    await expect(resolveRpDocument(bad)).rejects.toThrow();
+  }
+  expect(isRpDid(did)).toBe(true);
+  expect(isRpDid(`did:vh:${"Q".repeat(46)}`)).toBe(true);
+  expect(isRpDid("did:webvh:Qm:example.com")).toBe(false);
+});
+
 test("verifyRequestObjectJws rejects a tampered payload", async () => {
   const privateKey = ed25519.utils.randomSecretKey();
   const created = await rpLog(privateKey);
@@ -263,5 +293,5 @@ test("a src that is an IP address or not https is refused before anything is fet
     const jwt = signedRequestObject(privateKey, `${created.did}?src=${encodeURIComponent(src)}#key-1`, {});
     await expect(verifyRequestObjectJws(jwt)).rejects.not.toThrow("must not fetch");
   }
-  await expect(resolveRpDocument(`did:web:t.biset.md`)).rejects.toThrow(/did:vh/);
+  await expect(resolveRpDocument(`did:webvh:Qm:t.biset.md`)).rejects.toThrow(/did:vh or did:web/);
 });

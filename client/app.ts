@@ -10,7 +10,7 @@ import {
   spareFromMasterSeed,
 } from "../packages/wallet/src/keys.ts";
 import { createGenesisEntry, currentVhParameters, prepareLocationEntry, prepareUpdateEntry } from "../packages/wallet/src/vh-ops.ts";
-import { resolveRpDocument, verifyRequestObjectJws } from "./request-object.ts";
+import { isRpDid, resolveRpDocument, verifyRequestObjectJws } from "./request-object.ts";
 import {
   createPasskeyProtector,
   clearLocalIdentityState,
@@ -3979,7 +3979,7 @@ function validResponseType(value) { return value === "code" || value === "vp_tok
 async function jarAuthorizationParameters(clientId, jwt) {
   const { payload, rpDid, service, document: rpDocument } = await verifyRequestObjectJws(jwt, { watchers: [`https://${DOMAIN}`] });
   // Where the RP's log is published, for showing its host: from its own document.
-  knownSources.set(rpDid, locationsOf(rpDid, rpDocument)[0]?.src ?? null);
+  if (rpDid.startsWith("did:vh:")) knownSources.set(rpDid, locationsOf(rpDid, rpDocument)[0]?.src ?? null);
   if (rpDid !== clientId) throw new Error("The authorization request client_id does not match its signer.");
   if (payload.client_id !== clientId || !validResponseType(payload.response_type)) throw new Error("The authorization request is invalid.");
   const usesCode = payload.response_type === "code";
@@ -4110,7 +4110,7 @@ async function siopAuthorizationParameters(params) {
   const metadata = params.has("client_metadata") ? siopJson(params.get("client_metadata"), "client_metadata") : {};
   // Believed only when the DID itself says so; any trouble reading its document leaves the host alone as the identity.
   let rpDid;
-  if (typeof metadata.rp_did === "string" && metadata.rp_did.startsWith("did:vh:")) {
+  if (isRpDid(metadata.rp_did)) {
     try {
       const document = (await resolveRpDocument(metadata.rp_did, { watchers: [`https://${DOMAIN}`] })).document;
       const published = Array.isArray(document.service) && document.service.some(entry => entry && typeof entry === "object" && entry.type === SIOP_REDIRECT_TARGET && entry.serviceEndpoint === callback);
@@ -4135,7 +4135,7 @@ async function oauthAuthorizationParameters(search = null, { embedded = false } 
   const keys = [...params.keys()];
   // SIOPv2 / OpenID4VP, the way a relying party that has no key of its own asks: `client_id=redirect_uri:<its redirect URL>`.
   if (params.get("client_id")?.startsWith("redirect_uri:")) return await siopAuthorizationParameters(params);
-  if (params.get("client_id")?.startsWith("did:vh:")) {
+  if (isRpDid(params.get("client_id"))) {
     const jarKeys = ["client_id", "request", "response_type"];
     if (keys.length !== jarKeys.length || keys.some(key => !jarKeys.includes(key)) || !validResponseType(params.get("response_type"))) throw new Error("The authorization request is invalid.");
     return jarAuthorizationParameters(params.get("client_id"), params.get("request"));
@@ -4232,7 +4232,7 @@ async function beginOAuthAuthorization() {
     let outcomeReporting = false;
     if (request.clientId.startsWith("redirect_uri:")) {
       clientName = request.clientDisplayName ?? request.clientDisplayHost;
-    } else if (request.clientId.startsWith("did:vh:")) {
+    } else if (isRpDid(request.clientId)) {
       clientName = request.clientId;
     } else {
       const response = await fetch(`${API}/v1/oauth/clients/${encodeURIComponent(request.clientId)}`, { cache: "no-store" });
@@ -6538,7 +6538,7 @@ async function embedApprovalFor(request, host) {
   const search = validEmbedLogin(request)?.replace(/^\/authorize/, "");
   if (!search) throw new Error("The sign-in request is invalid.");
   const parameters = await oauthAuthorizationParameters(search, { embedded: true });
-  if (!parameters || !(parameters.clientId.startsWith("did:vh:") || parameters.clientId.startsWith("redirect_uri:"))) throw new Error("The sign-in request is invalid.");
+  if (!parameters || !(isRpDid(parameters.clientId) || parameters.clientId.startsWith("redirect_uri:"))) throw new Error("The sign-in request is invalid.");
   if (!embedSignInTargetsPage(parameters.redirectUri, embedParentOrigin)) throw new Error("This sign-in is not for the page that asked for it.");
   walletAuthorization = { ...parameters, clientName: parameters.clientDisplayName ?? parameters.clientDisplayHost ?? parameters.clientId, outcomeReporting: false };
   const edit = didDocumentEditDetail(parameters.authorizationDetails, "");
@@ -6959,7 +6959,7 @@ function validEmbedLogin(value) {
     // parameters plainly (oauthAuthorizationParameters checks them strictly, and the redirect against
     // the page that asked).
     const shaped = clientId.startsWith("redirect_uri:") ? new Set(keys).size === keys.length
-      : clientId.startsWith("did:vh:") && new Set(keys).size === keys.length
+      : isRpDid(clientId) && new Set(keys).size === keys.length
       && (keys.includes("request") ? keys.length === 3 && ["client_id", "request", "response_type"].every(key => keys.includes(key)) : true);
     return url.origin === location.origin && url.pathname === "/authorize" && shaped ? `${url.pathname}${url.search}` : null;
   } catch { return null; }

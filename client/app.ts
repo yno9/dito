@@ -34,6 +34,7 @@ import {
 } from "./key-store.ts";
 import { decryptIdentityContainer, encryptIdentityContainer } from "../packages/wallet/src/wallet-backup.ts";
 import { initCcd } from "./ccd.ts";
+import { checkedIdentityContainer, containerPath, parseLog, scidFromDid } from "./identity-container.ts";
 import { DERIVED_SECRET_DETAIL, DID_DOCUMENT_EDIT_DETAIL, KEY_AUTHORIZATION_DETAIL, derivedSecretDetails, didDocumentEditDetail, keyAuthorizationDetail, oauthAuthorizationDetails } from "./authorization-details.ts";
 import { base64url, base64urlDecode } from "../packages/vh/src/base64url.ts";
 import {
@@ -1459,10 +1460,6 @@ async function saveApplicationAuthorizationMetadata({ capability, edit, appKey }
   portableApplications = [...survivors, application];
 }
 
-function scidFromDid(did) {
-  try { return parseVhDid(did).scid; } catch { throw new Error("Could not derive an SCID filename from this DID."); }
-}
-
 // A did:vh names no host. Where its log is published is what the newest document says (its first
 // location), so the host of an identity is looked up from its log: the loaded one's entries, or the
 // last snapshot saved in this browser for the stored one (rememberLocation, below).
@@ -1611,15 +1608,6 @@ function downloadWalletBackup(contents, did) {
 
 // Container paths are keyed by the SCID, which is the identity: no username,
 // and unchanged when the DID moves between hosts.
-function containerPath(did, name) {
-  return `identities/${scidFromDid(did)}/${name}`;
-}
-
-/** Containers v1/v2 keyed their files by a did.md username; read-only, so old exports still recover. */
-function legacyContainerPath(username, name) {
-  return `identities/${username}/${name}`;
-}
-
 async function fetchCompleteDidLog(record) {
   const snapshot = await readDidLogSnapshot(record.username);
   if (snapshot?.did === record.did) { try { rememberLocation(parseLog(snapshot.didJsonl)); } catch { /* unreadable snapshot: the live log decides */ } }
@@ -1695,104 +1683,6 @@ async function createIdentityContainer(masterSeed) {
   };
   wipe(root.privateKey);
   return container;
-}
-
-function containerString(value, label, maximum = 4096) {
-  if (typeof value !== "string" || !value || value.length > maximum) throw new Error(`Identity container ${label} is invalid.`);
-  return value;
-}
-
-/** Reads the first container version, whose keyring was a did.md local vault
- * record. Retained solely so users can recover existing exports. */
-function checkedIdentityContainerV1(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || value.format !== "did.md/identity-container" || value.version !== 1
-    || !value.manifest || typeof value.manifest !== "object" || Array.isArray(value.manifest)
-    || value.manifest.format !== "did.md/identity-container" || value.manifest.version !== 1
-    || !Array.isArray(value.manifest.identities) || value.manifest.identities.length !== 1
-    || !value.files || typeof value.files !== "object" || Array.isArray(value.files)) {
-    throw new Error("This is not a supported did.md identity container.");
-  }
-  const identities = value.manifest.identities.map(identity => {
-    if (!identity || typeof identity !== "object" || Array.isArray(identity)) throw new Error("Identity container manifest is invalid.");
-    const username = containerString(identity.username, "username", 64);
-    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(username)) throw new Error("Identity container username is invalid.");
-    const did = containerString(identity.did, "DID");
-    const generation = containerString(identity.generation, "generation", 512);
-    const didLogPath = containerString(identity.didLogPath, "DID log path", 256);
-    const keyringPath = containerString(identity.keyringPath, "keyring path", 256);
-    if (didLogPath !== legacyContainerPath(username, "did.jsonl") || keyringPath !== legacyContainerPath(username, "keyring.json")) {
-      throw new Error("Identity container paths are invalid.");
-    }
-    const didJsonl = value.files[didLogPath];
-    if (typeof didJsonl !== "string" || didJsonl.length > 16 * 1024 * 1024) throw new Error("Identity container DID log is invalid.");
-    const entries = parseLog(didJsonl);
-    const latest = entries.at(-1);
-    if (!latest?.state || latest.state.id !== did || latest.versionId !== generation) throw new Error("Identity container DID log does not match its manifest.");
-    return { username, did, generation, didJsonl, keyring: value.files[keyringPath] };
-  });
-  const deviceBindings = value.files["metadata/device-bindings.json"];
-  const grants = value.files["metadata/grants.json"];
-  if (!Array.isArray(deviceBindings) || !grants || typeof grants !== "object" || Array.isArray(grants)
-    || !Array.isArray(grants.oauth)
-    || deviceBindings.length > 1024 || grants.oauth.length > 4096) {
-    throw new Error("Identity container metadata is invalid.");
-  }
-  return { version: 1, identities, deviceBindings, oauth: grants.oauth };
-}
-
-/** v2 is platform-independent: the outer JWE contains direct BIP39 entropy
- * and the documented SLIP-0010 profile, not any browser storage envelope. */
-function checkedIdentityContainer(value) {
-  if (value?.version === 1) return checkedIdentityContainerV1(value);
-  const version = value?.version;
-  if (!value || typeof value !== "object" || Array.isArray(value) || value.format !== "did.md/identity-container" || (version !== 2 && version !== 3)
-    || !value.manifest || typeof value.manifest !== "object" || Array.isArray(value.manifest)
-    || value.manifest.format !== "did.md/identity-container" || value.manifest.version !== version
-    || !Array.isArray(value.manifest.identities) || value.manifest.identities.length !== 1
-    || !value.files || typeof value.files !== "object" || Array.isArray(value.files)) {
-    throw new Error("This is not a supported did.md identity container.");
-  }
-  const identities = value.manifest.identities.map(identity => {
-    if (!identity || typeof identity !== "object" || Array.isArray(identity)) throw new Error("Identity container manifest is invalid.");
-    // v2 keyed its files by a did.md username; v3 by the SCID and has no username at all.
-    let username;
-    if (version === 2) {
-      username = containerString(identity.username, "username", 64);
-      if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(username)) throw new Error("Identity container username is invalid.");
-    }
-    const did = containerString(identity.did, "DID");
-    const rootKey = containerString(identity.rootKey, "Root Key");
-    const generation = containerString(identity.generation, "generation", 512);
-    const didLogPath = containerString(identity.didLogPath, "DID log path", 256);
-    const keyringPath = containerString(identity.keyringPath, "keyring path", 256);
-    const expectedLog = version === 2 ? legacyContainerPath(username, "did.jsonl") : containerPath(did, "did.jsonl");
-    const expectedKeyring = version === 2 ? legacyContainerPath(username, "keyring.json") : containerPath(did, "keyring.json");
-    if (identity.derivationProfile !== "did.md/master-ed25519-v1" || didLogPath !== expectedLog || keyringPath !== expectedKeyring) {
-      throw new Error("Identity container paths or derivation profile are invalid.");
-    }
-    const didJsonl = value.files[didLogPath];
-    if (typeof didJsonl !== "string" || didJsonl.length > 16 * 1024 * 1024) throw new Error("Identity container DID log is invalid.");
-    const entries = parseLog(didJsonl);
-    const latest = entries.at(-1);
-    if (!latest?.state || latest.state.id !== did || latest.versionId !== generation) throw new Error("Identity container DID log does not match its manifest.");
-    const keyring = value.files[keyringPath];
-    if (!keyring || typeof keyring !== "object" || Array.isArray(keyring) || keyring.type !== "bip39-slip10-ed25519" || keyring.derivationProfile !== "did.md/master-ed25519-v1") {
-      throw new Error("Identity container keyring is invalid.");
-    }
-    const masterSeed = base64urlDecode(keyring.masterEntropy, "Master entropy");
-    if (masterSeed.length !== 32) throw new Error("Identity container Master entropy must be 32 bytes.");
-    const applications = keyring.applications === undefined ? [] : keyring.applications;
-    if (!Array.isArray(applications) || applications.length > 1024) throw new Error("Identity container application metadata is invalid.");
-    return { username, did, rootKey, generation, didJsonl, entries, masterSeed, applications };
-  });
-  const deviceBindings = value.files["metadata/device-bindings.json"];
-  const grants = value.files["metadata/grants.json"];
-  if (!Array.isArray(deviceBindings) || !grants || typeof grants !== "object" || Array.isArray(grants)
-    || !Array.isArray(grants.oauth)
-    || deviceBindings.length > 1024 || grants.oauth.length > 4096) {
-    throw new Error("Identity container metadata is invalid.");
-  }
-  return { version, identities, deviceBindings, oauth: grants.oauth };
 }
 
 async function importIdentityContainer(contents, masterSeed, protection) {
@@ -1885,11 +1775,6 @@ function probeHost(host, options) {
 }
 
 // The did:vh log mechanics (parse, validate, parameters) are packages/vh's.
-function parseLog(text) {
-  if (!text.endsWith("\n")) throw new Error("Public log was not found.");
-  return parseVhLog(text);
-}
-
 /** A log verified against its own DID (the whole chain), as the wallet needs it before trusting it. */
 function resolveLog(entries) {
   return resolveVhLog(entries[0].state.id, entries);

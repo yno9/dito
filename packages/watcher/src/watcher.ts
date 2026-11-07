@@ -18,7 +18,7 @@
  * The handler takes and gives web-standard Request/Response and a `WatcherStore`, so the same code runs on Node and on Workers.
  */
 import { fetchVhLog, isScid, locationsOf, parseVhLog, resolveVhLog, VhResolutionError, type VhLogEntry } from "../../vh/src/index.ts";
-import type { Fork, WatchedLog, WatcherStore } from "./store.ts";
+import type { Fork, WatcherStore } from "./store.ts";
 
 export type WatcherAllow = {
   /** Hosts whose logs may be watched: `alice.did.md`, or `*.did.md` for every name under it. */

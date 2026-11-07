@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { endpointIdentity, mergeServiceEndpoints, sameDidDocumentReference, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
+import { endpointIdentity, mergeServiceEndpoints, sameDidDocumentReference, withDidDocumentEdit, type DidDocumentEndpoint } from "../packages/wallet/src/did-document-edit.ts";
 
 const did = `did:vh:${"Q".repeat(46)}`;
 const state = {
@@ -34,7 +34,7 @@ test("an edit that changes nothing yields an identical document", () => {
 
 // A service with several endpoints (DID Core: a set of strings and/or maps) is shared by
 // everyone who publishes to it; the edit addresses its endpoints one by one.
-const messaging = (serviceEndpoint: unknown) => ({ id: "#chat", type: "Messaging", serviceEndpoint });
+const messaging = (serviceEndpoint: DidDocumentEndpoint | DidDocumentEndpoint[]) => ({ id: "#chat", type: "Messaging", serviceEndpoint });
 const a = { uri: "https://a.example", accept: ["v2"] };
 const b = { uri: "http://b.onion/", accept: ["v2"] };
 const none = { remove: [], verificationMethods: [] };

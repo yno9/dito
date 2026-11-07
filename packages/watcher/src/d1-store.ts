@@ -11,7 +11,8 @@ const SCHEMA = "CREATE TABLE IF NOT EXISTS watched_logs (scid TEXT PRIMARY KEY, 
 /** A watcher's logs in Cloudflare D1: one row per SCID. */
 export class D1WatcherStore implements WatcherStore {
   private ready: Promise<unknown> | undefined;
-  constructor(private readonly db: D1Like) {}
+  private readonly db: D1Like;
+  constructor(db: D1Like) { this.db = db; }
 
   private schema() { return this.ready ??= this.db.exec(SCHEMA); }
 

@@ -22,15 +22,13 @@ import { resolveDidVhDocument } from "../../packages/did-verify/index.ts";
 import { parseVhDid } from "../../packages/vh/src/index.ts";
 import {
   AUTH_PROOF_CLOCK_SKEW_MS, CORS_BASE, DATA_DIR, Invalid,
-  asObj, atomicWrite, authenticationKeyFromState, b64url, b64urlBytes,
-  exclusive, hostedAuthenticationKey, isLoopbackDevelopmentOrigin, isLocalFileRedirect,
-  isObj, isoAt, onlyKeys, opaqueId, own, parseJsonl, read, requestBody,
-  sha256, sha256B64url, strictObjectKeys, validateLog, validTime, verifyAuthenticationProof,
+  asObj, atomicWrite, authenticationKeyFromState, b64urlBytes,
+  exclusive, isLoopbackDevelopmentOrigin, isLocalFileRedirect,
+  isObj, isoAt, onlyKeys, opaqueId, own, parseJsonl, randomB64url, read, requestBody,
+  sha256B64url, strictObjectKeys, validateLog, validTime, verifyAuthenticationProof,
   verifySelfIssuedIdToken,
   type AuthenticationAuthority, type Json, type Obj,
 } from "../host/identity-host.ts";
-
-function randomB64url(bytes = 32) { return b64url(crypto.getRandomValues(new Uint8Array(bytes))); }
 
 // ── PLAN6: SSRF guard for did:vh-authenticated (JAR) clients ───────────────
 // A did:vh-authenticated relying party's client_id names a DID, resolved by an
@@ -78,7 +76,7 @@ function p256Jwk(value: Json | undefined, label: string): P256Jwk {
 async function p256Jkt(key: P256Jwk) { return sha256B64url(JSON.stringify({ crv: key.crv, kty: key.kty, x: key.x, y: key.y })); }
 async function verifyP256Dpop(value: string, request: Request, expectedUrl: string, requiredNonce?: string): Promise<{ key: P256Jwk; jkt: string }> {
   const parts = value.split("."); if (parts.length !== 3) throw new Invalid("DPoP proof is malformed");
-  let header: Obj; let payload: Obj; let signature: Uint8Array;
+  let header: Obj; let payload: Obj; let signature: Uint8Array<ArrayBuffer>;
   try { header = asObj(JSON.parse(new TextDecoder().decode(b64urlBytes(parts[0]!))), "DPoP header"); payload = asObj(JSON.parse(new TextDecoder().decode(b64urlBytes(parts[1]!))), "DPoP payload"); signature = b64urlBytes(parts[2]!); }
   catch (error) { if (error instanceof Invalid) throw error; throw new Invalid("DPoP proof is malformed"); }
   strictObjectKeys(header, ["alg", "jwk", "typ"], "DPoP header");
@@ -422,13 +420,14 @@ async function oauthRegister(request: Request) {
   if (!Array.isArray(body.grant_types) || body.grant_types.length !== 1 || body.grant_types[0] !== "authorization_code") throw new Invalid("grant_types is invalid");
   if (!Array.isArray(body.response_types) || body.response_types.length !== 1 || body.response_types[0] !== "code") throw new Invalid("response_types is invalid");
   const scopes = oauthScope(body.scope, "scope");
+  const clientName = body.client_name.trim();
   const outcomeReporting = oauthOutcomeFlag(body.outcome_reporting);
   return exclusive("oauth", async () => {
     const state = oauthState();
     consumeOauthRegistration(request);
     if (Object.keys(state.clients).length >= OAUTH_MAX_CLIENTS) throw new Invalid("client registration capacity is reached");
     const clientId = `client_${randomB64url(32)}`; const registrationAccessToken = randomB64url(32); const now = isoAt(Date.now());
-    const client: OAuthClient = { clientId, clientName: body.client_name.trim(), redirectUris, scopes, createdAt: now, updatedAt: now, registrationTokenHash: await sha256B64url(registrationAccessToken), ...(outcomeReporting ? { outcomeReporting } : {}) };
+    const client: OAuthClient = { clientId, clientName, redirectUris, scopes, createdAt: now, updatedAt: now, registrationTokenHash: await sha256B64url(registrationAccessToken), ...(outcomeReporting ? { outcomeReporting } : {}) };
     state.clients[clientId] = client; saveOauthState(state);
     console.info(JSON.stringify({ event: "oauth.client_registered", clientId, origin: oauthClientOrigin(client) ?? null, time: now }));
     return oauthJson(request, { ...oauthClientBody(client), registration_access_token: registrationAccessToken }, 201);
@@ -523,7 +522,7 @@ async function oauthAuthorizeComplete(request: Request) {
     cleanupOauthTokens();
     const code = `code_${randomB64url(32)}`; const codeHash = await sha256B64url(code);
     const expiresAt = isoAt(Date.now() + OAUTH_CODE_MS);
-    oauthCodes.set(codeHash, { clientId, redirectUri, did: capability.issuer, capability: capability.signed, capabilityId: capability.id, deviceJkt: capability.deviceJkt, scope: capability.scope, codeChallenge: body.code_challenge, expiresAt, ...(typeof body.id_token === "string" ? { idToken: body.id_token } : {}), ...(typeof body.did_log === "string" ? { didLog: body.did_log } : {}) });
+    oauthCodes.set(codeHash, { clientId, redirectUri, did: capability.issuer, capability: capability.signed, capabilityId: capability.id, deviceJkt: capability.deviceJkt, scope: capability.scope, codeChallenge: body.code_challenge as string, expiresAt, ...(typeof body.id_token === "string" ? { idToken: body.id_token } : {}), ...(typeof body.did_log === "string" ? { didLog: body.did_log } : {}) });
     return oauthJson(request, { code, state: body.state, redirect_uri: redirectUri, iss: OAUTH_ISSUER });
   });
 }
@@ -575,7 +574,7 @@ async function oauthToken(request: Request) {
   const dpop = dpopHeader ? await verifyP256Dpop(dpopHeader, request, `${OAUTH_ISSUER}/v1/oauth/token`) : undefined;
   return exclusive("oauth", async () => {
     const state = oauthState(); cleanupOauthTokens(); const codeHash = await sha256B64url(code); const stored = oauthCodes.get(codeHash);
-    if (!stored || stored.clientId !== clientId || stored.redirectUri !== redirectUri || await sha256B64url(body.code_verifier) !== stored.codeChallenge) throw new Invalid("authorization code is invalid");
+    if (!stored || stored.clientId !== clientId || stored.redirectUri !== redirectUri || await sha256B64url(body.code_verifier as string) !== stored.codeChallenge) throw new Invalid("authorization code is invalid");
     oauthCodes.delete(codeHash);
     const suppliedAuthority = stored.didLog !== undefined ? await suppliedAuthorityFromDidLog(stored.didLog, stored.did) : undefined;
     const capability = await verifiedOauthCapability(stored.capability as unknown as Json, state, suppliedAuthority);

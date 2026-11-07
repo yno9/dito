@@ -130,8 +130,8 @@ function random(length: number) {
   return crypto.getRandomValues(new Uint8Array(length));
 }
 
-function asBytes(value: unknown, label: string): Uint8Array {
-  if (!Array.isArray(value) || !value.every(item => Number.isInteger(item) && item >= 0 && item <= 255)) {
+function asBytes(value: unknown, label: string): Uint8Array<ArrayBuffer> {
+  if (!Array.isArray(value) || !isByteArray(value)) {
     throw new Error(`Invalid ${label}.`);
   }
   return new Uint8Array(value);
@@ -193,23 +193,27 @@ async function writeStoredIdentity(record: StoredIdentity): Promise<void> {
   await transaction<IDBValidKey>("readwrite", store => store.put(record));
 }
 
+function isByteArray(bytes: unknown[]): boolean {
+  return bytes.every(item => typeof item === "number" && Number.isInteger(item) && item >= 0 && item <= 255);
+}
+
 function sealedPayloadIsValid(value: any): value is SealedPayload {
   return value && typeof value === "object" && Array.isArray(value.credentialId) && Array.isArray(value.prfSalt)
     && Array.isArray(value.iv) && Array.isArray(value.ciphertext)
     && value.credentialId.length >= 16 && value.credentialId.length <= 1024
     && value.prfSalt.length === 32 && value.iv.length === 12 && value.ciphertext.length >= 32 && value.ciphertext.length <= 4096
-    && [value.credentialId, value.prfSalt, value.iv, value.ciphertext].every(bytes => bytes.every((item: unknown) => Number.isInteger(item) && item >= 0 && item <= 255));
+    && [value.credentialId, value.prfSalt, value.iv, value.ciphertext].every(isByteArray);
 }
 
 function encryptedApplicationMetadataIsValid(value: any): value is EncryptedApplicationMetadata {
   return value && value.v === 1 && Array.isArray(value.iv) && value.iv.length === 12
     && Array.isArray(value.ciphertext) && value.ciphertext.length >= 16 && value.ciphertext.length <= 262_144
-    && [value.iv, value.ciphertext].every(bytes => bytes.every((item: unknown) => Number.isInteger(item) && item >= 0 && item <= 255));
+    && [value.iv, value.ciphertext].every(isByteArray);
 }
 
 function checkedApplicationMetadata(value: any): PortableApplication[] {
   if (!Array.isArray(value) || value.length > 1024) throw new Error("Application keyring metadata is invalid.");
-  return value.map(item => {
+  return value.map((item: any) => {
     if (!item || item.v !== 1 || typeof item.id !== "string" || typeof item.clientId !== "string"
       || typeof item.clientName !== "string" || (item.deviceJkt !== undefined && typeof item.deviceJkt !== "string") || typeof item.createdAt !== "string"
       || (item.appKey !== undefined && (typeof item.appKey !== "string" || item.appKey.length > 160))
@@ -221,7 +225,7 @@ function checkedApplicationMetadata(value: any): PortableApplication[] {
     return { v: 1, id: item.id, clientId: item.clientId, clientName: item.clientName,
       ...(item.deviceJkt !== undefined ? { deviceJkt: item.deviceJkt } : {}),
       ...(item.appKey !== undefined ? { appKey: item.appKey } : {}),
-      serviceIds: [...new Set(item.serviceIds)], keyIds: [...new Set(item.keyIds)],
+      serviceIds: [...new Set<string>(item.serviceIds)], keyIds: [...new Set<string>(item.keyIds)],
       ...(item.services ? { services: item.services.map((service: any) => ({ id: service.id, keyIds: [...new Set<string>(service.keyIds)] })) } : {}),
       createdAt: item.createdAt };
   });
@@ -359,7 +363,7 @@ function oauthGrantIsValid(value: any): value is WalletOAuthGrant {
   return value && typeof value.id === "string" && typeof value.did === "string"
     && typeof value.clientId === "string" && typeof value.clientName === "string"
     && (value.deviceJkt === undefined || typeof value.deviceJkt === "string")
-    && Array.isArray(value.scope) && value.scope.every(scope => typeof scope === "string")
+    && Array.isArray(value.scope) && value.scope.every((scope: unknown) => typeof scope === "string")
     && typeof value.issuedAt === "string" && typeof value.expiresAt === "string"
     && (value.label === undefined || (typeof value.label === "string" && value.label.length <= 160))
     && (value.appKey === undefined || (typeof value.appKey === "string" && value.appKey.length <= 160))
@@ -510,7 +514,7 @@ export async function readDidLogSnapshot(username: string): Promise<DidLogSnapsh
 }
 
 
-function prfResult(credential: Credential): Uint8Array {
+function prfResult(credential: Credential): Uint8Array<ArrayBuffer> {
   const result = (credential as PublicKeyCredential).getClientExtensionResults().prf as any;
   const first = result?.results?.first;
   if (!first) throw new Error("This passkey does not support the PRF extension required for encryption.");

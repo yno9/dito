@@ -19,7 +19,7 @@ import {
   waitForPagesBuild,
   waitForPublish,
 } from "../packages/wallet/src/github-host.ts";
-import { deriveDidWebDocument, parseVhLog, serializeVhLog } from "../packages/vh/src/index.ts";
+import { deriveDidWebDocument, serializeVhLog } from "../packages/vh/src/index.ts";
 
 const serialise = serializeVhLog;
 

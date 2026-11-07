@@ -3,10 +3,10 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { createDataIntegrityProof, keyFromPrivateKey, type Ed25519Key } from "../../vh/src/index.ts";
+import { arrayBufferBytes, base64url, base64urlDecode, canonicalize as jcs, createDataIntegrityProof, keyFromPrivateKey, type Ed25519Key } from "../../vh/src/index.ts";
 
-// Data Integrity proofs are packages/vh's; re-exported because wallet code and tests reach for them here.
-export { createDataIntegrityProof };
+// Data Integrity proofs, base64url and JCS are packages/vh's; re-exported because wallet code and tests reach for them here.
+export { base64urlDecode, createDataIntegrityProof, jcs };
 
 const encoder = new TextEncoder();
 
@@ -78,22 +78,6 @@ export function deriveWalletSecret(rootPrivateKey: Uint8Array, purpose: string, 
   return hkdf(sha256, rootPrivateKey, undefined, info, length);
 }
 
-// RFC 8785 canonical JSON, for the wallet's own credentials (packages/vh's canonicalize is the log's).
-export function jcs(value: any): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error("JSON contains a non-finite number");
-    return Object.is(value, -0) ? "0" : JSON.stringify(value);
-  }
-  if (Array.isArray(value)) return `[${value.map(jcs).join(",")}]`;
-  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${jcs(value[key])}`).join(",")}}`;
-}
-
-function base64url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
 
 export function controllerFromPrivate(privateKey: Uint8Array): ControllerKey {
   return keyFromPrivateKey(privateKey);
@@ -116,13 +100,6 @@ export function controllerFromEd25519Jwk(value: any): ControllerKey {
   return controller;
 }
 
-export function base64urlDecode(value: string, label: string): Uint8Array {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error(`${label} must be base64url without padding.`);
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - value.length % 4) % 4);
-  try { return Uint8Array.from(atob(padded), character => character.charCodeAt(0)); }
-  catch { throw new Error(`${label} is not valid base64url.`); }
-}
-
 function normaliseMnemonic(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -140,7 +117,7 @@ export function seedFromMnemonic(value: string, label = "Mnemonic"): Uint8Array 
   return seed;
 }
 
-async function hmacSha512(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+async function hmacSha512(key: Uint8Array<ArrayBuffer>, data: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
   const hmac = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-512" }, false, ["sign"]);
   return new Uint8Array(await crypto.subtle.sign("HMAC", hmac, data));
 }
@@ -157,7 +134,7 @@ async function hmacSha512(key: Uint8Array, data: Uint8Array): Promise<Uint8Array
  */
 async function deriveHardenedEd25519(masterSeed: Uint8Array, path: number[]): Promise<ControllerKey> {
   if (masterSeed.length !== 32) throw new Error("Master seed must be 32 bytes.");
-  let node = await hmacSha512(encoder.encode("ed25519 seed"), masterSeed);
+  let node = await hmacSha512(encoder.encode("ed25519 seed"), arrayBufferBytes(masterSeed, "Master seed"));
   for (const index of path) {
     if (!Number.isInteger(index) || index < 0 || index >= 0x80000000) {
       throw new Error("Invalid hardened derivation index.");

@@ -42,7 +42,7 @@ export type PublishFile = { path: string; content: string };
 
 export type PublishProgress = (step: string) => void;
 
-export type PublishResult = {
+export type GitHubPublishResult = {
   login: string;
   repo: string;
   domain: string;
@@ -541,7 +541,7 @@ export async function verifyPublishedLog(body: string, webDid: string, expectedV
   }
 }
 
-export type PublishArgs = {
+export type GitHubPublishArgs = {
   token: string;
   entries: Entry[];
   message?: string;
@@ -561,7 +561,7 @@ export type PublishArgs = {
  * The token is used only on the Octokit instances created here and is never
  * returned or stored.
  */
-export async function publishToGitHub(args: PublishArgs): Promise<PublishResult> {
+export async function publishToGitHub(args: GitHubPublishArgs): Promise<GitHubPublishResult> {
   const progress = args.onProgress ?? (() => {});
   const entries = args.entries.map(entry => JSON.parse(JSON.stringify(entry)) as Entry);
   // Token check is a read; everything after local validation may write.
@@ -597,7 +597,7 @@ export async function publishToGitHub(args: PublishArgs): Promise<PublishResult>
         buildType: pages.buildType,
       });
     } catch (error) {
-      if (error instanceof Error && /Pages build failed/i.test(error.message) && pages.buildType !== "workflow") {
+      if (error instanceof Error && /Pages build failed/i.test(error.message)) {
         throw error;
       }
       build = { status: pages.status || "unknown", buildType: pages.buildType, inconclusive: true };
@@ -670,7 +670,7 @@ export async function publishToGitHub(args: PublishArgs): Promise<PublishResult>
  * supplies the existing remote entries plus the new one; the same
  * validate→commit→Pages pipeline runs. Used by the host-row "Update" action.
  */
-export async function republishToGitHub(args: PublishArgs): Promise<PublishResult> {
+export async function republishToGitHub(args: GitHubPublishArgs): Promise<GitHubPublishResult> {
   return publishToGitHub(args);
 }
 

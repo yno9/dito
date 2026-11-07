@@ -91,29 +91,23 @@ export const PORT = numberEnv("PORT", 8787);
 /** Browser clients are deliberately limited to the Wallet.  The API never
  * uses cookies, but reflecting arbitrary origins here would make a future
  * credential-bearing endpoint dangerously easy to add. */
-export function cors(request: Request) {
+export function cors(request: Request): Record<string, string> {
   const origin = request.headers.get("origin");
-  // "null" is what a browser sends as Origin for a file:// page (the
-  // single-file dist/index.html build is meant to be opened this way). This
-  // API never uses cookies and every write is guarded by a client-supplied
-  // signature (verifyProof/verifyAuthenticationProof), so CORS here is only
-  // about which browser contexts may read a response — not an auth boundary
-  // — making it safe to include file:// alongside the hosted origins.
-  // isLoopbackDevelopmentOrigin lets the dev build (client/app.ts points
-  // API at http://localhost:8787 when location.hostname is localhost) call
-  // this host directly instead of every local run needing app.did.md's
-  // origin -- previously defined but never actually wired in here, so
-  // every local /v1/availability etc. request was silently CORS-blocked.
+  // "null" is the Origin of a file:// page (the single-file dist/index.html is
+  // meant to be opened that way). This API uses no cookies and every write
+  // carries its own signature, so CORS only decides which browser contexts may
+  // read a response; it is not an auth boundary. Loopback origins let the dev
+  // build (which points at http://localhost:8787) call this host directly.
   let loopback = false;
   if (origin) { try { loopback = isLoopbackDevelopmentOrigin(new URL(origin)); } catch {} }
   const allowed = origin === "https://app.did.md" || origin === "https://client.did.md" || origin === "null" || loopback;
-  return { ...CORS_BASE, ...(allowed ? { "access-control-allow-origin": origin } : {}) };
+  return origin && allowed ? { ...CORS_BASE, "access-control-allow-origin": origin } : { ...CORS_BASE };
 }
 /** DID documents and did:vh logs are public verification artefacts.  They
  * must be readable by a relying party that verifies a DID locally, including
  * an origin not known when this host was deployed.  This is intentionally
  * used only for GET responses from the public document routes. */
-export function publicDocumentCors() { return { ...CORS_BASE, "access-control-allow-origin": "*" }; }
+export function publicDocumentCors(): Record<string, string> { return { ...CORS_BASE, "access-control-allow-origin": "*" }; }
 export function isLoopbackDevelopmentOrigin(parsed: URL) {
   return parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]");
 }
@@ -366,7 +360,7 @@ async function serveLog(request: Request, username: string, resource: string) {
 // same resolution themselves -- see verifySelfIssuedIdToken's own comment.
 export const AUTH_PROOF_CLOCK_SKEW_MS = 5 * 60_000;
 export function b64url(bytes: Uint8Array) { return Buffer.from(bytes).toString("base64url"); }
-export function b64urlBytes(value: string) {
+export function b64urlBytes(value: string): Uint8Array<ArrayBuffer> {
   if (!/^[A-Za-z0-9_-]*$/.test(value)) throw new Invalid("invalid base64url value");
   const decoded = new Uint8Array(Buffer.from(value, "base64url"));
   if (!decoded.length && value) throw new Invalid("invalid base64url value");
@@ -393,7 +387,7 @@ export function validTime(value: Json | undefined, label: string) { if (typeof v
 // mis-decoding. Only Ed25519 is implemented today -- this is a dispatch
 // point, not a claim that other key types work.
 export type AuthenticationKeyType = "Ed25519";
-export type AuthenticationAuthority = { did: string; verificationMethod: string; keyType: AuthenticationKeyType; key: Uint8Array };
+export type AuthenticationAuthority = { did: string; verificationMethod: string; keyType: AuthenticationKeyType; key: Uint8Array<ArrayBuffer> };
 // Decodes a multikey from a DID Document's own verificationMethod entries
 // (authentication, assertionMethod, ...). This is distinct from publicKey(),
 // which decodes DID *log* control keys (updateKeys/witnesses) under
@@ -401,7 +395,7 @@ export type AuthenticationAuthority = { did: string; verificationMethod: string;
 // published DID Document's verificationMethod to any particular key type
 // (ordinary DID Core "multikey" content), so this decoder is free to grow
 // beyond Ed25519 without touching log verification at all.
-function authenticationMultikey(multikey: string, label: string): { keyType: AuthenticationKeyType; key: Uint8Array } {
+function authenticationMultikey(multikey: string, label: string): { keyType: AuthenticationKeyType; key: Uint8Array<ArrayBuffer> } {
   if (!multikey.startsWith("z")) throw new Invalid(`${label} must use base58btc`);
   const bytes = b58decode(multikey.slice(1));
   if (bytes.length === 34 && bytes[0] === 0xed && bytes[1] === 0x01) return { keyType: "Ed25519", key: bytes.slice(2) };
@@ -505,7 +499,7 @@ export async function verifyAuthenticationProof(document: Obj, proofValue: Json 
 // array (see authenticationKeyFromState).
 export async function verifySelfIssuedIdToken(idToken: string, expectedIssuer: string, expectedAudience: string, maxAgeMs: number, suppliedAuthority?: AuthenticationAuthority) {
   const parts = idToken.split("."); if (parts.length !== 3) throw new Invalid("id_token is malformed");
-  let header: Obj; let payload: Obj; let signature: Uint8Array;
+  let header: Obj; let payload: Obj; let signature: Uint8Array<ArrayBuffer>;
   try { header = asObj(JSON.parse(new TextDecoder().decode(b64urlBytes(parts[0]!))), "id_token header"); payload = asObj(JSON.parse(new TextDecoder().decode(b64urlBytes(parts[1]!))), "id_token payload"); signature = b64urlBytes(parts[2]!); }
   catch (error) { if (error instanceof Invalid) throw error; throw new Invalid("id_token is malformed"); }
   if (typeof header.kid !== "string" || !header.kid.startsWith(`${expectedIssuer}#`) || header.typ !== "JWT") throw new Invalid("id_token header is invalid");

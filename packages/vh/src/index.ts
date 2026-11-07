@@ -12,6 +12,7 @@ export * from "./hosting.ts";
 export * from "./aliases.ts";
 export * from "./base58.ts";
 export * from "./base64url.ts";
+export * from "./bytes.ts";
 export * from "./signer.ts";
 export * from "./proof.ts";
 export * from "./freshness.ts";

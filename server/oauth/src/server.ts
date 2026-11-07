@@ -220,7 +220,8 @@ async function handleRoute(request: Request): Promise<Response> {
       const ditoNonce = randomBase64url(32);
       const id = sessions.create({ clientId: client.client_id, redirectUri, state, nonce, pkceChallenge: challenge, ditoNonce });
       // The application's own name if its client entry has one, else its host (what the person recognises).
-      const appName = (typeof (client as { client_name?: unknown }).client_name === "string" && (client as { client_name: string }).client_name.trim()) || new URL(redirectUri).host;
+      const clientName = (client as { client_name?: unknown }).client_name;
+      const appName = (typeof clientName === "string" && clientName.trim()) || new URL(redirectUri).host;
       return redirect(dito.directPostAuthorizationUrl(id, ditoNonce, { name: appName, uri: new URL(redirectUri).origin }), {});
     }
     const verifier = randomBase64url(48);

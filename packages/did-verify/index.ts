@@ -6,7 +6,7 @@ export interface VerifiedSigner {
   publicKeyJwk: JsonWebKey;
 }
 
-function decodePart(value: string, label: string): Uint8Array {
+function decodePart(value: string, label: string): Uint8Array<ArrayBuffer> {
   if (!/^[A-Za-z0-9_-]*$/.test(value)) throw new Error(`${label} is not base64url`);
   try { return new Uint8Array(Buffer.from(value, "base64url")); }
   catch { throw new Error(`${label} is not base64url`); }

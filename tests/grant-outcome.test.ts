@@ -1,11 +1,11 @@
 import { expect, test } from "vitest";
-import { applyOutcome, grantDisplayState, shouldPoll } from "../packages/wallet/src/grant-outcome.ts";
+import { applyOutcome, grantDisplayState, shouldPoll, type OutcomeGrant } from "../packages/wallet/src/grant-outcome.ts";
 
 const issuedAt = "2026-10-01T00:00:00.000Z";
 const at = (ms: number) => new Date(Date.parse(issuedAt) + ms);
 const MIN = 60_000;
 const HOUR = 60 * MIN;
-const base = { issuedAt };
+const base: OutcomeGrant = { issuedAt };
 
 test("display state: legacy grants are active", () => {
   expect(grantDisplayState(base, at(99 * HOUR))).toBe("active");

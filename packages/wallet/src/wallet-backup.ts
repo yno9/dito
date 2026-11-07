@@ -9,6 +9,7 @@
 // material.
 
 import { base64url, base64urlDecode } from "../../vh/src/base64url.ts";
+import { arrayBufferBytes } from "../../vh/src/bytes.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -31,15 +32,15 @@ const MNEMONIC_ALG = "did.md-mnemonic-hkdf+A256KW";
 const HKDF_SALT_BYTES = 16;
 const HKDF_INFO = encoder.encode("did.md/identity-container-kek");
 
-function checkedMasterSeed(value: Uint8Array) {
+function checkedMasterSeed(value: Uint8Array): Uint8Array<ArrayBuffer> {
   if (!(value instanceof Uint8Array) || value.length !== 32) throw new Error("A 32-byte Master seed is required.");
-  return value;
+  return arrayBufferBytes(value, "Master seed");
 }
 
 // PBES2 exists to stretch a low-entropy human password; a 24-word Master
 // mnemonic is already ~256 bits of entropy, so deriving its wrapping key
 // through plain HKDF is both simpler and appropriate for the input.
-async function mnemonicWrappingKey(masterSeed: Uint8Array, salt: Uint8Array) {
+async function mnemonicWrappingKey(masterSeed: Uint8Array, salt: Uint8Array<ArrayBuffer>) {
   const baseKey = await crypto.subtle.importKey("raw", checkedMasterSeed(masterSeed), "HKDF", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
     { name: "HKDF", hash: "SHA-256", salt, info: HKDF_INFO },

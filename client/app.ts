@@ -55,7 +55,7 @@ import { parseLoginHost, isHostedAt } from "../packages/wallet/src/login-hint.ts
 import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
 import { applyOutcome, grantDisplayState, shouldPoll } from "../packages/wallet/src/grant-outcome.ts";
 import { VERIFICATION_RELATIONSHIPS, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
-import { ForkedLogError, StaleLogError, VhHostingClient, latestVersion, locationsOf, standingOf, parseVhDid, parseVhLog, resolveVhLog, serializeVhLog, uncachedUrl } from "../packages/vh/src/index.ts";
+import { ForkedLogError, StaleLogError, VhHostingClient, latestVersion, locationsOf, standingOf, parseVhDid, resolveVhLog, serializeVhLog, uncachedUrl } from "../packages/vh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
 import dashboardHeaderTemplate from "./pages/dashboard-header.html";
 import footerTemplate from "./pages/footer.html";

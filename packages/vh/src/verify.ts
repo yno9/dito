@@ -15,7 +15,7 @@ import { verifyDataIntegrityProof, publicKeyFromMultikey } from "./proof.ts";
 import { checkAndRemember, type VersionMemory } from "./freshness.ts";
 import { VH_METHOD, parseVhDid, isScid } from "./did.ts";
 import { keyHash } from "./hash.ts";
-import { entryHash, parseVersionId, parseVersionTime, verifyScid, type VhLogEntry, type VhParameters } from "./log.ts";
+import { entryHash, parseVersionId, parseVersionTime, verifyScid, type VhLogEntry } from "./log.ts";
 
 export type VhErrorCode = "invalidDid" | "invalidOptions" | "invalidLog" | "notFound" | "featureNotSupported";
 

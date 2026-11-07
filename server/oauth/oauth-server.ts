@@ -22,15 +22,13 @@ import { resolveDidVhDocument } from "../../packages/did-verify/index.ts";
 import { parseVhDid } from "../../packages/vh/src/index.ts";
 import {
   AUTH_PROOF_CLOCK_SKEW_MS, CORS_BASE, DATA_DIR, Invalid,
-  asObj, atomicWrite, authenticationKeyFromState, b64url, b64urlBytes,
-  exclusive, hostedAuthenticationKey, isLoopbackDevelopmentOrigin, isLocalFileRedirect,
-  isObj, isoAt, onlyKeys, opaqueId, own, parseJsonl, read, requestBody,
-  sha256, sha256B64url, strictObjectKeys, validateLog, validTime, verifyAuthenticationProof,
+  asObj, atomicWrite, authenticationKeyFromState, b64urlBytes,
+  exclusive, isLoopbackDevelopmentOrigin, isLocalFileRedirect,
+  isObj, isoAt, onlyKeys, opaqueId, own, parseJsonl, randomB64url, read, requestBody,
+  sha256B64url, strictObjectKeys, validateLog, validTime, verifyAuthenticationProof,
   verifySelfIssuedIdToken,
   type AuthenticationAuthority, type Json, type Obj,
 } from "../host/identity-host.ts";
-
-function randomB64url(bytes = 32) { return b64url(crypto.getRandomValues(new Uint8Array(bytes))); }
 
 // ── PLAN6: SSRF guard for did:vh-authenticated (JAR) clients ───────────────
 // A did:vh-authenticated relying party's client_id names a DID, resolved by an

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import {
   SCID_PLACEHOLDER, VH_METHOD, VhResolutionError, canonicalize, createVhLog, deactivateVhLog, entryHash, jcsHash, keyHash, parseVersionId,
-  keyFromPrivateKey, parseVhDid, parseVhLog, resolveVhLog, serializeVhLog, updateVhLog, verifyScid, vhDid, type VhLogEntry,
+  keyFromPrivateKey, parseVhDid, parseVhLog, resolveVhLog, serializeVhLog, updateVhLog, vhDid, type VhLogEntry,
 } from "../packages/vh/src/index.ts";
 
 const key = () => keyFromPrivateKey(crypto.getRandomValues(new Uint8Array(32)));

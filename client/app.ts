@@ -1,5 +1,4 @@
 import {
-  controllerFromPrivate,
   createKeyAuthorizationCredentialWire,
   createDataIntegrityProof,
   createSelfIssuedIdToken,
@@ -35,7 +34,8 @@ import {
 } from "./key-store.ts";
 import { decryptIdentityContainer, encryptIdentityContainer } from "../packages/wallet/src/wallet-backup.ts";
 import { initCcd } from "./ccd.ts";
-import { base64url, base64urlDecode, sha256Base64url } from "../packages/vh/src/base64url.ts";
+import { DERIVED_SECRET_DETAIL, DID_DOCUMENT_EDIT_DETAIL, KEY_AUTHORIZATION_DETAIL, derivedSecretDetails, didDocumentEditDetail, keyAuthorizationDetail, oauthAuthorizationDetails } from "./authorization-details.ts";
+import { base64url, base64urlDecode } from "../packages/vh/src/base64url.ts";
 import {
   githubErrorMessage,
   githubDidLocation,
@@ -53,8 +53,8 @@ import { verifyMasterOwnsLog } from "../packages/wallet/src/identity.ts";
 import { parseLoginHost, isHostedAt } from "../packages/wallet/src/login-hint.ts";
 import { commitAuthorization } from "../packages/wallet/src/authorization-commit.ts";
 import { applyOutcome, grantDisplayState, shouldPoll } from "../packages/wallet/src/grant-outcome.ts";
-import { assertEditSparesMethods, assertEndpointRemovals, assertServiceEndpointMode, assertVerificationMethodEdit, VERIFICATION_RELATIONSHIPS, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
-import { ROOT_KEY_FRAGMENT, ForkedLogError, StaleLogError, VhHostingClient, latestVersion, locationsOf, standingOf, parseVhDid, parseVhLog, resolveVhLog, resolveVhFromWatchers, serializeVhLog, uncachedUrl } from "../packages/vh/src/index.ts";
+import { VERIFICATION_RELATIONSHIPS, withDidDocumentEdit } from "../packages/wallet/src/did-document-edit.ts";
+import { ForkedLogError, StaleLogError, VhHostingClient, latestVersion, locationsOf, standingOf, parseVhDid, parseVhLog, resolveVhLog, serializeVhLog, uncachedUrl } from "../packages/vh/src/index.ts";
 import homeHeaderTemplate from "./pages/home-header.html";
 import dashboardHeaderTemplate from "./pages/dashboard-header.html";
 import footerTemplate from "./pages/footer.html";
@@ -284,9 +284,6 @@ const AUTO_LOCK_MS = 24 * 60 * 60_000;
 const OAUTH_ISSUER = API;
 const DEVICE_CAPABILITY_GRANT_MS = 31 * 24 * 60 * 60_000;
 const WALLET_SESSION_KEY = "did-md-wallet-last-passkey-identity";
-const DID_DOCUMENT_EDIT_DETAIL = "urn:did-core:document-edit:v1";
-const KEY_AUTHORIZATION_DETAIL = "urn:did.md:key-authorization:v1";
-const DERIVED_SECRET_DETAIL = "urn:did.md:derived-secret:v1";
 // A bare `?alias` (no value needed) pre-enables the Alias toggle on the
 // creation screen -- for a relying party (e.g. biset) redirecting here
 // whose users are expected to want a memorable did.md hostname, or for
@@ -461,21 +458,6 @@ function fieldGroup(heading, entries) {
   return group;
 }
 
-function linkFact(label, href) {
-  const fragment = document.createDocumentFragment();
-  const term = document.createElement("dt");
-  term.textContent = label;
-  const description = document.createElement("dd");
-  const link = document.createElement("a");
-  link.href = href;
-  link.target = "_blank";
-  link.rel = "noreferrer";
-  link.textContent = href;
-  description.append(link);
-  fragment.append(term, description);
-  return fragment;
-}
-
 // The DID/username are already known locally (no identity this browser
 // hasn't verified gets into `loaded`/`storedIdentityRecord` in the first
 // place), so this always renders them immediately. The live did.json fetch
@@ -596,140 +578,6 @@ function rememberPasskeyWalletSession() {
 function forgetPasskeyWalletSession() {
   try { localStorage.removeItem(WALLET_SESSION_KEY); } catch { /* no-op */ }
 }
-
-function p256Jwk(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "crv,kty,x,y"
-    || value.kty !== "EC" || value.crv !== "P-256" || base64urlDecode(value.x, "DPoP x").length !== 32 || base64urlDecode(value.y, "DPoP y").length !== 32) {
-    throw new Error("The client supplied an invalid P-256 DPoP public key.");
-  }
-  return { kty: "EC", crv: "P-256", x: value.x, y: value.y };
-}
-
-function detailObject(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is invalid.`);
-  return value;
-}
-
-function detailKeys(value, keys, label) {
-  if (Object.keys(value).sort().join(",") !== [...keys].sort().join(",")) throw new Error(`${label} has unexpected fields.`);
-}
-
-function oauthAuthorizationDetails(value) {
-  if (value === null) return [];
-  if (typeof value !== "string" || value.length < 2 || value.length > 16_384) throw new Error("The OAuth authorization details are invalid.");
-  let details;
-  try { details = JSON.parse(value); } catch { throw new Error("The OAuth authorization details are invalid."); }
-  if (!Array.isArray(details) || !details.length || details.length > 16) throw new Error("The OAuth authorization details are invalid.");
-  for (const [index, detail] of details.entries()) {
-    const object = detailObject(detail, `Authorization detail ${index + 1}`);
-    if (typeof object.type !== "string" || !/^[A-Za-z][A-Za-z0-9:._/-]{0,127}$/.test(object.type)) throw new Error("The OAuth authorization details are invalid.");
-  }
-  return details;
-}
-
-function didDocumentEditDetail(details, did) {
-  const matches = details.filter(detail => detail.type === DID_DOCUMENT_EDIT_DETAIL);
-  if (!matches.length) return undefined;
-  if (matches.length !== 1) throw new Error("The DID document edit request is duplicated.");
-  const detail = detailObject(matches[0], "The DID document edit request");
-  const detailShape = ["type", "services", "verificationMethods", "remove", ...(detail.serviceKeyBindings === undefined ? [] : ["serviceKeyBindings"]), ...(detail.removeEndpoints === undefined ? [] : ["removeEndpoints"])];
-  detailKeys(detail, detailShape, "The DID document edit request");
-  if (!Array.isArray(detail.services) || !Array.isArray(detail.verificationMethods) || !Array.isArray(detail.remove)
-    || detail.services.length > 64 || detail.verificationMethods.length > 64 || detail.remove.length > 128) throw new Error("The DID document edit request is invalid.");
-  // DID Core permits a fragment-only relative DID URL (for example
-  // `#didcomm`) for resources in this same DID Document.
-  const validId = id => typeof id === "string" && (/^#[^\s#]+$/.test(id)
-    || ((did ? id.startsWith(`${did}#`) : id.startsWith("did:vh:")) && id.includes("#") && !/[\s#]/.test(id.slice(id.indexOf("#") + 1))));
-  // DID Core allows serviceEndpoint to be a string, a map, or a set of
-  // strings and/or maps -- accept all three shapes, not just the first two.
-  const validEndpoint = endpoint => typeof endpoint === "string" || (!!endpoint && typeof endpoint === "object" && !Array.isArray(endpoint));
-  for (const value of detail.services) {
-    const service = detailObject(value, "DID service"); detailKeys(service, ["id", "type", "serviceEndpoint", ...(service.endpointMode === undefined ? [] : ["endpointMode"])], "DID service");
-    const endpointValid = Array.isArray(service.serviceEndpoint)
-      ? service.serviceEndpoint.length > 0 && service.serviceEndpoint.length <= 8 && service.serviceEndpoint.every(validEndpoint)
-      : validEndpoint(service.serviceEndpoint);
-    if (!validId(service.id) || typeof service.type !== "string" || !service.type.trim() || !endpointValid) throw new Error("A DID service is invalid.");
-    assertServiceEndpointMode(service);
-  }
-  if (detail.removeEndpoints !== undefined) assertEndpointRemovals(detail.removeEndpoints, validId);
-  // controller is force-set to the Wallet's own loaded DID below, never
-  // trusted from the relying party's request -- a verification method
-  // published into THIS identity's own DID Document must be controlled by
-  // THIS identity, regardless of what a relying party (which doesn't
-  // necessarily know the DID yet when it builds this request) claims.
-  detail.verificationMethods = detail.verificationMethods.map(value => {
-    const method = detailObject(value, "DID verification method");
-    detailKeys(method, ["id", "type", "controller", "publicKeyMultibase", ...(method.relationships === undefined ? [] : ["relationships"]), ...(method.mode === undefined ? [] : ["mode"])], "DID verification method");
-    if (!validId(method.id) || typeof method.type !== "string" || !method.type.trim() || typeof method.controller !== "string" || typeof method.publicKeyMultibase !== "string") throw new Error("A DID verification method is invalid.");
-    assertVerificationMethodEdit(method);
-    return { ...method, controller: did };
-  });
-  // The identity's own Root key is this Wallet's, never a relying party's to
-  // replace or remove: without it the identity can no longer be opened.
-  assertEditSparesMethods(detail, did, [ROOT_KEY_FRAGMENT]);
-  if (detail.serviceKeyBindings !== undefined) {
-    if (!Array.isArray(detail.serviceKeyBindings) || detail.serviceKeyBindings.length > detail.services.length) throw new Error("The DID service/key bindings are invalid.");
-    const serviceIds = new Set(detail.services.map(service => service.id));
-    const keyIds = new Set(detail.verificationMethods.map(method => method.id));
-    const seenServices = new Set();
-    for (const value of detail.serviceKeyBindings) {
-      const binding = detailObject(value, "DID service/key binding");
-      detailKeys(binding, ["serviceId", "keyIds"], "DID service/key binding");
-      if (!serviceIds.has(binding.serviceId) || seenServices.has(binding.serviceId) || !Array.isArray(binding.keyIds)
-        || binding.keyIds.some(id => !keyIds.has(id)) || new Set(binding.keyIds).size !== binding.keyIds.length) throw new Error("The DID service/key bindings are invalid.");
-      seenServices.add(binding.serviceId);
-    }
-  }
-  if (detail.remove.some(id => !validId(id)) || new Set([...detail.services.map(x => x.id), ...detail.verificationMethods.map(x => x.id), ...detail.remove]).size !== detail.services.length + detail.verificationMethods.length + detail.remove.length) throw new Error("The DID document edit contains duplicate or invalid ids.");
-  return detail;
-}
-
-function keyAuthorizationDetail(details) {
-  const matches = details.filter(detail => detail.type === KEY_AUTHORIZATION_DETAIL);
-  if (!matches.length) return undefined;
-  if (matches.length !== 1) throw new Error("The key authorization request is duplicated.");
-  const detail = detailObject(matches[0], "The key authorization request");
-  detailKeys(detail, ["type", "subject", "publicKey", "purposes"], "The key authorization request");
-  const key = detailObject(detail.publicKey, "The authorized public key");
-  detailKeys(key, ["type", "publicKeyMultibase"], "The authorized public key");
-  if (!/^urn:uuid:[0-9a-f-]{36}$/i.test(detail.subject) || typeof key.type !== "string" || !key.type.trim()
-    || typeof key.publicKeyMultibase !== "string" || !key.publicKeyMultibase.startsWith("z")
-    || !Array.isArray(detail.purposes) || !detail.purposes.length || detail.purposes.length > 16
-    || detail.purposes.some(value => typeof value !== "string" || !value.trim() || value.length > 64)) throw new Error("The key authorization request is invalid.");
-  return detail;
-}
-
-// A relying party's own devices sometimes need to agree on a value (e.g. a
-// storage locator) without that value ever being published anywhere public.
-// Rather than trust an RP-supplied secret (which would need transporting
-// over the very channel it's trying to keep private), the Wallet derives it
-// itself from the identity's Root private key and hands back only the
-// result -- see deriveWalletSecret in packages/wallet/src/keys.ts. purpose/context are
-// domain-separation labels the RP supplies; several distinct requests may
-// appear in one authorization, so (unlike the "exactly one" detail types
-// above) this collects every match.
-function derivedSecretDetails(details) {
-  const matches = details.filter(detail => detail.type === DERIVED_SECRET_DETAIL);
-  if (matches.length > 8) throw new Error("Too many derived secret requests.");
-  const seen = new Set();
-  return matches.map(value => {
-    const detail = detailObject(value, "The derived secret request");
-    const shape = ["type", "purpose", ...(detail.context === undefined ? [] : ["context"])];
-    detailKeys(detail, shape, "The derived secret request");
-    if (typeof detail.purpose !== "string" || !/^[A-Za-z][A-Za-z0-9:._-]{0,127}$/.test(detail.purpose)) throw new Error("The derived secret purpose is invalid.");
-    if (detail.context !== undefined && (typeof detail.context !== "string" || !detail.context.trim() || detail.context.length > 2048)) throw new Error("The derived secret context is invalid.");
-    const key = `${detail.purpose}\u0000${detail.context ?? ""}`;
-    if (seen.has(key)) throw new Error("The derived secret requests are duplicated.");
-    seen.add(key);
-    return detail;
-  });
-}
-
-async function p256Jkt(key) {
-  return sha256Base64url(JSON.stringify({ crv: key.crv, kty: key.kty, x: key.x, y: key.y }));
-}
-
-function walletTimestamp(afterMs = 0) { return new Date(Date.now() + afterMs).toISOString(); }
 
 // #context-toast (now on both headers -- see its own comment in
 // home-header.html) has two independent triggers sharing one element:
@@ -925,11 +773,6 @@ document.addEventListener("keydown", event => { if (event.key === "Escape") dism
 function showContextToast(message) {
   hoverToastActive = true;
   paintContextToast(message, false);
-}
-function hideContextToast() {
-  hoverToastActive = false;
-  if (actionToast) paintContextToast(actionToast.message, actionToast.error);
-  else paintContextToast("", false);
 }
 
 // Every other id (the per-panel ones: #services-result, ...) is untouched --
@@ -3780,15 +3623,6 @@ async function unlockIdentity(username, enteredMaster, password = "", source = u
   return loaded;
 }
 
-async function loadIdentity(username, enteredMaster, password = "") {
-  try {
-    await unlockIdentity(username, enteredMaster, password);
-    output("#loaded-identity-message", `Loaded ${loaded.entries.at(-1).state.id} in this tab. It will auto-lock after 24 hours of inactivity.`);
-  } catch (error) {
-    output("#wallet-result", errorMessage(error), true);
-  }
-}
-
 // The application's name as the person will see it: what it calls itself (via the RP's signed
 // request), else its host, else its identifier. Editable; the edit is the device label saved with
 // the grant.
@@ -4186,10 +4020,6 @@ async function fetchLog(logUrl) {
   }
   if (last instanceof Response) return last;
   throw last;
-}
-
-function hostOf(url) {
-  try { return new URL(url ?? "").host; } catch { return null; }
 }
 
 // Settles when the boot-time read of the stored identity has finished.
@@ -4806,29 +4636,6 @@ onClick("#wallet-backup-export", () => (loaded ? "#loaded-identity-message" : "#
     setExportView(true);
   });
 });
-
-// This tool is intentionally part of the same single-file app. It uses
-// WebCrypto and the already-bundled did:vh implementation only; it does
-// not rely on IndexedDB, a passkey, or an app.did.md session.
-function parsePortableEicForMove(value) {
-  if (!value || typeof value !== "object" || value.format !== "did.md/identity-container" || (value.version !== 2 && value.version !== 3)
-    || !value.manifest || value.manifest.version !== value.version || !Array.isArray(value.manifest.identities) || value.manifest.identities.length !== 1
-    || !value.files || typeof value.files !== "object") throw new Error("This operation accepts one did.md identity container (v2 or v3).");
-  const identity = value.manifest.identities[0];
-  if (!identity || typeof identity.did !== "string" || typeof identity.didLogPath !== "string" || typeof identity.keyringPath !== "string") {
-    throw new Error("The EIC manifest is invalid.");
-  }
-  const source = value.files[identity.didLogPath];
-  const keyring = value.files[identity.keyringPath];
-  if (typeof source !== "string" || !source.endsWith("\n") || !keyring || keyring.type !== "bip39-slip10-ed25519" || keyring.derivationProfile !== "did.md/master-ed25519-v1") {
-    throw new Error("The EIC log or portable keyring is invalid.");
-  }
-  const entries = parseLog(source);
-  if (!entries.length || entries.at(-1)?.state?.id !== identity.did) throw new Error("The EIC history does not match its DID.");
-  const masterSeed = base64urlDecode(keyring.masterEntropy, "Master entropy");
-  if (masterSeed.length !== 32) throw new Error("Master entropy must be 32 bytes.");
-  return { source, entries, masterSeed, did: identity.did };
-}
 
 /** Saves the provisional identity's password-protected Master and a local
  * snapshot of its (unpublished) genesis log, so reloading this browser still
@@ -6049,11 +5856,6 @@ query("#lock-toggle").addEventListener("click", () => {
   }
   openLockUnlockForm();
 });
-
-function cancelLockUnlockForm() {
-  applicationActionAfterUnlock = null;
-  closeLockUnlockForm();
-}
 
 async function submitUnlockMnemonic(mnemonic) {
   const submit = query("#context-command-submit");

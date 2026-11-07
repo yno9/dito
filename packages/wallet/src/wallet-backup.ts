@@ -8,6 +8,8 @@
 // must never be serialised: those are device-bound, not portable identity
 // material.
 
+import { base64url, base64urlDecode } from "../../vh/src/base64url.ts";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const GCM_IV_BYTES = 12;
@@ -20,25 +22,9 @@ function random(length: number) {
   return crypto.getRandomValues(new Uint8Array(length));
 }
 
-function base64url(bytes: Uint8Array) {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function base64urlBytes(value: string, label: string) {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error(`${label} must be base64url.`);
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - value.length % 4) % 4);
-  try {
-    return Uint8Array.from(atob(padded), char => char.charCodeAt(0));
-  } catch {
-    throw new Error(`${label} must be base64url.`);
-  }
-}
-
 function compactPart(value: string, label: string) {
   if (!/^[A-Za-z0-9_-]*$/.test(value)) throw new Error(`The backup ${label} is invalid.`);
-  return value ? base64urlBytes(value, `backup ${label}`) : new Uint8Array();
+  return value ? base64urlDecode(value, `backup ${label}`) : new Uint8Array();
 }
 
 const MNEMONIC_ALG = "did.md-mnemonic-hkdf+A256KW";
@@ -95,7 +81,7 @@ async function decryptWithMnemonic(compactJwe: string, masterSeed: Uint8Array, t
     || header.alg !== MNEMONIC_ALG || header.enc !== "A256GCM" || typeof header.hs !== "string") {
     throw new Error(`This is not a ${label}.`);
   }
-  const kek = await mnemonicWrappingKey(masterSeed, base64urlBytes(header.hs, "backup hs"));
+  const kek = await mnemonicWrappingKey(masterSeed, base64urlDecode(header.hs, "backup hs"));
   let cek: CryptoKey;
   try {
     cek = await crypto.subtle.unwrapKey("raw", compactPart(encryptedKeyPart, "encrypted key"), kek, "AES-KW", { name: "AES-GCM", length: 256 }, false, ["decrypt"]);

@@ -35,6 +35,7 @@ import {
 } from "./key-store.ts";
 import { decryptIdentityContainer, encryptIdentityContainer } from "../packages/wallet/src/wallet-backup.ts";
 import { initCcd } from "./ccd.ts";
+import { base64url, base64urlDecode, sha256Base64url } from "../packages/vh/src/base64url.ts";
 import {
   githubErrorMessage,
   githubDidLocation,
@@ -596,27 +597,9 @@ function forgetPasskeyWalletSession() {
   try { localStorage.removeItem(WALLET_SESSION_KEY); } catch { /* no-op */ }
 }
 
-function base64url(bytes) {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function base64urlBytes(value, label) {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error(`${label} must be base64url.`);
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - value.length % 4) % 4);
-  let binary;
-  try { binary = atob(padded); } catch { throw new Error(`${label} must be base64url.`); }
-  return Uint8Array.from(binary, character => character.charCodeAt(0));
-}
-
-async function sha256Base64url(value) {
-  return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))));
-}
-
 function p256Jwk(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "crv,kty,x,y"
-    || value.kty !== "EC" || value.crv !== "P-256" || base64urlBytes(value.x, "DPoP x").length !== 32 || base64urlBytes(value.y, "DPoP y").length !== 32) {
+    || value.kty !== "EC" || value.crv !== "P-256" || base64urlDecode(value.x, "DPoP x").length !== 32 || base64urlDecode(value.y, "DPoP y").length !== 32) {
     throw new Error("The client supplied an invalid P-256 DPoP public key.");
   }
   return { kty: "EC", crv: "P-256", x: value.x, y: value.y };
@@ -735,7 +718,7 @@ function derivedSecretDetails(details) {
     detailKeys(detail, shape, "The derived secret request");
     if (typeof detail.purpose !== "string" || !/^[A-Za-z][A-Za-z0-9:._-]{0,127}$/.test(detail.purpose)) throw new Error("The derived secret purpose is invalid.");
     if (detail.context !== undefined && (typeof detail.context !== "string" || !detail.context.trim() || detail.context.length > 2048)) throw new Error("The derived secret context is invalid.");
-    const key = `${detail.purpose} ${detail.context ?? ""}`;
+    const key = `${detail.purpose}\u0000${detail.context ?? ""}`;
     if (seen.has(key)) throw new Error("The derived secret requests are duplicated.");
     seen.add(key);
     return detail;
@@ -1953,7 +1936,7 @@ function checkedIdentityContainer(value) {
     if (!keyring || typeof keyring !== "object" || Array.isArray(keyring) || keyring.type !== "bip39-slip10-ed25519" || keyring.derivationProfile !== "did.md/master-ed25519-v1") {
       throw new Error("Identity container keyring is invalid.");
     }
-    const masterSeed = base64urlBytes(keyring.masterEntropy, "Master entropy");
+    const masterSeed = base64urlDecode(keyring.masterEntropy, "Master entropy");
     if (masterSeed.length !== 32) throw new Error("Identity container Master entropy must be 32 bytes.");
     const applications = keyring.applications === undefined ? [] : keyring.applications;
     if (!Array.isArray(applications) || applications.length > 1024) throw new Error("Identity container application metadata is invalid.");
@@ -4092,7 +4075,7 @@ async function siopAuthorizationParameters(params) {
   let device; let edit;
   for (const encoded of transaction) {
     let item;
-    try { item = JSON.parse(new TextDecoder().decode(base64urlBytes(encoded, "transaction data"))); } catch { throw new Error("The authorization request's transaction_data is invalid."); }
+    try { item = JSON.parse(new TextDecoder().decode(base64urlDecode(encoded, "transaction data"))); } catch { throw new Error("The authorization request's transaction_data is invalid."); }
     if (!item || typeof item !== "object" || !Array.isArray(item.credential_ids) || item.credential_ids.length !== 1 || item.credential_ids[0] !== "capability") throw new Error("The authorization request's transaction_data is invalid.");
     if (item.type === "device_capability" && device === undefined) device = item;
     else if (item.type === "did_document_edit" && edit === undefined) edit = item;
@@ -4842,7 +4825,7 @@ function parsePortableEicForMove(value) {
   }
   const entries = parseLog(source);
   if (!entries.length || entries.at(-1)?.state?.id !== identity.did) throw new Error("The EIC history does not match its DID.");
-  const masterSeed = base64urlBytes(keyring.masterEntropy, "Master entropy");
+  const masterSeed = base64urlDecode(keyring.masterEntropy, "Master entropy");
   if (masterSeed.length !== 32) throw new Error("Master entropy must be 32 bytes.");
   return { source, entries, masterSeed, did: identity.did };
 }

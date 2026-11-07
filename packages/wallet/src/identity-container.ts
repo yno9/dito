@@ -3,14 +3,11 @@
 // is the identity -- so it works for any host, including a bring-your-own
 // domain. The browser wallet writes and reads the same format (version 3);
 // versions 1-2 (username-keyed) remain readable there and here.
+import { base64url } from "../../vh/src/base64url.ts";
 import { decryptIdentityContainer, encryptIdentityContainer } from "./wallet-backup.ts";
 
 const FORMAT = "did.md/identity-container";
 const PROFILE = "did.md/master-ed25519-v1";
-
-function base64url(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64url");
-}
 
 export function containerPath(scid: string, name: string): string {
   return `identities/${scid}/${name}`;
